@@ -1,7 +1,7 @@
 import os
 import tempfile
+import pytest
 from providers.provider_adapter import ProviderKeyStore, OpenAIAdapter
-import os
 
 
 def test_keystore_env_fallback(monkeypatch):
@@ -13,15 +13,9 @@ def test_keystore_env_fallback(monkeypatch):
 
 def test_openai_adapter_raises_when_no_key(monkeypatch):
     monkeypatch.delenv('INTELLI_OPENAI_KEY', raising=False)
+    keyring = pytest.importorskip('keyring', reason='keyring not installed; skipping')
     # Ensure keyring returns None by monkeypatching get_password
-    import keyring
-
-    orig = keyring.get_password
-
-    def _none(service, username):
-        return None
-
-    monkeypatch.setattr(keyring, 'get_password', _none)
+    monkeypatch.setattr(keyring, 'get_password', lambda service, username: None)
     adapter = OpenAIAdapter()
     try:
         adapter.call({'prompt': 'hi'})

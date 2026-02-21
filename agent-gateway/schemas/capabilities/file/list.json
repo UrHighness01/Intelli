@@ -1,0 +1,10 @@
+{
+  "tool": "file.list",
+  "display_name": "File List",
+  "description": "Lists the contents of a directory.",
+  "required_capabilities": ["fs.list"],
+  "optional_capabilities": [],
+  "risk_level": "medium",
+  "requires_approval": false,
+  "allowed_arg_keys": ["path", "recursive", "pattern"]
+}

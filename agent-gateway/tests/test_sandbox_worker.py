@@ -8,9 +8,10 @@ from agent_gateway.sandbox.proxy import SandboxProxy
 
 
 def get_worker_path():
-    # worker next to module
-    here = os.path.join(os.getcwd(), 'agent-gateway', 'sandbox', 'worker.py')
-    return here
+    # worker is at agent-gateway/sandbox/worker.py — resolve relative to this file
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    gw_dir = os.path.dirname(tests_dir)  # agent-gateway/
+    return os.path.join(gw_dir, 'sandbox', 'worker.py')
 
 
 def test_worker_process_echo():

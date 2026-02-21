@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway Status — Intelli</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 14px;
+    }
+    .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; font-weight: 900; color: #fff;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header a { margin-left: auto; color: var(--muted); font-size: .82rem; text-decoration: none; }
+    header a:hover { color: var(--text); }
+
+    main { padding: 28px; max-width: 900px; margin: 0 auto; }
+
+    /* Auth */
+    #auth-row {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px 20px; display: flex; gap: 10px; align-items: center; margin-bottom: 22px;
+    }
+    #auth-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; color: var(--text); padding: 8px 12px; font-size: .88rem; }
+    #auth-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* Stat cards */
+    #cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;
+      margin-bottom: 22px;
+    }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px 16px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .card-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .card-value { font-size: 1.55rem; font-weight: 700; }
+    .card-sub   { font-size: .72rem; color: var(--muted); }
+    .v-green  { color: var(--green); }
+    .v-red    { color: var(--red); }
+    .v-yellow { color: var(--yellow); }
+    .v-accent { color: var(--accent); }
+
+    /* Kill-switch panel */
+    #ks-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px 20px; margin-bottom: 22px;
+    }
+    #ks-panel h2 { font-size: .9rem; font-weight: 700; margin-bottom: 10px; }
+    .ks-status {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    }
+    #ks-dot {
+      width: 12px; height: 12px; border-radius: 50%; background: var(--green);
+    }
+    #ks-dot.armed { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    #ks-text { font-size: .88rem; }
+    #ks-reason { font-size: .75rem; color: var(--muted); font-style: italic; margin-left: 22px; }
+    .ks-controls { display: flex; gap: 8px; align-items: center; }
+    .ks-controls input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: .82rem;
+    }
+    .ks-controls input:focus { outline: none; border-color: var(--accent); }
+
+    button {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
+      color: var(--text); padding: 7px 14px; font-size: .82rem; cursor: pointer; transition: border-color .2s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { background: #7c73ff; }
+    button.danger { border-color: var(--red); color: var(--red); }
+    button.danger:hover { background: rgba(255,107,107,.1); }
+
+    /* Meta bar */
+    #meta-bar {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 16px; font-size: .75rem; color: var(--muted); display: flex; gap: 20px;
+    }
+    #meta-bar span { color: var(--text); }
+
+    /* Auto-refresh indicator */
+    #refresh-row { margin-bottom: 14px; display: flex; align-items: center; gap: 10px; font-size: .75rem; color: var(--muted); }
+    #refresh-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    #refresh-dot.stale { background: var(--yellow); }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 16px; font-size: .82rem;
+      opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+    #toast.ok  { border-color: var(--green); color: var(--green); }
+    #toast.err { border-color: var(--red);   color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📊</div>
+  <h1>Gateway Status</h1>
+  <a href="index.html">← Hub</a>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-row">
+    <input type="password" id="token-input" placeholder="Admin Bearer token…" />
+    <button class="primary" onclick="connect()">Connect</button>
+  </div>
+
+  <!-- Refresh indicator -->
+  <div id="refresh-row">
+    <div id="refresh-dot"></div>
+    <span id="refresh-lbl">Not connected</span>
+    <button style="margin-left:auto;font-size:.72rem;padding:4px 10px" onclick="poll()">↻ Refresh</button>
+  </div>
+
+  <!-- Summary cards -->
+  <div id="cards">
+    <div class="stat-card">
+      <div class="card-label">Version</div>
+      <div class="card-value v-accent" id="c-version">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Uptime</div>
+      <div class="card-value v-green" id="c-uptime">—</div>
+      <div class="card-sub" id="c-uptime-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Tool Calls</div>
+      <div class="card-value" id="c-calls">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Pending Approvals</div>
+      <div class="card-value" id="c-pending">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Scheduler Tasks</div>
+      <div class="card-value v-accent" id="c-tasks">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Memory Agents</div>
+      <div class="card-value v-accent" id="c-agents">—</div>
+    </div>
+  </div>
+
+  <!-- Kill-switch -->
+  <div id="ks-panel">
+    <h2>🔴 Emergency Kill-Switch</h2>
+    <div class="ks-status">
+      <div id="ks-dot"></div>
+      <div id="ks-text">—</div>
+    </div>
+    <div id="ks-reason"></div>
+    <div class="ks-controls" style="margin-top:12px">
+      <input type="text" id="ks-reason-input" placeholder="Reason (optional)…" />
+      <button class="danger" onclick="ksActivate()">Arm</button>
+      <button onclick="ksDeactivate()">Disarm</button>
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div id="meta-bar">
+    Last updated: <span id="meta-ts">—</span>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _token = '';
+let _pollTimer = null;
+
+function connect() {
+  const t = document.getElementById('token-input').value.trim();
+  if (!t) { toast('Paste a token first', 'err'); return; }
+  _token = t;
+  sessionStorage.setItem('gw_token', t);
+  poll();
+  if (!_pollTimer) _pollTimer = setInterval(poll, 5000);
+}
+
+function _headers() {
+  return { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+}
+
+async function poll() {
+  if (!_token) return;
+  try {
+    const r = await fetch('/admin/status', { headers: _headers() });
+    if (r.status === 401 || r.status === 403) { toast('Token rejected', 'err'); return; }
+    if (!r.ok) { toast('HTTP ' + r.status, 'err'); return; }
+    const d = await r.json();
+    render(d);
+    document.getElementById('refresh-dot').className = '';
+    document.getElementById('refresh-lbl').textContent =
+      'Auto-refresh every 5 s – last at ' + new Date().toLocaleTimeString();
+    document.getElementById('meta-ts').textContent = new Date().toLocaleString();
+  } catch (e) {
+    document.getElementById('refresh-dot').className = 'stale';
+    toast(e.message, 'err');
+  }
+}
+
+function fmt_uptime(s) {
+  s = Math.floor(s);
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h + 'h ' + m + 'm';
+}
+
+function render(d) {
+  document.getElementById('c-version').textContent = d.version || '—';
+  const ups = d.uptime_seconds ?? 0;
+  document.getElementById('c-uptime').textContent = fmt_uptime(ups);
+  document.getElementById('c-uptime-sub').textContent = ups.toFixed(0) + ' s';
+  document.getElementById('c-calls').textContent = d.tool_calls_total ?? 0;
+
+  const pending = d.pending_approvals ?? 0;
+  const pel = document.getElementById('c-pending');
+  pel.textContent = pending;
+  pel.className = 'card-value ' + (pending > 0 ? 'v-yellow' : '');
+
+  document.getElementById('c-tasks').textContent  = d.scheduler_tasks ?? 0;
+  document.getElementById('c-agents').textContent = d.memory_agents ?? 0;
+
+  const armed = !!d.kill_switch_active;
+  document.getElementById('ks-dot').className = armed ? 'armed' : '';
+  document.getElementById('ks-text').textContent =
+    armed ? '🔴 ARMED — all tool calls are blocked' : '✅ Disarmed — gateway is operating normally';
+  document.getElementById('ks-text').style.color = armed ? 'var(--red)' : 'var(--green)';
+  document.getElementById('ks-reason').textContent =
+    armed && d.kill_switch_reason ? 'Reason: ' + d.kill_switch_reason : '';
+}
+
+async function ksActivate() {
+  if (!_token) { toast('Connect first', 'err'); return; }
+  const reason = document.getElementById('ks-reason-input').value.trim();
+  try {
+    const r = await fetch('/admin/kill-switch', {
+      method: 'POST', headers: _headers(), body: JSON.stringify({ reason }),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast('Kill-switch ARMED', 'err');
+    document.getElementById('ks-reason-input').value = '';
+    await poll();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function ksDeactivate() {
+  if (!_token) { toast('Connect first', 'err'); return; }
+  try {
+    const r = await fetch('/admin/kill-switch', { method: 'DELETE', headers: _headers() });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast('Kill-switch disarmed', 'ok');
+    await poll();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (type || '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const stored = sessionStorage.getItem('gw_token');
+  if (stored) {
+    _token = stored;
+    document.getElementById('token-input').value = stored;
+    poll();
+    _pollTimer = setInterval(poll, 5000);
+  }
+});
+</script>
+</body>
+</html>

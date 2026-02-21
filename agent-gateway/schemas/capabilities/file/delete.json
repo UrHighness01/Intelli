@@ -1,0 +1,10 @@
+{
+  "tool": "file.delete",
+  "display_name": "File Delete",
+  "description": "Permanently deletes a file or directory.",
+  "required_capabilities": ["fs.delete"],
+  "optional_capabilities": [],
+  "risk_level": "high",
+  "requires_approval": true,
+  "allowed_arg_keys": ["path", "recursive"]
+}

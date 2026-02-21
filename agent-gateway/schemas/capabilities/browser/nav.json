@@ -1,0 +1,10 @@
+{
+  "tool": "browser.nav",
+  "display_name": "Browser Navigate",
+  "description": "Navigates the browser to a specified URL.",
+  "required_capabilities": ["browser.nav"],
+  "optional_capabilities": [],
+  "risk_level": "medium",
+  "requires_approval": false,
+  "allowed_arg_keys": ["url", "new_tab"]
+}

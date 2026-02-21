@@ -1,0 +1,10 @@
+{
+  "tool": "file.write",
+  "display_name": "File Write",
+  "description": "Creates or overwrites a file on the local filesystem.",
+  "required_capabilities": ["fs.write"],
+  "optional_capabilities": [],
+  "risk_level": "high",
+  "requires_approval": true,
+  "allowed_arg_keys": ["path", "content", "mode"]
+}

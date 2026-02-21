@@ -1,0 +1,10 @@
+{
+  "tool": "echo",
+  "display_name": "Echo",
+  "description": "Returns its inputs verbatim; used for testing.",
+  "required_capabilities": [],
+  "optional_capabilities": [],
+  "risk_level": "low",
+  "requires_approval": false,
+  "allowed_arg_keys": ["text"]
+}

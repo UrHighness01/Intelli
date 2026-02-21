@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli · Audit Log</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2d3145;
+      --accent: #6c63ff;
+      --accent-dim: #3d3870;
+      --text: #e2e4f0;
+      --muted: #7b7f9e;
+      --low: #2ecc71;
+      --medium: #f39c12;
+      --high: #e74c3c;
+      --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: var(--accent); }
+    header .spacer { flex: 1; }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); display: inline-block;
+      transition: background .3s;
+    }
+    #status-dot.ok { background: var(--low); }
+    #status-dot.err { background: var(--high); }
+
+    /* Login */
+    #login-panel {
+      max-width: 380px;
+      margin: 80px auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 32px;
+    }
+    #login-panel h2 { margin-bottom: 20px; font-size: 18px; }
+    label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    input[type=text], input[type=password] {
+      width: 100%; padding: 9px 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-size: 14px;
+      margin-bottom: 16px; outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent); color: #fff; border: none;
+      padding: 9px 20px; border-radius: 6px; cursor: pointer;
+      font-size: 14px; font-weight: 500;
+    }
+    button:hover { background: #7d76ff; }
+    button.secondary {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    button.secondary:hover { border-color: var(--accent); color: var(--text); }
+    #login-error { color: var(--high); font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+    /* Main */
+    #main-panel { display: none; }
+    .toolbar {
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar select, .toolbar input[type=text] {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 10px;
+      font-size: 13px; outline: none; margin-bottom: 0;
+    }
+    .toolbar select:focus, .toolbar input[type=text]:focus { border-color: var(--accent); }
+    #entry-count { color: var(--muted); font-size: 13px; margin-left: auto; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      text-align: left;
+      color: var(--muted);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: var(--surface); }
+    tbody td { padding: 9px 14px; vertical-align: top; }
+    td.ts { color: var(--muted); white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+    td.event { font-weight: 500; }
+    td.actor { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    td.details { font-family: var(--mono); font-size: 12px; color: var(--muted); max-width: 420px; word-break: break-all; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .badge-approve { background: #1a3a2a; color: var(--low); }
+    .badge-reject  { background: #3a1a1a; color: var(--high); }
+    .badge-login   { background: #1a2a3a; color: #5ba8f7; }
+    .badge-set     { background: #2a1a3a; color: #b07af7; }
+    .badge-default { background: var(--border); color: var(--text); }
+
+    #empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--muted); display: none;
+    }
+    #empty-state svg { opacity: .3; margin-bottom: 12px; }
+
+    /* Logout */
+    #logout-btn { font-size: 12px; padding: 5px 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ Intelli · Audit Log</h1>
+  <span class="spacer"></span>
+  <span id="status-dot" title="connection status"></span>
+  <button class="secondary" id="logout-btn" style="display:none" onclick="logout()">Logout</button>
+</header>
+
+<!-- Login form -->
+<div id="login-panel">
+  <h2>Sign in</h2>
+  <label for="u">Username</label>
+  <input type="text" id="u" value="admin" autocomplete="username" />
+  <label for="p">Password</label>
+  <input type="password" id="p" autocomplete="current-password" />
+  <button onclick="login()">Sign in</button>
+  <div id="login-error"></div>
+</div>
+
+<!-- Audit viewer -->
+<div id="main-panel">
+  <div class="toolbar">
+    <select id="filter-event" onchange="applyFilters()">
+      <option value="">All events</option>
+      <option value="approve">approve</option>
+      <option value="reject">reject</option>
+      <option value="set_redaction_rules">set_redaction_rules</option>
+      <option value="set_provider_key">set_provider_key</option>
+      <option value="delete_provider_key">delete_provider_key</option>
+    </select>
+    <input type="text" id="filter-actor" placeholder="Filter actor…" oninput="applyFilters()" style="width:160px" />
+    <input type="text" id="filter-search" placeholder="Search details…" oninput="applyFilters()" style="width:200px" />
+    <select id="tail-count" onchange="fetchAudit()">
+      <option value="50">Last 50</option>
+      <option value="200" selected>Last 200</option>
+      <option value="500">Last 500</option>
+      <option value="1000">Last 1000</option>
+    </select>
+    <input type="datetime-local" id="filter-since" title="Since (local time)" onchange="fetchAudit()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;outline:none;" />
+    <input type="datetime-local" id="filter-until" title="Until (local time)" onchange="fetchAudit()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;outline:none;" />
+    <button onclick="fetchAudit()">&#8635; Refresh</button>
+    <button class="secondary" onclick="downloadCSV()" title="Download filtered entries as CSV">↓ CSV</button>
+    <span id="entry-count"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Event</th>
+          <th>Actor</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+    <div id="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <p>No audit entries found.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const BASE = '';   // same origin
+  let _token = sessionStorage.getItem('audit_token') || '';
+  let _allEntries = [];
+
+  // ── Auth ──────────────────────────────────────────────────────────────
+  async function login() {
+    const u = document.getElementById('u').value.trim();
+    const p = document.getElementById('p').value;
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = '';
+    try {
+      const r = await fetch(BASE + '/admin/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: u, password: p}),
+      });
+      if (!r.ok) { errEl.textContent = 'Invalid credentials.'; return; }
+      const data = await r.json();
+      _token = data.token;
+      sessionStorage.setItem('audit_token', _token);
+      showMain();
+    } catch (e) {
+      errEl.textContent = 'Connection error: ' + e.message;
+    }
+  }
+
+  document.getElementById('p').addEventListener('keydown', e => {
+    if (e.key === 'Enter') login();
+  });
+
+  function logout() {
+    sessionStorage.removeItem('audit_token');
+    _token = '';
+    document.getElementById('main-panel').style.display = 'none';
+    document.getElementById('login-panel').style.display = 'block';
+    document.getElementById('logout-btn').style.display = 'none';
+    setDot('');
+  }
+
+  function showMain() {
+    document.getElementById('login-panel').style.display = 'none';
+    document.getElementById('main-panel').style.display = 'block';
+    document.getElementById('logout-btn').style.display = 'inline-block';
+    fetchAudit();
+  }
+
+  // ── Data fetching ─────────────────────────────────────────────────────
+  function _serverParams() {
+    const since = document.getElementById('filter-since').value;
+    const until = document.getElementById('filter-until').value;
+    // Convert local datetime-local value to ISO string
+    const toISO = v => v ? new Date(v).toISOString() : '';
+    const actor  = document.getElementById('filter-actor').value.trim();
+    const action = document.getElementById('filter-event').value.trim();
+    const tail   = document.getElementById('tail-count').value;
+    const params = new URLSearchParams({ tail });
+    if (actor)       params.set('actor', actor);
+    if (action)      params.set('action', action);
+    if (since)       params.set('since', toISO(since));
+    if (until)       params.set('until', toISO(until));
+    return params;
+  }
+
+  async function fetchAudit() {
+    const params = _serverParams();
+    try {
+      const r = await fetch(BASE + `/admin/audit?${params}`, {
+        headers: {'Authorization': 'Bearer ' + _token},
+      });
+      if (r.status === 401) { logout(); return; }
+      setDot(r.ok ? 'ok' : 'err');
+      const data = await r.json();
+      _allEntries = (data.entries || []).reverse(); // newest first
+      applyFilters();
+    } catch (e) {
+      setDot('err');
+    }
+  }
+
+  async function downloadCSV() {
+    if (!_token) return;
+    const params = _serverParams();
+    params.set('tail', '10000');   // export more rows
+    const url = BASE + `/admin/audit/export.csv?${params}`;
+    const a = document.createElement('a');
+    a.href = url;
+    // Bearer token can't be sent via plain anchor link—fetch + blob instead
+    try {
+      const r = await fetch(url, { headers: {'Authorization': 'Bearer ' + _token} });
+      if (!r.ok) { alert('Export failed: ' + r.status); return; }
+      const blob = await r.blob();
+      a.href = URL.createObjectURL(blob);
+      a.download = 'audit.csv';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) {
+      alert('Export error: ' + e.message);
+    }
+  }
+
+  function applyFilters() {
+    const fEvent  = document.getElementById('filter-event').value.toLowerCase();
+    const fActor  = document.getElementById('filter-actor').value.toLowerCase();
+    const fSearch = document.getElementById('filter-search').value.toLowerCase();
+
+    const filtered = _allEntries.filter(e => {
+      if (fEvent  && !(e.event || '').toLowerCase().includes(fEvent))  return false;
+      if (fActor  && !(e.actor || '').toLowerCase().includes(fActor))  return false;
+      if (fSearch) {
+        const blob = JSON.stringify(e.details || '').toLowerCase();
+        if (!blob.includes(fSearch)) return false;
+      }
+      return true;
+    });
+
+    renderTable(filtered);
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────
+  function eventBadge(event) {
+    const e = (event || '').toLowerCase();
+    let cls = 'badge-default';
+    if (e === 'approve')   cls = 'badge-approve';
+    else if (e === 'reject') cls = 'badge-reject';
+    else if (e.includes('login')) cls = 'badge-login';
+    else if (e.startsWith('set') || e.startsWith('delete')) cls = 'badge-set';
+    return `<span class="badge ${cls}">${esc(event)}</span>`;
+  }
+
+  function esc(str) {
+    return String(str ?? '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function renderTable(entries) {
+    const tbody = document.getElementById('table-body');
+    const empty = document.getElementById('empty-state');
+    document.getElementById('entry-count').textContent =
+      entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies');
+
+    if (entries.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    tbody.innerHTML = entries.map(e => `
+      <tr>
+        <td class="ts">${esc(e.ts)}</td>
+        <td class="event">${eventBadge(e.event)}</td>
+        <td class="actor">${esc(e.actor ?? '—')}</td>
+        <td class="details"><code>${esc(JSON.stringify(e.details ?? {}))}</code></td>
+      </tr>
+    `).join('');
+  }
+
+  function setDot(state) {
+    const dot = document.getElementById('status-dot');
+    dot.className = 'ok err'.includes(state) ? state : '';
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+  if (_token) showMain();
+</script>
+</body>
+</html>

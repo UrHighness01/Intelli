@@ -1,52 +1,307 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Intelli — Approvals</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 20px; }
-      .req { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
-      pre { background:#f7f7f7; padding:8px; overflow:auto }
-      button { margin-right:8px }
-    </style>
-  </head>
-  <body>
-    <h1>Pending Approvals</h1>
-    <div id="list">Loading…</div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Admin Hub</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
 
-    <script>
-      async function fetchPending(){
-        const res = await fetch('/approvals');
-        if(!res.ok){ document.getElementById('list').innerText = 'Error fetching approvals'; return }
-        const body = await res.json();
-        const pending = body.pending || {};
-        const el = document.getElementById('list');
-        el.innerHTML = '';
-        const keys = Object.keys(pending);
-        if(keys.length === 0){ el.innerText = 'No pending approvals'; return }
-        keys.forEach(id => {
-          const item = pending[id];
-          const wrap = document.createElement('div'); wrap.className = 'req';
-          const h = document.createElement('div'); h.innerHTML = `<strong>Request ${id}</strong> — status: ${item.status}`;
-          const pre = document.createElement('pre'); pre.textContent = JSON.stringify(item.payload, null, 2);
-          const approve = document.createElement('button'); approve.textContent = 'Approve';
-          approve.onclick = async () => { await action(id, 'approve'); };
-          const reject = document.createElement('button'); reject.textContent = 'Reject';
-          reject.onclick = async () => { await action(id, 'reject'); };
-          wrap.appendChild(h); wrap.appendChild(pre); wrap.appendChild(approve); wrap.appendChild(reject);
-          el.appendChild(wrap);
-        });
-      }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
 
-      async function action(id, verb){
-        const res = await fetch(`/approvals/${id}/${verb}`, { method: 'POST' });
-        if(!res.ok){ alert('Action failed'); return }
-        await fetchPending();
-      }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 22px 32px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .logo {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; font-weight: 900; color: #fff;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 700; }
+    header .subtitle { color: var(--muted); font-size: .85rem; margin-left: 2px; }
+    .version { margin-left: auto; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 3px 12px; font-size: .75rem; color: var(--muted); }
 
-      fetchPending();
-      setInterval(fetchPending, 5000);
-    </script>
-  </body>
+    main { padding: 32px; max-width: 980px; margin: 0 auto; }
+
+    /* -- Status bar --------------------------------------------------------- */
+    #status-bar {
+      display: flex; gap: 12px; margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .stat-pill {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 16px; display: flex; align-items: center; gap: 8px; font-size: .82rem;
+    }
+    .stat-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .stat-pill .dot.ok { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .stat-pill .dot.warn { background: var(--yellow); }
+    .stat-pill .label { color: var(--muted); }
+    .stat-pill .value { font-weight: 600; }
+
+    /* -- Section headings --------------------------------------------------- */
+    .section-title {
+      font-size: .75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--muted); margin-bottom: 12px;
+    }
+
+    /* -- Tool grid ---------------------------------------------------------- */
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+
+    .tool-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color .15s, box-shadow .15s, transform .1s;
+      display: flex; flex-direction: column; gap: 8px;
+      position: relative; overflow: hidden;
+    }
+    .tool-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: transparent;
+      transition: background .15s;
+    }
+    .tool-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 4px 20px rgba(108,99,255,.15);
+      transform: translateY(-1px);
+    }
+    .tool-card:hover::before { background: linear-gradient(90deg, var(--accent), #a78bfa); }
+
+    .card-icon { font-size: 1.4rem; line-height: 1; }
+    .card-name { font-size: .95rem; font-weight: 600; }
+    .card-desc { font-size: .78rem; color: var(--muted); line-height: 1.45; }
+    .card-badge {
+      display: inline-block; border-radius: 10px; padding: 2px 8px;
+      font-size: .68rem; font-weight: 700; align-self: flex-start; margin-top: 2px;
+    }
+    .badge-live { background: rgba(61,220,132,.15); color: var(--green); }
+    .badge-api  { background: rgba(108,99,255,.18); color: var(--accent); }
+    .badge-new  { background: rgba(255,209,102,.15); color: var(--yellow); }
+
+    /* -- Quick links -------------------------------------------------------- */
+    .quick-links {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px 20px; margin-bottom: 32px;
+    }
+    .quick-links h3 { font-size: .82rem; color: var(--muted); margin-bottom: 10px; }
+    .link-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .link-chip {
+      text-decoration: none; color: var(--accent);
+      background: rgba(108,99,255,.1); border: 1px solid rgba(108,99,255,.25);
+      border-radius: 6px; padding: 4px 12px; font-size: .78rem; font-weight: 500;
+      transition: background .15s;
+    }
+    .link-chip:hover { background: rgba(108,99,255,.22); }
+
+    /* -- Footer ------------------------------------------------------------- */
+    footer {
+      border-top: 1px solid var(--border); padding: 18px 32px;
+      display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: .78rem;
+    }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">I</div>
+  <div>
+    <h1>Intelli Gateway</h1>
+    <div class="subtitle">Agent orchestration & admin console</div>
+  </div>
+  <div class="version">prototype</div>
+</header>
+
+<main>
+  <!-- Live status pills -->
+  <div id="status-bar">
+    <div class="stat-pill">
+      <span class="dot" id="health-dot"></span>
+      <span class="label">Gateway</span>
+      <span class="value" id="health-val">checking…</span>
+    </div>
+    <div class="stat-pill">
+      <span class="label">Pending approvals</span>
+      <span class="value" id="pending-val">—</span>
+    </div>
+    <div class="stat-pill">
+      <span class="label">Tool calls</span>
+      <span class="value" id="tool-calls-val">—</span>
+    </div>
+  </div>
+
+  <!-- Admin tools -->
+  <div class="section-title">Admin tools</div>
+  <div class="tool-grid">
+    <a class="tool-card" href="approvals.html">
+      <div class="card-icon">⏳</div>
+      <div class="card-name">Approvals</div>
+      <div class="card-desc">Real-time queue of pending high-risk tool calls. Approve or reject with one click.</div>
+      <span class="card-badge badge-live">Live SSE</span>
+    </a>
+    <a class="tool-card" href="users.html">
+      <div class="card-icon">👥</div>
+      <div class="card-name">Users</div>
+      <div class="card-desc">Manage user accounts — create, delete, reset passwords, and configure per-user tool restrictions.</div>
+      <span class="card-badge badge-new">New</span>
+    </a>
+    <a class="tool-card" href="memory.html">
+      <div class="card-icon">🧠</div>
+      <div class="card-name">Agent Memory</div>
+      <div class="card-desc">Browse and edit persistent per-agent key-value memory stores. Set TTLs, prune expired keys.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="metrics.html">
+      <div class="card-icon">📊</div>
+      <div class="card-name">Metrics</div>
+      <div class="card-desc">Live Prometheus metrics dashboard — sparklines, summary cards, and full metric table with filter.</div>
+      <span class="card-badge badge-live">Live</span>
+    </a>
+    <a class="tool-card" href="webhooks.html">
+      <div class="card-icon">🔗</div>
+      <div class="card-name">Webhooks</div>
+      <div class="card-desc">Register and manage outgoing webhook URLs. Inspect per-hook delivery history.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="content-filter.html">
+      <div class="card-icon">🛡️</div>
+      <div class="card-name">Content Filter</div>
+      <div class="card-desc">Admin deny-rule manager — literal and regex patterns. Live test panel to check input against rules.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="audit.html">
+      <div class="card-icon">📋</div>
+      <div class="card-name">Audit Log</div>
+      <div class="card-desc">Filterable JSON-lines audit viewer. Filter by event type, actor, and date range.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="consent.html">
+      <div class="card-icon">🔒</div>
+      <div class="card-name">Consent Timeline</div>
+      <div class="card-desc">Per-origin context-sharing timeline. View and filter what tab data has been sent to agents.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="tab_permission.html">
+      <div class="card-icon">🌐</div>
+      <div class="card-name">Tab Preview</div>
+      <div class="card-desc">Send a live tab DOM snapshot to the gateway and inspect redacted, sanitised output.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="schedule.html">
+      <div class="card-icon">⏱️</div>
+      <div class="card-name">Scheduler</div>
+      <div class="card-desc">Create and manage recurring tool-call tasks. Toggle enable/disable, edit intervals, and trigger tasks on demand.</div>
+      <span class="card-badge badge-new">New</span>
+    </a>
+    <a class="tool-card" href="rate-limits.html">
+      <div class="card-icon">⚡</div>
+      <div class="card-name">Rate Limits</div>
+      <div class="card-desc">View and edit IP/user rate-limit config. Live usage snapshot with per-client eviction.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="providers.html">
+      <div class="card-icon">🔑</div>
+      <div class="card-name">Providers</div>
+      <div class="card-desc">Live health status for all LLM providers. Manage API keys, view TTL/expiry, and check adapter availability.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+    <a class="tool-card" href="status.html">
+      <div class="card-icon">📊</div>
+      <div class="card-name">Status</div>
+      <div class="card-desc">Live gateway operational dashboard: uptime, kill-switch state, tool call counts, pending approvals, and scheduler summary.</div>
+      <span class="card-badge badge-api">REST</span>
+    </a>
+  </div>
+
+  <!-- Quick API links -->
+  <div class="quick-links">
+    <h3>Quick API links</h3>
+    <div class="link-row">
+      <a class="link-chip" href="/docs" target="_blank">Swagger UI</a>
+      <a class="link-chip" href="/redoc" target="_blank">ReDoc</a>
+      <a class="link-chip" href="/metrics">Prometheus metrics</a>
+      <a class="link-chip" href="/health">Health</a>
+      <a class="link-chip" href="/admin/users">/admin/users</a>
+      <a class="link-chip" href="/admin/schedule">/admin/schedule</a>
+      <a class="link-chip" href="/admin/webhooks">/admin/webhooks</a>
+      <a class="link-chip" href="/approvals">/approvals</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Intelli Agent Gateway — prototype</span>
+  <a href="/docs" target="_blank">API docs</a>
+  <a href="https://github.com/UrHighness01/Intelli" target="_blank">GitHub</a>
+</footer>
+
+<script>
+'use strict';
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  // Health
+  try {
+    const r = await fetch('/health');
+    const ok = r.ok;
+    document.getElementById('health-dot').className = 'dot ' + (ok ? 'ok' : 'warn');
+    document.getElementById('health-val').textContent = ok ? 'Online' : 'Degraded';
+  } catch {
+    document.getElementById('health-dot').className = 'dot warn';
+    document.getElementById('health-val').textContent = 'Unreachable';
+  }
+
+  // Pending approvals
+  try {
+    const r = await fetch('/approvals');
+    if (r.ok) {
+      const d = await r.json();
+      const pending = d.pending || {};
+      const count = typeof pending === 'object' && !Array.isArray(pending)
+        ? Object.keys(pending).length
+        : (Array.isArray(pending) ? pending.length : 0);
+      document.getElementById('pending-val').textContent = count;
+    }
+  } catch {}
+
+  // Metrics — extract tool_calls_total
+  try {
+    const r = await fetch('/metrics');
+    if (r.ok) {
+      const txt = await r.text();
+      const m = txt.match(/^tool_calls_total\s+([\d.]+)/m);
+      document.getElementById('tool-calls-val').textContent = m ? (+m[1]).toLocaleString() : '0';
+    }
+  } catch {}
+}
+
+refreshStatus();
+setInterval(refreshStatus, 10000);
+</script>
+</body>
 </html>

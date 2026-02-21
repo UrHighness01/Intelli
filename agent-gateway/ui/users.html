@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — User Management</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+    header a { color: var(--muted); font-size: .82rem; text-decoration: none; margin-left: auto; }
+    header a:hover { color: var(--accent); }
+
+    main {
+      padding: 24px 28px; max-width: 1200px; margin: 0 auto;
+      display: grid; gap: 16px;
+    }
+
+    /* -- Auth ---------------------------------------------------------------- */
+    #auth-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; white-space: nowrap;
+    }
+    button:hover { opacity: .85; }
+    button.danger   { background: #7f2a2a; color: var(--red); border: 1px solid #7f2a2a; }
+    button.danger:hover { background: #a03535; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm { padding: 4px 10px; font-size: .78rem; }
+    button.warn { background: #4a3a10; color: var(--yellow); border: 1px solid var(--yellow); }
+
+    input[type=text], input[type=password], input[type=email], textarea {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-size: .82rem; outline: none; width: 100%;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+
+    /* -- Layout ------------------------------------------------------------- */
+    #workspace {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* -- Left: user list ---------------------------------------------------- */
+    #user-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+
+    #add-form {
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+      display: grid; gap: 8px;
+    }
+    #add-form h3 { font-size: .85rem; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+    .roles-row {
+      display: flex; gap: 12px; flex-wrap: wrap;
+    }
+    .roles-row label {
+      display: flex; align-items: center; gap: 5px;
+      font-size: .78rem; color: var(--muted); cursor: pointer;
+    }
+
+    #user-list-header {
+      padding: 10px 16px; font-size: .85rem; font-weight: 500;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .user-item {
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background .1s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .user-item:last-child { border: none; }
+    .user-item:hover { background: rgba(108,99,255,.06); }
+    .user-item.active { background: rgba(108,99,255,.14); border-left: 3px solid var(--accent); }
+
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--surface2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .75rem; font-weight: 700; color: var(--accent); flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+    .user-name { font-size: .85rem; font-weight: 500; flex: 1; }
+    .role-chip {
+      display: inline-block; border-radius: 10px; padding: 1px 7px;
+      font-size: .68rem; font-weight: 600;
+      background: rgba(108,99,255,.18); color: var(--accent);
+    }
+    .role-chip.admin { background: rgba(255,107,107,.18); color: var(--red); }
+    .restriction-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--yellow); flex-shrink: 0;
+    }
+
+    #user-empty { padding: 32px 16px; text-align: center; color: var(--muted); font-size: .85rem; }
+    #refresh-users { width: 100%; border-radius: 0 0 10px 10px; background: var(--surface2); color: var(--muted); border-top: 1px solid var(--border); }
+
+    /* -- Right: user detail ------------------------------------------------- */
+    #detail-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    #detail-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #detail-title { font-size: .95rem; font-weight: 600; flex: 1; }
+    #detail-username { font-family: monospace; color: var(--accent); }
+
+    .section {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .section h3 { font-size: .82rem; font-weight: 600; color: var(--muted); margin-bottom: 10px; }
+    .form-row { display: flex; gap: 8px; align-items: center; }
+    .form-row input { flex: 1; }
+
+    .tools-list {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+    }
+    .tool-tag {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 14px;
+      padding: 2px 8px; font-size: .75rem; color: var(--text);
+    }
+    .tool-tag button {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      padding: 0; font-size: .75rem; line-height: 1;
+    }
+    .tool-tag button:hover { color: var(--red); }
+
+    .add-tool-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+    .add-tool-row input { flex: 1; font-family: monospace; font-size: .8rem; }
+
+    .empty-state { padding: 40px 24px; text-align: center; color: var(--muted); font-size: .88rem; }
+    .placeholder { color: var(--muted); font-style: italic; }
+
+    /* -- Toast --------------------------------------------------------------- */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 18px; font-size: .85rem; color: var(--text);
+      transform: translateY(80px); opacity: 0; transition: all .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.ok   { border-color: var(--green); }
+    #toast.err  { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span>User Management</span>
+  <a href="/">← Admin hub</a>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input type="password" id="token-input" placeholder="Paste admin token…" />
+    <button onclick="loadUsers()">Connect</button>
+  </div>
+
+  <div id="workspace">
+    <!-- Left: user list + add form -->
+    <div id="user-panel">
+      <div id="add-form">
+        <h3>Create user</h3>
+        <input type="text" id="new-username" placeholder="username" autocomplete="off" />
+        <input type="password" id="new-password" placeholder="password" autocomplete="new-password" />
+        <div class="roles-row">
+          <label><input type="checkbox" value="admin" id="role-admin" /> admin</label>
+          <label><input type="checkbox" value="user" id="role-user" checked /> user</label>
+        </div>
+        <button onclick="createUser()">+ Create</button>
+      </div>
+
+      <div id="user-list-header">
+        <span>Users</span>
+        <span id="user-count" style="color:var(--muted);font-size:.75rem"></span>
+      </div>
+      <div id="user-items">
+        <div id="user-empty">No users loaded.</div>
+      </div>
+      <button id="refresh-users" onclick="loadUsers()">⟳ Refresh</button>
+    </div>
+
+    <!-- Right: user detail -->
+    <div id="detail-panel">
+      <div id="detail-header">
+        <span id="detail-title">Select a user →</span>
+        <span id="detail-username"></span>
+        <button class="danger sm" id="btn-delete" onclick="deleteUser()" style="display:none">Delete user</button>
+      </div>
+      <div id="detail-body">
+        <div class="empty-state placeholder">Select a user from the left panel.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _token = '';
+let _users  = [];    // array of user objects
+let _selUser = null; // selected username
+let _tools   = [];   // allowed_tools for selected user
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function tok() {
+  if (!_token) _token = sessionStorage.getItem('ag_token') || '';
+  return _token;
+}
+function getToken() {
+  const t = document.getElementById('token-input').value.trim();
+  if (t) { _token = t; sessionStorage.setItem('ag_token', t); }
+  return _token || tok();
+}
+function authHeaders() { return { Authorization: 'Bearer ' + tok(), 'Content-Type': 'application/json' }; }
+function toast(msg, kind = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.className = '', 2600);
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Load users ────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  getToken();
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  try {
+    const r = await fetch('/admin/users', { headers: authHeaders() });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _users = data.users || [];
+    renderUserList();
+    if (_selUser) {
+      const still = _users.find(u => u.username === _selUser);
+      if (still) loadDetail(_selUser);
+      else clearDetail();
+    }
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+function renderUserList() {
+  const container = document.getElementById('user-items');
+  const count = document.getElementById('user-count');
+  count.textContent = _users.length + ' user' + (_users.length === 1 ? '' : 's');
+  if (_users.length === 0) {
+    container.innerHTML = '<div id="user-empty" style="padding:32px 16px;text-align:center;color:var(--muted);font-size:.85rem">No users.</div>';
+    return;
+  }
+  container.innerHTML = _users.map(u => `
+    <div class="user-item${u.username === _selUser ? ' active' : ''}"
+         onclick="loadDetail('${escHtml(u.username)}')" data-user="${escHtml(u.username)}">
+      <div class="user-avatar">${escHtml(u.username[0].toUpperCase())}</div>
+      <span class="user-name">${escHtml(u.username)}</span>
+      ${(u.roles||[]).map(r => `<span class="role-chip${r==='admin'?' admin':''}">${escHtml(r)}</span>`).join('')}
+      ${u.has_tool_restrictions ? '<span class="restriction-dot" title="tool restrictions"></span>' : ''}
+    </div>
+  `).join('');
+}
+
+// ── User detail ───────────────────────────────────────────────────────────────
+async function loadDetail(username) {
+  _selUser = username;
+  renderUserList();
+  document.getElementById('detail-title').textContent = username;
+  document.getElementById('detail-username').textContent = '';
+  document.getElementById('btn-delete').style.display = username === 'admin' ? 'none' : '';
+
+  // Load permissions to get allowed_tools
+  let perms = null;
+  try {
+    const r = await fetch(`/admin/users/${encodeURIComponent(username)}/permissions`, { headers: authHeaders() });
+    if (r.ok) perms = await r.json();
+  } catch {}
+  _tools = Array.isArray(perms?.allowed_tools) ? [...perms.allowed_tools] : [];
+
+  const u = _users.find(u => u.username === username) || {};
+  renderDetail(u);
+}
+
+function renderDetail(u) {
+  const body = document.getElementById('detail-body');
+  const isAdmin = u.username === 'admin';
+  body.innerHTML = `
+    <!-- Change password -->
+    <div class="section">
+      <h3>Change password</h3>
+      <div class="form-row">
+        <input type="password" id="new-pw" placeholder="New password…" autocomplete="new-password" />
+        <button class="sm warn" onclick="changePassword()">Set password</button>
+      </div>
+    </div>
+
+    <!-- Roles display (read-only) -->
+    <div class="section">
+      <h3>Roles</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${(u.roles||[]).map(r => `<span class="role-chip${r==='admin'?' admin':''}">${escHtml(r)}</span>`).join('')}
+        ${(u.roles||[]).length === 0 ? '<span style="color:var(--muted);font-size:.8rem">No roles assigned</span>' : ''}
+      </div>
+    </div>
+
+    <!-- Tool restrictions -->
+    <div class="section">
+      <h3>Allowed tools <span style="color:var(--muted);font-size:.75rem;font-weight:400">(empty = unrestricted)</span></h3>
+      <div class="tools-list" id="tools-list"></div>
+      <div class="add-tool-row">
+        <input type="text" id="add-tool-input" placeholder="tool.name" />
+        <button class="sm" onclick="addTool()">Add</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="sm secondary" onclick="saveTools()">Save restrictions</button>
+        <button class="sm secondary" onclick="clearTools()">Clear (unrestrict)</button>
+      </div>
+    </div>
+  `;
+  renderTools();
+  document.getElementById('add-tool-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTool();
+  });
+}
+
+function renderTools() {
+  const list = document.getElementById('tools-list');
+  if (!list) return;
+  if (_tools.length === 0) {
+    list.innerHTML = '<span style="color:var(--muted);font-size:.78rem">No restrictions — all tools permitted.</span>';
+    return;
+  }
+  list.innerHTML = _tools.map((t, i) => `
+    <span class="tool-tag">
+      ${escHtml(t)}
+      <button onclick="removeTool(${i})" title="Remove">✕</button>
+    </span>
+  `).join('');
+}
+
+function addTool() {
+  const inp = document.getElementById('add-tool-input');
+  const val = inp.value.trim();
+  if (!val) return;
+  if (!_tools.includes(val)) { _tools.push(val); renderTools(); }
+  inp.value = '';
+}
+
+function removeTool(i) {
+  _tools.splice(i, 1);
+  renderTools();
+}
+
+async function saveTools() {
+  if (!_selUser) return;
+  const t = tok();
+  try {
+    const body = _tools.length ? { allowed_tools: _tools } : { allowed_tools: null };
+    const r = await fetch(`/admin/users/${encodeURIComponent(_selUser)}/permissions`, {
+      method: 'PUT', headers: authHeaders(), body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Tool restrictions saved ✓');
+    await loadUsers();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+async function clearTools() {
+  _tools = [];
+  renderTools();
+  await saveTools();
+}
+
+// ── Change password ───────────────────────────────────────────────────────────
+async function changePassword() {
+  if (!_selUser) return;
+  const pw = document.getElementById('new-pw')?.value?.trim();
+  if (!pw) { toast('Enter a new password', 'err'); return; }
+  try {
+    const r = await fetch(`/admin/users/${encodeURIComponent(_selUser)}/password`, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ new_password: pw })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    document.getElementById('new-pw').value = '';
+    toast('Password updated ✓');
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Create user ───────────────────────────────────────────────────────────────
+async function createUser() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  if (!username || !password) { toast('Username and password required', 'err'); return; }
+  const roles = [...document.querySelectorAll('.roles-row input:checked')].map(c => c.value);
+  try {
+    const r = await fetch('/admin/users', {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ username, password, roles })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    toast(`User "${username}" created ✓`);
+    await loadUsers();
+    loadDetail(username);
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Delete user ───────────────────────────────────────────────────────────────
+async function deleteUser() {
+  if (!_selUser || _selUser === 'admin') return;
+  if (!confirm(`Delete user "${_selUser}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/admin/users/${encodeURIComponent(_selUser)}`, {
+      method: 'DELETE', headers: authHeaders()
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast(`"${_selUser}" deleted`);
+    clearDetail();
+    await loadUsers();
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+function clearDetail() {
+  _selUser = null;
+  _tools = [];
+  document.getElementById('detail-title').textContent = 'Select a user →';
+  document.getElementById('detail-username').textContent = '';
+  document.getElementById('btn-delete').style.display = 'none';
+  document.getElementById('detail-body').innerHTML = '<div class="empty-state placeholder">Select a user from the left panel.</div>';
+  renderUserList();
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('ag_token');
+  if (saved) {
+    document.getElementById('token-input').value = saved;
+    _token = saved;
+    loadUsers();
+  }
+});
+</script>
+</body>
+</html>

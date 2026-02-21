@@ -1,0 +1,10 @@
+{
+  "tool": "system.exec",
+  "display_name": "System Execute",
+  "description": "Executes an arbitrary OS-level command or binary.",
+  "required_capabilities": ["sys.exec"],
+  "optional_capabilities": ["sys.env"],
+  "risk_level": "high",
+  "requires_approval": true,
+  "allowed_arg_keys": ["command", "args", "timeout", "env", "cwd"]
+}

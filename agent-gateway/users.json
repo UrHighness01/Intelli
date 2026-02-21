@@ -1,0 +1,12 @@
+{
+  "openai": "sk-exp2",
+  "openrouter": "or-key-abc",
+  "anthropic": "",
+  "admin": {
+    "salt": "c3def36e6129a28c3074eb15867ccdb8",
+    "hash": "198d4c4590a800803f2c67c899a3f5e912834f26a10ce6e9db192b790af1e266",
+    "roles": [
+      "admin"
+    ]
+  }
+}

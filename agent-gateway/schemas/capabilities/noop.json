@@ -1,0 +1,10 @@
+{
+  "tool": "noop",
+  "display_name": "No-op",
+  "description": "Does nothing; used for testing and capability probing.",
+  "required_capabilities": [],
+  "optional_capabilities": [],
+  "risk_level": "low",
+  "requires_approval": false,
+  "allowed_arg_keys": []
+}

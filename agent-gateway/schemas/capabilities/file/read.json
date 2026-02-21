@@ -1,0 +1,10 @@
+{
+  "tool": "file.read",
+  "display_name": "File Read",
+  "description": "Reads the contents of a file from the local filesystem.",
+  "required_capabilities": ["fs.read"],
+  "optional_capabilities": [],
+  "risk_level": "medium",
+  "requires_approval": false,
+  "allowed_arg_keys": ["path", "encoding"]
+}

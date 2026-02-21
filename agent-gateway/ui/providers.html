@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Providers — Intelli Gateway</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 14px;
+    }
+    .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; font-weight: 900; color: #fff;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header a { margin-left: auto; color: var(--muted); font-size: .82rem; text-decoration: none; }
+    header a:hover { color: var(--text); }
+
+    main { padding: 28px; max-width: 1100px; margin: 0 auto; }
+
+    /* Auth */
+    #auth-row {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px 20px; display: flex; gap: 10px; align-items: center; margin-bottom: 22px;
+    }
+    #auth-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; color: var(--text); padding: 8px 12px; font-size: .88rem; }
+    #auth-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* Cards grid */
+    #providers-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;
+      margin-bottom: 28px;
+    }
+    .provider-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px; transition: border-color .2s;
+    }
+    .provider-card:hover { border-color: var(--accent); }
+    .card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .prov-icon { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; font-size: 1.2rem;
+      background: var(--surface2); border: 1px solid var(--border); }
+    .prov-name { font-weight: 700; font-size: .95rem; }
+    .status-chip {
+      margin-left: auto; padding: 3px 9px; border-radius: 12px; font-size: .7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em; border: 1px solid currentColor;
+    }
+    .chip-ok         { color: var(--green); background: rgba(61,220,132,.1); }
+    .chip-no_key     { color: var(--yellow); background: rgba(255,209,102,.1); }
+    .chip-unavailable{ color: var(--red);   background: rgba(255,107,107,.1); }
+    .chip-unknown    { color: var(--muted); background: var(--surface2); }
+
+    .meta-row { font-size: .75rem; color: var(--muted); margin-bottom: 4px; }
+    .meta-row span { color: var(--text); font-family: monospace; }
+    .meta-row.warn span { color: var(--yellow); }
+    .meta-row.danger span { color: var(--red); }
+
+    .card-sep { height: 1px; background: var(--border); margin: 12px 0; }
+
+    /* Key management inline */
+    .key-row { display: flex; gap: 6px; align-items: center; }
+    .key-row input[type="password"] {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: .81rem;
+    }
+    .key-row input:focus { outline: none; border-color: var(--accent); }
+    .key-row input[type="number"] {
+      width: 60px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 6px 8px; font-size: .81rem;
+    }
+
+    button {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
+      color: var(--text); padding: 7px 13px; font-size: .82rem; cursor: pointer; transition: border-color .2s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { background: #7c73ff; }
+    button.danger { border-color: var(--red); color: var(--red); font-size: .75rem; padding: 5px 10px; }
+    button.danger:hover { background: rgba(255,107,107,.1); }
+    button.full { width: 100%; margin-top: 8px; }
+    button.sm { font-size: .75rem; padding: 4px 9px; }
+
+    .field-label { font-size: .7rem; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .05em; margin-bottom: 4px; display: block; }
+
+    /* Expiring section */
+    #expiring-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; margin-bottom: 18px;
+    }
+    .section-hdr {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      font-weight: 700; font-size: .88rem; display: flex; align-items: center; gap: 8px;
+    }
+    .section-body { padding: 14px 18px; }
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th { padding: 7px 10px; text-align: left; color: var(--muted); font-size: .7rem;
+      text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+    td { padding: 7px 10px; border-bottom: 1px solid rgba(45,49,69,.4); }
+    td.mono { font-family: monospace; font-size: .78rem; }
+    #expiring-empty { color: var(--muted); font-size: .82rem; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 18px; font-size: .82rem;
+      opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+    #toast.ok   { border-color: var(--green); color: var(--green); }
+    #toast.err  { border-color: var(--red);   color: var(--red); }
+
+    #refresh-lbl { font-size: .72rem; color: var(--muted); margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🔑</div>
+  <h1>Providers</h1>
+  <a href="index.html">← Hub</a>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-row">
+    <input type="password" id="token-input" placeholder="Admin Bearer token…" />
+    <button class="primary" onclick="connect()">Connect</button>
+  </div>
+
+  <!-- Provider cards -->
+  <div id="providers-grid">
+    <!-- Rendered dynamically -->
+  </div>
+
+  <!-- Expiring keys -->
+  <div id="expiring-panel">
+    <div class="section-hdr">
+      ⚠ Keys expiring within 7 days
+      <button class="sm" onclick="loadExpiring()">↻ Check</button>
+      <span id="refresh-lbl">—</span>
+    </div>
+    <div class="section-body">
+      <div id="expiring-empty">Connect to check expiring keys.</div>
+      <table id="expiring-table" style="display:none">
+        <thead><tr>
+          <th>Provider</th>
+          <th>Expires</th>
+          <th>Days left</th>
+        </tr></thead>
+        <tbody id="expiring-body"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+const PROVIDERS = [
+  { id: 'openai',     icon: '🤖', label: 'OpenAI' },
+  { id: 'anthropic',  icon: '🔮', label: 'Anthropic' },
+  { id: 'openrouter', icon: '🌐', label: 'OpenRouter' },
+  { id: 'ollama',     icon: '🦙', label: 'Ollama' },
+];
+
+let _token = '';
+let _healthTimer = null;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function connect() {
+  const t = document.getElementById('token-input').value.trim();
+  if (!t) { toast('Paste a token first', 'err'); return; }
+  _token = t;
+  sessionStorage.setItem('gw_token', t);
+  renderCards();
+  loadAll();
+  if (!_healthTimer) {
+    _healthTimer = setInterval(loadAll, 30000);
+  }
+}
+
+function _headers() {
+  return { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+}
+
+// ── Initial render ─────────────────────────────────────────────────────────────
+function renderCards() {
+  const grid = document.getElementById('providers-grid');
+  grid.innerHTML = PROVIDERS.map(p => `
+    <div class="provider-card" id="card-${p.id}">
+      <div class="card-top">
+        <div class="prov-icon">${p.icon}</div>
+        <div class="prov-name">${p.label}</div>
+        <span class="status-chip chip-unknown" id="chip-${p.id}">—</span>
+      </div>
+      <div id="meta-${p.id}">
+        <div class="meta-row">Configured: <span id="configured-${p.id}">—</span></div>
+        <div class="meta-row">Available: <span id="available-${p.id}">—</span></div>
+        <div class="meta-row" id="expiry-row-${p.id}" style="display:none">
+          Expires: <span id="expiry-${p.id}">—</span>
+        </div>
+      </div>
+      <div class="card-sep"></div>
+      <label class="field-label">API key</label>
+      <div class="key-row" style="margin-bottom:6px">
+        <input type="password" id="key-input-${p.id}" placeholder="Paste new key…" />
+        <input type="number" id="ttl-input-${p.id}" min="0" max="3650" placeholder="TTL" title="TTL in days (0 = no expiry)" />
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="primary sm" style="flex:1" onclick="storeKey('${p.id}')">Store</button>
+        <button class="sm" onclick="rotateKey('${p.id}')">Rotate</button>
+        <button class="danger sm" onclick="deleteKey('${p.id}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Load all ───────────────────────────────────────────────────────────────────
+async function loadAll() {
+  if (!_token) return;
+  await Promise.allSettled(PROVIDERS.map(p => loadHealth(p.id)));
+  loadExpiring();
+}
+
+// ── Health load ────────────────────────────────────────────────────────────────
+async function loadHealth(provId) {
+  try {
+    const r = await fetch(`/admin/providers/${provId}/health`, { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const chip = document.getElementById(`chip-${provId}`);
+    chip.className = 'status-chip chip-' + (d.status || 'unknown');
+    chip.textContent = d.status || '—';
+    document.getElementById(`configured-${provId}`).textContent = d.configured ? 'yes' : 'no';
+    document.getElementById(`available-${provId}`).textContent  = d.available  ? 'yes' : 'no';
+  } catch (_) {}
+
+  // Key expiry
+  try {
+    const r2 = await fetch(`/admin/providers/${provId}/key/expiry`, { headers: _headers() });
+    if (!r2.ok) return;
+    const d2 = await r2.json();
+    if (d2.expires_at) {
+      const exp = new Date(d2.expires_at);
+      const daysLeft = Math.ceil((exp - Date.now()) / 86400000);
+      const row = document.getElementById(`expiry-row-${provId}`);
+      const span = document.getElementById(`expiry-${provId}`);
+      span.textContent = exp.toLocaleDateString() + ` (${daysLeft}d)`;
+      row.style.display = 'block';
+      row.className = 'meta-row' + (daysLeft < 7 ? ' danger' : daysLeft < 30 ? ' warn' : '');
+    }
+  } catch (_) {}
+}
+
+// ── Expiring keys ──────────────────────────────────────────────────────────────
+async function loadExpiring() {
+  if (!_token) return;
+  try {
+    const r = await fetch('/admin/providers/expiring?within_days=7', { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const rows = d.expiring || [];
+    const empty = document.getElementById('expiring-empty');
+    const tbl   = document.getElementById('expiring-table');
+    const tbody = document.getElementById('expiring-body');
+    document.getElementById('refresh-lbl').textContent =
+      '— checked ' + new Date().toLocaleTimeString();
+    if (!rows.length) {
+      empty.textContent = 'No keys expiring within 7 days. ✓';
+      empty.style.display = 'block';
+      tbl.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    tbl.style.display = 'table';
+    tbody.innerHTML = rows.map(row => {
+      const exp = new Date(row.expires_at || row.expiry || '');
+      const daysLeft = isNaN(exp) ? '?' : Math.ceil((exp - Date.now()) / 86400000);
+      return `<tr>
+        <td>${esc(row.provider)}</td>
+        <td class="mono">${isNaN(exp) ? '—' : exp.toLocaleDateString()}</td>
+        <td style="color:var(--red)">${daysLeft}d</td>
+      </tr>`;
+    }).join('');
+  } catch (_) {}
+}
+
+// ── Key management ─────────────────────────────────────────────────────────────
+async function storeKey(provId) {
+  const k = document.getElementById(`key-input-${provId}`).value.trim();
+  if (!k) { toast('Enter a key value first', 'err'); return; }
+  const ttlVal = parseInt(document.getElementById(`ttl-input-${provId}`).value);
+  const body = { key: k };
+  if (!isNaN(ttlVal) && ttlVal > 0) body.ttl_days = ttlVal;
+  try {
+    const r = await fetch(`/admin/providers/${provId}/key`, {
+      method: 'POST', headers: _headers(), body: JSON.stringify(body),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast(`Key stored for ${provId}`, 'ok');
+    document.getElementById(`key-input-${provId}`).value = '';
+    setTimeout(() => loadHealth(provId), 400);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function rotateKey(provId) {
+  const k = document.getElementById(`key-input-${provId}`).value.trim();
+  if (!k) { toast('Paste the new key to rotate to', 'err'); return; }
+  const ttlVal = parseInt(document.getElementById(`ttl-input-${provId}`).value);
+  const body = { key: k };
+  if (!isNaN(ttlVal) && ttlVal > 0) body.ttl_days = ttlVal;
+  try {
+    const r = await fetch(`/admin/providers/${provId}/key/rotate`, {
+      method: 'POST', headers: _headers(), body: JSON.stringify(body),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast(`Key rotated for ${provId}`, 'ok');
+    document.getElementById(`key-input-${provId}`).value = '';
+    setTimeout(() => loadHealth(provId), 400);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteKey(provId) {
+  if (!confirm(`Delete the stored key for ${provId}?`)) return;
+  try {
+    const r = await fetch(`/admin/providers/${provId}/key`, {
+      method: 'DELETE', headers: _headers(),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast(`Key deleted for ${provId}`, 'ok');
+    document.getElementById(`expiry-row-${provId}`).style.display = 'none';
+    setTimeout(() => loadHealth(provId), 400);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Utilities ───────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (type || '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+// ── Auto-connect ────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const stored = sessionStorage.getItem('gw_token');
+  if (stored) {
+    _token = stored;
+    document.getElementById('token-input').value = stored;
+    renderCards();
+    loadAll();
+    _healthTimer = setInterval(loadAll, 30000);
+  }
+});
+</script>
+</body>
+</html>

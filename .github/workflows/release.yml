@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write       # create/update GitHub Releases
+  id-token: write       # required for Sigstore keyless signing
+
+jobs:
+  # ── 1. Run full test suite ──────────────────────────────────────────────
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r agent-gateway/requirements.txt
+          pip install pytest build pip-licenses pip-audit
+
+      - name: Add repo root to PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+
+      - name: Set SANDBOX_WORKER_PATH
+        run: |
+          echo "SANDBOX_WORKER_PATH=$GITHUB_WORKSPACE/agent-gateway/sandbox/worker.py" >> $GITHUB_ENV
+
+      - name: Allow all capabilities for tests
+        run: echo "AGENT_GATEWAY_ALLOWED_CAPS=ALL" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: pytest -q agent-gateway/tests/
+
+  # ── 2. Build, SBOM, sign, release ───────────────────────────────────────
+  release:
+    name: Build & publish
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for changelog generation
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build pip-licenses pip-audit
+          pip install -r agent-gateway/requirements.txt
+
+      # ── SBOM ──────────────────────────────────────────────────────────
+      - name: Generate SBOM (pip-licenses)
+        run: |
+          pip-licenses \
+            --format=json \
+            --with-urls \
+            --with-description \
+            --output-file=sbom.json
+          pip-licenses \
+            --format=csv \
+            --output-file=sbom.csv
+
+      # ── Vulnerability scan ────────────────────────────────────────────
+      - name: Run pip-audit
+        run: |
+          pip-audit \
+            --format=json \
+            --output=pip-audit.json \
+            -r agent-gateway/requirements.txt \
+            || true   # don't fail the release on known-unfixed CVEs
+
+      # ── Wheel build ───────────────────────────────────────────────────
+      - name: Build wheel and sdist
+        working-directory: agent-gateway
+        run: python -m build --outdir ../dist/
+
+      # ── Sigstore keyless signing ─────────────────────────────────────
+      - name: Sign artifacts with Sigstore
+        uses: sigstore/gh-action-sigstore-python@v2.1.0
+        with:
+          inputs: >-
+            dist/*.whl
+            dist/*.tar.gz
+            sbom.json
+
+      # ── GitHub Release ────────────────────────────────────────────────
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Extract section for this tag from CHANGELOG.md (if it exists)
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+          fi
+          # Fallback to a brief auto-generated header
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${TAG} — see commit history for changes."
+          fi
+          # Write to file (safe for multi-line content)
+          echo "$NOTES" > release_notes.md
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          fail_on_unmatched_files: false
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.whl.sigstore.json
+            dist/*.tar.gz.sigstore.json
+            sbom.json
+            sbom.json.sigstore.json
+            sbom.csv
+            pip-audit.json

@@ -1,0 +1,10 @@
+{
+  "tool": "clipboard.read",
+  "display_name": "Clipboard Read",
+  "description": "Reads the current system clipboard content.",
+  "required_capabilities": ["clipboard.read"],
+  "optional_capabilities": [],
+  "risk_level": "medium",
+  "requires_approval": false,
+  "allowed_arg_keys": []
+}

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from app import app
+import auth as _auth
 import os
 import time
 
@@ -10,6 +11,20 @@ client = TestClient(app)
 def test_login_and_refresh_and_revoke(monkeypatch):
     # ensure default admin exists via env
     monkeypatch.setenv('AGENT_GATEWAY_ADMIN_PASSWORD', 'pw123')
+    # Force (re-)creation of admin with this password in case users.json is stale
+    _auth._load_users  # ensure module loaded
+    users_path = _auth.USERS_PATH
+    if users_path.exists():
+        import json
+        with users_path.open('r') as f:
+            u = json.load(f)
+        if 'admin' in u:
+            u.pop('admin')
+            with users_path.open('w') as f:
+                json.dump(u, f)
+    _auth._TOKENS.clear()
+    _auth._REFRESH_TOKENS.clear()
+    _auth._ensure_default_admin()
     # login
     r = client.post('/admin/login', json={'username': 'admin', 'password': 'pw123'})
     assert r.status_code == 200

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Scheduler</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header a.back { color: var(--muted); text-decoration: none; font-size: .85rem; }
+    header a.back:hover { color: var(--accent); }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+
+    main { padding: 24px 28px; display: grid; grid-template-columns: 300px 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+
+    /* -- Auth ---------------------------------------------------------------- */
+    #auth-panel {
+      grid-column: 1 / -1;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600;
+    }
+    button:hover { opacity: .85; }
+    button.danger  { background: #7f2a2a; }
+    button.warn    { background: #7f5a00; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm { padding: 4px 10px; font-size: .78rem; }
+    button.full { width: 100%; margin-top: 8px; }
+
+    input, textarea, select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-family: inherit; font-size: .82rem;
+      outline: none; width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+    textarea { resize: vertical; font-family: monospace; }
+
+    label.field-label { display: block; font-size: .75rem; color: var(--muted); margin-bottom: 4px; margin-top: 10px; }
+    label.field-label:first-child { margin-top: 0; }
+
+    /* -- Left panel --------------------------------------------------------- */
+    #left-panel {
+      display: flex; flex-direction: column; gap: 14px; align-self: start;
+    }
+
+    /* Create form ----------------------------------------------------------- */
+    #create-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    #create-header {
+      padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none;
+    }
+    #create-header h2 { font-size: .9rem; font-weight: 500; color: var(--muted); }
+    #create-header .chevron { color: var(--muted); font-size: .8rem; transition: transform .2s; }
+    #create-header.open .chevron { transform: rotate(180deg); }
+    #create-body { padding: 0 16px 16px; display: none; }
+    #create-body.visible { display: block; }
+
+    /* Task list ------------------------------------------------------------- */
+    #list-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    #list-header {
+      padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    #list-header h2 { font-size: .9rem; font-weight: 500; color: var(--muted); }
+    #task-list { list-style: none; max-height: 55vh; overflow-y: auto; }
+    #task-list li {
+      padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    #task-list li:last-child { border: none; }
+    #task-list li:hover { background: rgba(108,99,255,.07); }
+    #task-list li.active { background: rgba(108,99,255,.15); }
+    #task-empty { padding: 24px 16px; color: var(--muted); font-size: .82rem; text-align: center; }
+
+    .task-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+    .task-dot.on  { background: var(--green); box-shadow: 0 0 4px var(--green); }
+    .task-dot.off { background: var(--muted); }
+    .task-info { flex: 1; min-width: 0; }
+    .task-name { font-size: .88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-tool { font-size: .75rem; color: var(--muted); margin-top: 1px; }
+    .task-meta { text-align: right; flex-shrink: 0; }
+    .interval-badge {
+      display: inline-block; background: rgba(108,99,255,.18); color: var(--accent);
+      border-radius: 10px; padding: 1px 7px; font-size: .7rem; font-weight: 700;
+    }
+    .run-count { font-size: .68rem; color: var(--muted); margin-top: 3px; }
+
+    /* -- Right panel -------------------------------------------------------- */
+    #detail-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; align-self: start;
+    }
+    #detail-empty {
+      padding: 60px 24px; text-align: center; color: var(--muted);
+    }
+    #detail-empty .hint { font-size: 2rem; margin-bottom: 10px; }
+    #detail-content { display: none; }
+
+    #detail-panel-header {
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .detail-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .detail-dot.on  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .detail-dot.off { background: var(--muted); }
+    #detail-name { font-size: 1.1rem; font-weight: 700; flex: 1; }
+    .tool-chip {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 3px 10px; font-size: .75rem; color: var(--muted);
+      font-family: monospace;
+    }
+
+    #detail-body { padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+
+    /* stat grid */
+    .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .stat-box {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .stat-box .sl { font-size: .7rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
+    .stat-box .sv { font-size: .88rem; font-weight: 600; font-family: monospace; }
+    .stat-box.error .sv { color: var(--red); }
+
+    /* section */
+    .section-label { font-size: .75rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+
+    /* last result */
+    #last-result-box {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; max-height: 120px; overflow-y: auto;
+      font-family: monospace; font-size: .78rem; color: var(--muted);
+      white-space: pre-wrap; word-break: break-all;
+    }
+    #last-error-box {
+      background: rgba(255,107,107,.07); border: 1px solid rgba(255,107,107,.3);
+      border-radius: 8px; padding: 10px 14px; font-size: .82rem; color: var(--red);
+      word-break: break-all; display: none;
+    }
+
+    /* edit section */
+    .edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .edit-row.single { grid-template-columns: 1fr; }
+
+    /* action bar */
+    #action-bar {
+      display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border);
+      padding: 14px 20px;
+    }
+    #action-bar button { flex: 1; min-width: 100px; }
+
+    /* run history */
+    #history-wrap table { width: 100%; border-collapse: collapse; font-size: .78rem; margin-top: 8px; }
+    #history-wrap th { padding: 6px 8px; text-align: left; color: var(--muted); font-size: .7rem;
+      text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+    #history-wrap td { padding: 6px 8px; border-bottom: 1px solid rgba(45,49,69,.5); vertical-align: top; }
+    #history-wrap td.mono { font-family: monospace; font-size: .75rem; }
+    .hist-ok  { color: var(--green); font-weight: 700; }
+    .hist-err { color: var(--red);   font-weight: 700; }
+    #history-empty { color: var(--muted); font-size: .82rem; margin-top: 8px; }
+
+    /* -- Toast -------------------------------------------------------------- */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 18px; font-size: .82rem;
+      opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+    #toast.ok   { border-color: var(--green); color: var(--green); }
+    #toast.err  { border-color: var(--red);   color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">← Hub</a>
+  <h1>Scheduler</h1>
+  <span>Recurring tool-call tasks</span>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Admin token</label>
+    <input type="password" id="token-input" placeholder="Paste Bearer token…" />
+    <button onclick="connect()">Connect</button>
+  </div>
+
+  <!-- Left -->
+  <div id="left-panel">
+    <!-- Create form -->
+    <div id="create-card">
+      <div id="create-header" onclick="toggleCreate()">
+        <h2>＋ New task</h2>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="create-body">
+        <label class="field-label">Name</label>
+        <input type="text" id="c-name" placeholder="e.g. Nightly summary" />
+        <label class="field-label">Tool</label>
+        <input type="text" id="c-tool" placeholder="e.g. browser.summarize" />
+        <label class="field-label">Args (JSON)</label>
+        <textarea id="c-args" rows="3">{}</textarea>
+        <label class="field-label">Interval (seconds)</label>
+        <input type="number" id="c-interval" value="3600" min="1" />
+        <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:.82rem;cursor:pointer;">
+          <input type="checkbox" id="c-enabled" checked style="width:auto;" /> Enabled immediately
+        </label>
+        <button class="full" onclick="createTask()">Create task</button>
+      </div>
+    </div>
+
+    <!-- Task list -->
+    <div id="list-card">
+      <div id="list-header">
+        <h2>Tasks</h2>
+        <button class="sm secondary" onclick="loadTasks()">↻ Refresh</button>
+      </div>
+      <ul id="task-list">
+        <li id="task-empty">Connect to load tasks</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Right -->
+  <div id="detail-panel">
+    <div id="detail-empty">
+      <div class="hint">⏱️</div>
+      <div>Select a task to view details</div>
+    </div>
+    <div id="detail-content">
+      <div id="detail-panel-header">
+        <div class="detail-dot" id="d-dot"></div>
+        <div id="d-name">—</div>
+        <div class="tool-chip" id="d-tool-chip">—</div>
+      </div>
+      <div id="detail-body">
+        <!-- Stats -->
+        <div>
+          <div class="section-label">Statistics</div>
+          <div class="stat-grid">
+            <div class="stat-box">
+              <div class="sl">Run count</div>
+              <div class="sv" id="d-run-count">—</div>
+            </div>
+            <div class="stat-box">
+              <div class="sl">Last run</div>
+              <div class="sv" id="d-last-run">—</div>
+            </div>
+            <div class="stat-box">
+              <div class="sl">Next run</div>
+              <div class="sv" id="d-next-run">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Last result -->
+        <div>
+          <div class="section-label">Last result</div>
+          <div id="last-result-box">No runs yet</div>
+          <div id="last-error-box"></div>
+        </div>
+
+        <!-- Run history -->
+        <div id="history-wrap">
+          <div class="section-label" style="display:flex;align-items:center;gap:10px;">
+            Run history
+            <button style="font-size:.7rem;padding:2px 8px;" onclick="loadHistory()">↻ Refresh</button>
+          </div>
+          <div id="history-empty">No history loaded.</div>
+          <table id="history-table" style="display:none">
+            <thead><tr>
+              <th>#</th>
+              <th>Timestamp</th>
+              <th style="text-align:right">Duration</th>
+              <th>Status</th>
+              <th>Error</th>
+            </tr></thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Edit -->
+        <div>
+          <div class="section-label">Edit</div>
+          <div class="edit-row">
+            <div>
+              <label class="field-label">Name</label>
+              <input type="text" id="d-edit-name" />
+            </div>
+            <div>
+              <label class="field-label">Tool</label>
+              <input type="text" id="d-edit-tool" disabled title="Cannot change tool; delete and recreate." />
+            </div>
+          </div>
+          <label class="field-label">Args (JSON)</label>
+          <textarea id="d-edit-args" rows="3"></textarea>
+          <label class="field-label">Interval (seconds)</label>
+          <input type="number" id="d-edit-interval" min="1" />
+          <button class="full" style="margin-top:10px;" onclick="saveChanges()">Save changes</button>
+        </div>
+      </div>
+      <!-- Action bar -->
+      <div id="action-bar">
+        <button id="btn-toggle" onclick="toggleEnabled()">Disable</button>
+        <button class="warn" onclick="triggerTask()">▶ Run now</button>
+        <button class="danger" onclick="deleteTask()">Delete</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _token = '';
+let _selectedId = null;
+let _tasks = {};   // id -> task
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+function connect() {
+  const t = document.getElementById('token-input').value.trim();
+  if (!t) { toast('Paste a token first', 'err'); return; }
+  _token = t;
+  sessionStorage.setItem('gw_token', t);
+  loadTasks();
+}
+
+function _headers() {
+  return { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+}
+
+// ── Task list ─────────────────────────────────────────────────────────────────
+async function loadTasks() {
+  if (!_token) { toast('Not connected', 'err'); return; }
+  try {
+    const r = await fetch('/admin/schedule', { headers: _headers() });
+    if (!r.ok) { toast('Failed to load tasks (' + r.status + ')', 'err'); return; }
+    const body = await r.json();
+    const list = body.tasks ?? body;
+    _tasks = {};
+    list.forEach(t => _tasks[t.id] = t);
+    renderList(list);
+    if (_selectedId && _tasks[_selectedId]) renderDetail(_tasks[_selectedId]);
+  } catch (e) { toast('Network error: ' + e.message, 'err'); }
+}
+
+function renderList(list) {
+  const ul = document.getElementById('task-list');
+  ul.innerHTML = '';
+  if (!list.length) {
+    ul.innerHTML = '<li id="task-empty" style="color:var(--muted);font-size:.82rem;text-align:center;padding:24px;">No tasks yet — create one above</li>';
+    return;
+  }
+  list.forEach(t => {
+    const li = document.createElement('li');
+    li.dataset.id = t.id;
+    if (t.id === _selectedId) li.classList.add('active');
+    li.innerHTML = `
+      <div class="task-dot ${t.enabled ? 'on' : 'off'}"></div>
+      <div class="task-info">
+        <div class="task-name">${esc(t.name)}</div>
+        <div class="task-tool">${esc(t.tool)}</div>
+      </div>
+      <div class="task-meta">
+        <div class="interval-badge">${fmtInterval(t.interval_seconds)}</div>
+        <div class="run-count">×${t.run_count}</div>
+      </div>`;
+    li.onclick = () => selectTask(t.id);
+    ul.appendChild(li);
+  });
+}
+
+function selectTask(id) {
+  _selectedId = id;
+  document.querySelectorAll('#task-list li').forEach(li => li.classList.toggle('active', li.dataset.id === id));
+  renderDetail(_tasks[id]);
+  loadHistory();
+}
+
+// ── Run History ──────────────────────────────────────────────────────────────
+async function loadHistory() {
+  if (!_selectedId || !_token) return;
+  const emptyEl = document.getElementById('history-empty');
+  const tbl     = document.getElementById('history-table');
+  const tbody   = document.getElementById('history-body');
+  emptyEl.textContent = 'Loading…';
+  emptyEl.style.display = 'block';
+  tbl.style.display = 'none';
+  try {
+    const r = await fetch('/admin/schedule/' + _selectedId + '/history', { headers: _headers() });
+    if (!r.ok) { emptyEl.textContent = 'Failed to load history.'; return; }
+    const data = await r.json();
+    const rows = data.history || [];
+    if (!rows.length) { emptyEl.textContent = 'No runs recorded yet.'; return; }
+    emptyEl.style.display = 'none';
+    tbl.style.display = 'table';
+    tbody.innerHTML = rows.map((row, i) => {
+      const ts = row.timestamp ? new Date(row.timestamp).toLocaleString() : '—';
+      const dur = typeof row.duration_seconds === 'number' ? row.duration_seconds.toFixed(3) + ' s' : '—';
+      const status = row.ok
+        ? '<span class="hist-ok">✓ ok</span>'
+        : '<span class="hist-err">✗ err</span>';
+      const err = row.error ? `<span style="color:var(--red);font-size:.75rem">${esc(row.error)}</span>` : '';
+      return `<tr>
+        <td class="mono">${row.run ?? (i + 1)}</td>
+        <td class="mono">${ts}</td>
+        <td class="mono" style="text-align:right">${dur}</td>
+        <td>${status}</td>
+        <td>${err}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    emptyEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Detail ───────────────────────────────────────────────────────────────────
+function renderDetail(t) {
+  document.getElementById('detail-empty').style.display = 'none';
+  document.getElementById('detail-content').style.display = 'block';
+
+  const enabled = t.enabled;
+  const dot = document.getElementById('d-dot');
+  dot.className = 'detail-dot ' + (enabled ? 'on' : 'off');
+  document.getElementById('d-name').textContent = t.name;
+  document.getElementById('d-tool-chip').textContent = t.tool;
+
+  document.getElementById('d-run-count').textContent = t.run_count;
+  document.getElementById('d-last-run').textContent = t.last_run_at ? fmtDateShort(t.last_run_at) : '—';
+  document.getElementById('d-next-run').textContent = fmtDateShort(t.next_run_at);
+
+  // Last result / error
+  const resBox = document.getElementById('last-result-box');
+  const errBox = document.getElementById('last-error-box');
+  if (t.last_error) {
+    errBox.style.display = 'block';
+    errBox.textContent = '⚠ ' + t.last_error;
+    resBox.textContent = t.last_result != null ? JSON.stringify(t.last_result, null, 2) : 'No result';
+  } else {
+    errBox.style.display = 'none';
+    resBox.textContent = t.last_result != null ? JSON.stringify(t.last_result, null, 2) : 'No runs yet';
+  }
+
+  // Edit fields
+  document.getElementById('d-edit-name').value = t.name;
+  document.getElementById('d-edit-tool').value = t.tool;
+  document.getElementById('d-edit-args').value = JSON.stringify(t.args ?? {}, null, 2);
+  document.getElementById('d-edit-interval').value = t.interval_seconds;
+
+  // Toggle button label
+  const btn = document.getElementById('btn-toggle');
+  btn.textContent = enabled ? 'Disable' : 'Enable';
+  btn.className = enabled ? 'warn' : '';
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+async function toggleEnabled() {
+  if (!_selectedId) return;
+  const t = _tasks[_selectedId];
+  const newEnabled = !t.enabled;
+  try {
+    const r = await fetch('/admin/schedule/' + _selectedId, {
+      method: 'PATCH', headers: _headers(),
+      body: JSON.stringify({ enabled: newEnabled }),
+    });
+    if (!r.ok) { toast('Failed (' + r.status + ')', 'err'); return; }
+    toast(newEnabled ? 'Task enabled' : 'Task disabled', 'ok');
+    await loadTasks();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function triggerTask() {
+  if (!_selectedId) return;
+  try {
+    const r = await fetch('/admin/schedule/' + _selectedId + '/trigger', {
+      method: 'POST', headers: _headers(),
+    });
+    if (!r.ok) { toast('Trigger failed (' + r.status + ')', 'err'); return; }
+    toast('Task queued for next tick (≤ 1 s)', 'ok');
+    // Refresh after a brief delay to pick up run_count change
+    setTimeout(loadTasks, 1200);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function saveChanges() {
+  if (!_selectedId) return;
+  const name = document.getElementById('d-edit-name').value.trim();
+  const argsRaw = document.getElementById('d-edit-args').value.trim();
+  const interval = parseInt(document.getElementById('d-edit-interval').value, 10);
+
+  let args;
+  try { args = JSON.parse(argsRaw); } catch { toast('Args is not valid JSON', 'err'); return; }
+  if (!name) { toast('Name cannot be empty', 'err'); return; }
+  if (!interval || interval < 1) { toast('Interval must be ≥ 1', 'err'); return; }
+
+  try {
+    const r = await fetch('/admin/schedule/' + _selectedId, {
+      method: 'PATCH', headers: _headers(),
+      body: JSON.stringify({ name, args, interval_seconds: interval }),
+    });
+    if (!r.ok) { const b = await r.json(); toast(b.detail || 'Save failed', 'err'); return; }
+    toast('Changes saved', 'ok');
+    await loadTasks();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteTask() {
+  if (!_selectedId) return;
+  const t = _tasks[_selectedId];
+  if (!confirm('Delete task "' + t.name + '"?')) return;
+  try {
+    const r = await fetch('/admin/schedule/' + _selectedId, {
+      method: 'DELETE', headers: _headers(),
+    });
+    if (!r.ok) { toast('Delete failed (' + r.status + ')', 'err'); return; }
+    toast('Task deleted', 'ok');
+    _selectedId = null;
+    document.getElementById('detail-empty').style.display = '';
+    document.getElementById('detail-content').style.display = 'none';
+    await loadTasks();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function createTask() {
+  const name = document.getElementById('c-name').value.trim();
+  const tool = document.getElementById('c-tool').value.trim();
+  const argsRaw = document.getElementById('c-args').value.trim();
+  const interval = parseInt(document.getElementById('c-interval').value, 10);
+  const enabled = document.getElementById('c-enabled').checked;
+
+  if (!name) { toast('Name is required', 'err'); return; }
+  if (!tool) { toast('Tool is required', 'err'); return; }
+  let args;
+  try { args = JSON.parse(argsRaw || '{}'); } catch { toast('Args is not valid JSON', 'err'); return; }
+  if (!interval || interval < 1) { toast('Interval must be ≥ 1', 'err'); return; }
+
+  try {
+    const r = await fetch('/admin/schedule', {
+      method: 'POST', headers: _headers(),
+      body: JSON.stringify({ name, tool, args, interval_seconds: interval, enabled }),
+    });
+    if (!r.ok) { const b = await r.json(); toast(b.detail || 'Create failed', 'err'); return; }
+    const created = await r.json();
+    toast('Task created', 'ok');
+    // Reset form
+    document.getElementById('c-name').value = '';
+    document.getElementById('c-tool').value = '';
+    document.getElementById('c-args').value = '{}';
+    document.getElementById('c-interval').value = '3600';
+    document.getElementById('c-enabled').checked = true;
+    await loadTasks();
+    selectTask(created.id);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Collapsible create form ───────────────────────────────────────────────────
+function toggleCreate() {
+  const hdr = document.getElementById('create-header');
+  const body = document.getElementById('create-body');
+  hdr.classList.toggle('open');
+  body.classList.toggle('visible');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtInterval(secs) {
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.round(secs / 60) + 'm';
+  if (secs < 86400) return (secs / 3600).toFixed(1).replace('.0', '') + 'h';
+  return (secs / 86400).toFixed(1).replace('.0', '') + 'd';
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const now = Date.now();
+  const diff = Math.abs(now - d.getTime()) / 1000;
+  if (diff < 60) return Math.round(diff) + 's ago';
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+let _toastTimer;
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(function init() {
+  const cached = sessionStorage.getItem('gw_token');
+  if (cached) {
+    _token = cached;
+    document.getElementById('token-input').value = cached;
+    loadTasks();
+  }
+})();
+</script>
+</body>
+</html>

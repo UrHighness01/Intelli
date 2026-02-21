@@ -1,0 +1,10 @@
+{
+  "tool": "browser.dom",
+  "display_name": "DOM Access",
+  "description": "Reads or modifies the live DOM of the active browser tab.",
+  "required_capabilities": ["browser.dom"],
+  "optional_capabilities": [],
+  "risk_level": "low",
+  "requires_approval": false,
+  "allowed_arg_keys": ["selector", "action", "value", "attribute"]
+}

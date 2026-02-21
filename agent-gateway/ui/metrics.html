@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Metrics</title>
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --border:  #2d3145;
+      --accent:  #6c63ff;
+      --green:   #3ddc84;
+      --red:     #ff6b6b;
+      --yellow:  #ffd166;
+      --text:    #e2e4f0;
+      --muted:   #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+
+    #status-badge {
+      margin-left: auto;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: .8rem;
+      font-weight: 600;
+      background: var(--border);
+      color: var(--muted);
+    }
+    #status-badge.ok  { background: #1e3a2a; color: var(--green); }
+    #status-badge.err { background: #3a1e1e; color: var(--red);   }
+
+    main { padding: 28px; max-width: 1200px; margin: 0 auto; }
+
+    /* Auth panel */
+    #auth-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1;
+      min-width: 220px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 12px;
+      color: var(--text);
+      font-family: monospace;
+      font-size: .85rem;
+      outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 18px;
+      font-size: .85rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    button.secondary {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    /* Summary cards */
+    #cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card .label { font-size: .78rem; color: var(--muted); margin-bottom: 8px; }
+    .card .value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
+    .card .sub   { font-size: .75rem; color: var(--muted); margin-top: 6px; }
+    .card.accent  { border-color: var(--accent); }
+    .card.green   { border-color: var(--green);  }
+    .card.red     { border-color: var(--red);    }
+    .card.yellow  { border-color: var(--yellow); }
+
+    /* Metric table */
+    #table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    #table-wrap h2 {
+      padding: 14px 20px;
+      font-size: .95rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .85rem;
+    }
+    thead th {
+      text-align: left;
+      padding: 10px 20px;
+      color: var(--muted);
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border: none; }
+    tbody tr:hover { background: rgba(108,99,255,.06); }
+    td { padding: 9px 20px; }
+    td.metric-name { font-family: monospace; color: var(--accent); }
+    td.metric-labels { font-family: monospace; font-size: .78rem; color: var(--muted); }
+    td.metric-value { font-weight: 600; text-align: right; }
+    td.metric-type  { font-size: .78rem; color: var(--muted); }
+    td.metric-help  { font-size: .78rem; color: var(--muted); font-style: italic; }
+
+    /* Filter row */
+    #filter-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    #filter-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      color: var(--text);
+      font-size: .85rem;
+      outline: none;
+    }
+    #filter-input:focus { border-color: var(--accent); }
+    #row-count { font-size: .8rem; color: var(--muted); }
+
+    /* sparkline canvas */
+    canvas.spark {
+      display: block;
+      width: 80px;
+      height: 28px;
+      image-rendering: pixelated;
+    }
+
+    /* Refresh bar */
+    #refresh-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    #refresh-bar span { font-size: .82rem; color: var(--muted); }
+    #countdown {
+      font-size: .82rem;
+      color: var(--accent);
+      min-width: 80px;
+    }
+    #last-updated { font-size: .78rem; color: var(--muted); }
+
+    .empty-state {
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span>Live Metrics</span>
+  <span id="status-badge">Waiting</span>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input type="password" id="token-input" placeholder="Paste admin token…" />
+    <button onclick="startPolling()">Connect</button>
+    <button class="secondary" onclick="stopPolling()">Pause</button>
+  </div>
+
+  <!-- Refresh bar -->
+  <div id="refresh-bar">
+    <button class="secondary" onclick="fetchNow()">⟳ Refresh now</button>
+    <span>Auto-refresh:</span>
+    <span id="countdown">—</span>
+    <span id="last-updated"></span>
+  </div>
+
+  <!-- Summary cards -->
+  <div id="cards">
+    <div class="card accent">
+      <div class="label">Tool calls (total)</div>
+      <div class="value" id="c-tool-calls">—</div>
+      <div class="sub">tool_calls_total</div>
+    </div>
+    <div class="card red">
+      <div class="label">Validation errors</div>
+      <div class="value" id="c-val-errors">—</div>
+      <div class="sub">tool_validation_errors_total</div>
+    </div>
+    <div class="card yellow">
+      <div class="label">Pending approvals</div>
+      <div class="value" id="c-approvals">—</div>
+      <div class="sub">approvals_queued_total</div>
+    </div>
+    <div class="card green">
+      <div class="label">Provider requests</div>
+      <div class="value" id="c-provider">—</div>
+      <div class="sub">provider_requests_total</div>
+    </div>
+    <div class="card red">
+      <div class="label">Provider errors</div>
+      <div class="value" id="c-prov-err">—</div>
+      <div class="sub">provider_errors_total</div>
+    </div>
+    <div class="card">
+      <div class="label">Rate-limit hits</div>
+      <div class="value" id="c-ratelimit">—</div>
+      <div class="sub">rate_limit_hits_total</div>
+    </div>
+    <div class="card green">
+      <div class="label">Scheduler runs</div>
+      <div class="value" id="c-sched-runs">—</div>
+      <div class="sub">scheduler_runs_total</div>
+    </div>
+    <div class="card red">
+      <div class="label">Scheduler errors</div>
+      <div class="value" id="c-sched-errs">—</div>
+      <div class="sub">scheduler_errors_total</div>
+    </div>
+  </div>
+
+  <!-- Full metric table -->
+  <div id="table-wrap">
+    <h2>All metrics</h2>
+    <div id="filter-row">
+      <input type="text" id="filter-input" placeholder="Filter by name or label…" oninput="applyFilter()" />
+      <span id="row-count"></span>
+    </div>
+    <table id="metrics-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Labels</th>
+          <th>Type</th>
+          <th>Help</th>
+          <th style="text-align:right">Value</th>
+          <th>Trend</th>
+        </tr>
+      </thead>
+      <tbody id="metrics-body">
+        <tr><td colspan="6" class="empty-state">Connect to see metrics.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  /* ----------------------------------------------------------------
+   * Prometheus text-format parser
+   * Returns an array of { name, labels, value, type, help }
+   * ---------------------------------------------------------------- */
+  function parsePrometheus(text) {
+    const lines = text.split('\n');
+    const meta  = {};   // name → { type, help }
+    const rows  = [];
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+
+      const helpM = line.match(/^#\s+HELP\s+(\S+)\s+(.*)/);
+      if (helpM) {
+        const [, name, help] = helpM;
+        meta[name] = meta[name] || {};
+        meta[name].help = help;
+        continue;
+      }
+
+      const typeM = line.match(/^#\s+TYPE\s+(\S+)\s+(.*)/);
+      if (typeM) {
+        const [, name, type] = typeM;
+        meta[name] = meta[name] || {};
+        meta[name].type = type;
+        continue;
+      }
+
+      if (line.startsWith('#')) continue;
+
+      // metric_name{labels} value [timestamp]
+      const m = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})?\s+([\d.eE+\-NnIiAa]+)/);
+      if (!m) continue;
+
+      const [, name, labelsRaw, valueStr] = m;
+      const value = parseFloat(valueStr);
+
+      // Parse label key=value pairs
+      const labels = {};
+      if (labelsRaw) {
+        const pairs = labelsRaw.slice(1, -1);
+        for (const pair of pairs.matchAll(/(\w+)="([^"]*)"/g)) {
+          labels[pair[1]] = pair[2];
+        }
+      }
+
+      rows.push({
+        name,
+        labels,
+        value,
+        type: meta[name]?.type || '',
+        help: meta[name]?.help || '',
+      });
+    }
+    return rows;
+  }
+
+  /* ----------------------------------------------------------------
+   * History for sparklines: Map<key → number[]>
+   * key = name + JSON.stringify(labels) (stable enough)
+   * ---------------------------------------------------------------- */
+  const history = new Map();
+  const SPARK_MAX = 20;
+
+  function histKey(row) {
+    return row.name + JSON.stringify(row.labels);
+  }
+
+  function pushHistory(rows) {
+    for (const r of rows) {
+      const k = histKey(r);
+      const arr = history.get(k) || [];
+      arr.push(r.value);
+      if (arr.length > SPARK_MAX) arr.shift();
+      history.set(k, arr);
+    }
+  }
+
+  /* ----------------------------------------------------------------
+   * Sparkline renderer (canvas, 80 × 28)
+   * ---------------------------------------------------------------- */
+  function drawSparkline(canvas, data) {
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.offsetWidth  || 80;
+    const H = canvas.offsetHeight || 28;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!data || data.length < 2) {
+      ctx.clearRect(0, 0, W, H);
+      return;
+    }
+
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+
+    const toX = i => (i / (data.length - 1)) * W;
+    const toY = v => H - ((v - min) / range) * (H - 4) - 2;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Gradient fill
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(108,99,255,.4)');
+    grad.addColorStop(1, 'rgba(108,99,255,0)');
+    ctx.beginPath();
+    ctx.moveTo(toX(0), H);
+    for (let i = 0; i < data.length; i++) ctx.lineTo(toX(i), toY(data[i]));
+    ctx.lineTo(toX(data.length - 1), H);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    for (let i = 0; i < data.length; i++) {
+      i === 0 ? ctx.moveTo(toX(i), toY(data[i])) : ctx.lineTo(toX(i), toY(data[i]));
+    }
+    ctx.strokeStyle = '#6c63ff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  /* ----------------------------------------------------------------
+   * Summary card helpers
+   * ---------------------------------------------------------------- */
+  function sumMetric(rows, name) {
+    return rows.filter(r => r.name === name).reduce((a, r) => a + r.value, 0);
+  }
+
+  function updateCards(rows) {
+    const fmt = v => isNaN(v) ? '—' : v.toLocaleString();
+    document.getElementById('c-tool-calls').textContent = fmt(sumMetric(rows, 'tool_calls_total'));
+    document.getElementById('c-val-errors').textContent = fmt(sumMetric(rows, 'tool_validation_errors_total'));
+    document.getElementById('c-approvals' ).textContent = fmt(sumMetric(rows, 'approvals_queued_total'));
+    document.getElementById('c-provider'  ).textContent = fmt(sumMetric(rows, 'provider_requests_total'));
+    document.getElementById('c-prov-err'  ).textContent = fmt(sumMetric(rows, 'provider_errors_total'));
+    document.getElementById('c-ratelimit' ).textContent = fmt(sumMetric(rows, 'rate_limit_hits_total'));
+    document.getElementById('c-sched-runs').textContent = fmt(sumMetric(rows, 'scheduler_runs_total'));
+    document.getElementById('c-sched-errs').textContent = fmt(sumMetric(rows, 'scheduler_errors_total'));
+  }
+
+  /* ----------------------------------------------------------------
+   * Table renderer
+   * ---------------------------------------------------------------- */
+  let _currentRows = [];
+
+  function renderTable(rows) {
+    _currentRows = rows;
+    applyFilter();
+  }
+
+  function applyFilter() {
+    const q   = document.getElementById('filter-input').value.toLowerCase();
+    const rows = _currentRows.filter(r => {
+      if (!q) return true;
+      const labelsStr = Object.entries(r.labels).map(([k,v]) => `${k}="${v}"`).join(',');
+      return r.name.toLowerCase().includes(q) || labelsStr.toLowerCase().includes(q);
+    });
+
+    const tbody = document.getElementById('metrics-body');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No matching metrics.</td></tr>';
+      document.getElementById('row-count').textContent = '0 rows';
+      return;
+    }
+
+    document.getElementById('row-count').textContent = `${rows.length} row${rows.length !== 1 ? 's' : ''}`;
+
+    tbody.innerHTML = '';
+    for (const r of rows) {
+      const labelsStr = Object.entries(r.labels)
+        .map(([k, v]) => `<span style="color:var(--muted)">${k}=</span>"${v}"`)
+        .join(' ');
+
+      const key = histKey(r);
+      const hist = history.get(key) || [];
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="metric-name">${escHtml(r.name)}</td>
+        <td class="metric-labels">${labelsStr || '<span style="color:var(--border)">—</span>'}</td>
+        <td class="metric-type">${escHtml(r.type)}</td>
+        <td class="metric-help">${escHtml(r.help)}</td>
+        <td class="metric-value">${formatVal(r.value)}</td>
+        <td><canvas class="spark" width="80" height="28"></canvas></td>
+      `;
+      tbody.appendChild(tr);
+
+      const canvas = tr.querySelector('canvas');
+      requestAnimationFrame(() => drawSparkline(canvas, hist));
+    }
+  }
+
+  function formatVal(v) {
+    if (!isFinite(v)) return String(v);
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3 && Number.isInteger(v)) return v.toLocaleString();
+    if (Number.isInteger(v)) return v.toString();
+    return v.toPrecision(4);
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* ----------------------------------------------------------------
+   * Polling logic
+   * ---------------------------------------------------------------- */
+  let _timer      = null;
+  let _countdown  = 0;
+  let _tickHandle = null;
+  const INTERVAL  = 5000;   // ms
+
+  function getToken() {
+    return document.getElementById('token-input').value.trim();
+  }
+
+  async function fetchNow() {
+    const token = getToken();
+    const badge = document.getElementById('status-badge');
+
+    try {
+      const res = await fetch('/metrics', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
+
+      if (!res.ok) {
+        badge.textContent = `Error ${res.status}`;
+        badge.className = 'err';
+        return;
+      }
+
+      const text = await res.text();
+      const rows = parsePrometheus(text);
+
+      pushHistory(rows);
+      updateCards(rows);
+      renderTable(rows);
+
+      badge.textContent = 'Live';
+      badge.className = 'ok';
+      document.getElementById('last-updated').textContent =
+        '— last updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      badge.textContent = 'Offline';
+      badge.className = 'err';
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    fetchNow();
+    _timer = setInterval(fetchNow, INTERVAL);
+    _countdown = INTERVAL / 1000;
+    _tickHandle = setInterval(() => {
+      _countdown = Math.max(0, _countdown - 1);
+      document.getElementById('countdown').textContent =
+        `next in ${_countdown}s`;
+      if (_countdown === 0) _countdown = INTERVAL / 1000;
+    }, 1000);
+  }
+
+  function stopPolling() {
+    if (_timer)      clearInterval(_timer);
+    if (_tickHandle) clearInterval(_tickHandle);
+    _timer = _tickHandle = null;
+    document.getElementById('countdown').textContent = 'paused';
+  }
+
+  // Auto-start if token is already in storage
+  window.addEventListener('DOMContentLoaded', () => {
+    const saved = sessionStorage.getItem('metrics_token');
+    if (saved) {
+      document.getElementById('token-input').value = saved;
+      startPolling();
+    }
+  });
+
+  document.getElementById('token-input').addEventListener('change', () => {
+    sessionStorage.setItem('metrics_token', document.getElementById('token-input').value.trim());
+  });
+</script>
+</body>
+</html>

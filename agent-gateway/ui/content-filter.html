@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Content Filter</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+    #rule-count {
+      margin-left: auto; background: var(--border);
+      color: var(--muted); padding: 4px 12px; border-radius: 20px;
+      font-size: .8rem; font-weight: 600;
+    }
+
+    main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 340px; gap: 20px; }
+
+    /* ── Auth ──────────────────────────────────────────────────────────────── */
+    #auth-panel {
+      grid-column: 1 / -1;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; white-space: nowrap;
+    }
+    button:hover { opacity: .85; }
+    button.danger   { background: #7f2a2a; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm { padding: 4px 10px; font-size: .78rem; }
+
+    /* ── Rules panel (left col) ───────────────────────────────────────────── */
+    #rules-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    #rules-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    #rules-header h2 { font-size: .9rem; font-weight: 500; color: var(--muted); flex: 1; }
+
+    /* Add form */
+    #add-form {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+      display: grid; grid-template-columns: 2fr 100px 1fr auto; gap: 8px; align-items: end;
+    }
+    #add-form label { font-size: .75rem; color: var(--muted); display: block; margin-bottom: 4px; }
+    #add-form input, #add-form select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-size: .82rem; outline: none; width: 100%;
+    }
+    #add-form input:focus, #add-form select:focus { border-color: var(--accent); }
+    #add-pattern { font-family: monospace; }
+    #add-label   { font-family: monospace; }
+
+    /* Table */
+    #rules-table-wrap { overflow-x: auto; flex: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    thead th {
+      text-align: left; padding: 9px 16px;
+      color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border: none; }
+    tbody tr:hover { background: rgba(108,99,255,.04); }
+    td { padding: 9px 16px; vertical-align: middle; }
+    td.pattern { font-family: monospace; word-break: break-all; color: var(--accent); max-width: 280px; }
+    td.mode    { font-size: .78rem; }
+    td.label   { color: var(--muted); font-size: .82rem; word-break: break-all; }
+    td.actions { white-space: nowrap; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .72rem; font-weight: 600;
+    }
+    .badge.literal { background: rgba(61,220,132,.12); color: var(--green); }
+    .badge.regex   { background: rgba(255,209,102,.12); color: var(--yellow); }
+    .empty-state { padding: 40px 16px; text-align: center; color: var(--muted); font-size: .88rem; }
+
+    /* ── Test panel (right col) ───────────────────────────────────────────── */
+    #test-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column; align-self: start;
+    }
+    #test-panel h2 {
+      padding: 12px 18px; font-size: .9rem; font-weight: 500; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    #test-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+    #test-input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 12px; color: var(--text); font-size: .85rem; outline: none; resize: vertical;
+      font-family: monospace; min-height: 90px;
+    }
+    #test-input:focus { border-color: var(--accent); }
+    #test-result {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 14px; font-size: .82rem; min-height: 52px; word-break: break-all;
+    }
+    #test-result.pass { border-color: var(--green); color: var(--green); }
+    #test-result.block { border-color: var(--red); color: var(--red); }
+    #test-result.empty { color: var(--muted); font-style: italic; }
+
+    /* ── Toast ──────────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 18px; font-size: .85rem; color: var(--text);
+      transform: translateY(80px); opacity: 0; transition: all .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.ok  { border-color: var(--green); }
+    #toast.err { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span>Content Filter</span>
+  <div id="rule-count">— rules</div>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input type="password" id="token-input" placeholder="Paste admin token…" />
+    <button onclick="loadRules()">Connect</button>
+  </div>
+
+  <!-- Rules (left col) -->
+  <div id="rules-panel">
+    <div id="rules-header">
+      <h2>Deny rules</h2>
+      <button class="secondary sm" onclick="reloadRules()" title="Reload rules from disk + env">⟳ Reload from disk</button>
+    </div>
+
+    <!-- Add rule form -->
+    <div id="add-form">
+      <div>
+        <label for="add-pattern">Pattern</label>
+        <input type="text" id="add-pattern" placeholder="pattern or regex…" />
+      </div>
+      <div>
+        <label for="add-mode">Mode</label>
+        <select id="add-mode">
+          <option value="literal">literal</option>
+          <option value="regex">regex</option>
+        </select>
+      </div>
+      <div>
+        <label for="add-label">Label (optional)</label>
+        <input type="text" id="add-label" placeholder="human-readable name" />
+      </div>
+      <button onclick="addRule()" style="align-self:end">Add rule</button>
+    </div>
+
+    <!-- Table -->
+    <div id="rules-table-wrap">
+      <table id="rules-table" style="display:none">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Pattern</th>
+            <th>Mode</th>
+            <th>Label</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rules-body"></tbody>
+      </table>
+      <div id="rules-empty" class="empty-state" style="display:none">No deny rules configured.</div>
+      <div id="rules-placeholder" class="empty-state">Connect to load rules.</div>
+    </div>
+  </div>
+
+  <!-- Test panel (right col) -->
+  <div id="test-panel">
+    <h2>Test input</h2>
+    <div id="test-body">
+      <textarea id="test-input" placeholder="Enter text to test against active rules…"></textarea>
+      <button onclick="testInput()">Check</button>
+      <div id="test-result" class="empty">Enter text and click Check.</div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  /* ── State ──────────────────────────────────────────────────────────────── */
+  let _rules = [];      // [{pattern, mode, label}]
+
+  function token() { return document.getElementById('token-input').value.trim(); }
+  function headers(json = false) {
+    const h = {};
+    const t = token();
+    if (t) h['Authorization'] = `Bearer ${t}`;
+    if (json) h['Content-Type'] = 'application/json';
+    return h;
+  }
+
+  /* ── Toast ──────────────────────────────────────────────────────────────── */
+  let _toastTimer = null;
+  function toast(msg, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => { el.className = ''; }, 2800);
+  }
+
+  /* ── Load rules ─────────────────────────────────────────────────────────── */
+  async function loadRules() {
+    try {
+      const r = await fetch('/admin/content-filter/rules', { headers: headers() });
+      if (!r.ok) { toast(`Failed: ${r.status}`, 'err'); return; }
+      const { rules } = await r.json();
+      _rules = rules || [];
+      renderRules();
+      // Auto-rerun test if input is populated
+      if (document.getElementById('test-input').value.trim()) testInput();
+    } catch (e) {
+      toast('Cannot reach gateway', 'err');
+    }
+  }
+
+  function renderRules() {
+    const tbody = document.getElementById('rules-body');
+    tbody.innerHTML = '';
+    document.getElementById('rules-placeholder').style.display = 'none';
+    document.getElementById('rule-count').textContent = `${_rules.length} rule${_rules.length !== 1 ? 's' : ''}`;
+
+    if (!_rules.length) {
+      document.getElementById('rules-table').style.display = 'none';
+      document.getElementById('rules-empty').style.display = '';
+      return;
+    }
+
+    document.getElementById('rules-empty').style.display = 'none';
+    document.getElementById('rules-table').style.display = '';
+
+    _rules.forEach((rule, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="color:var(--muted);font-size:.78rem">${idx}</td>
+        <td class="pattern">${escHtml(rule.pattern)}</td>
+        <td class="mode"><span class="badge ${escHtml(rule.mode)}">${escHtml(rule.mode)}</span></td>
+        <td class="label">${escHtml(rule.label || '—')}</td>
+        <td class="actions">
+          <button class="sm danger" onclick="deleteRule(${idx})">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* ── Add rule ────────────────────────────────────────────────────────────── */
+  async function addRule() {
+    const pattern = document.getElementById('add-pattern').value.trim();
+    const mode    = document.getElementById('add-mode').value;
+    const label   = document.getElementById('add-label').value.trim();
+
+    if (!pattern) { toast('Pattern is required', 'err'); return; }
+
+    try {
+      const r = await fetch('/admin/content-filter/rules', {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({ pattern, mode, label }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        toast(`Error ${r.status}: ${body.detail?.msg || body.detail || 'unknown'}`, 'err');
+        return;
+      }
+      toast(`Rule "${pattern}" added`, 'ok');
+      document.getElementById('add-pattern').value = '';
+      document.getElementById('add-label').value = '';
+      await loadRules();
+    } catch (e) {
+      toast('Request failed', 'err');
+    }
+  }
+
+  /* ── Delete rule ─────────────────────────────────────────────────────────── */
+  async function deleteRule(idx) {
+    if (!confirm(`Delete rule #${idx} (${_rules[idx]?.pattern})?`)) return;
+    try {
+      const r = await fetch(`/admin/content-filter/rules/${idx}`, {
+        method: 'DELETE',
+        headers: headers(),
+      });
+      if (!r.ok) { toast(`Error ${r.status}`, 'err'); return; }
+      toast(`Rule #${idx} deleted`, 'ok');
+      await loadRules();
+    } catch (e) {
+      toast('Request failed', 'err');
+    }
+  }
+
+  /* ── Reload from disk ────────────────────────────────────────────────────── */
+  async function reloadRules() {
+    try {
+      const r = await fetch('/admin/content-filter/reload', {
+        method: 'POST',
+        headers: headers(),
+      });
+      if (!r.ok) { toast(`Error ${r.status}`, 'err'); return; }
+      const { active_patterns } = await r.json();
+      toast(`Reloaded — ${active_patterns} active pattern${active_patterns !== 1 ? 's' : ''}`, 'ok');
+      await loadRules();
+    } catch (e) {
+      toast('Request failed', 'err');
+    }
+  }
+
+  /* ── Test input (client-side match) ─────────────────────────────────────── */
+  function testInput() {
+    const text = document.getElementById('test-input').value;
+    const el   = document.getElementById('test-result');
+
+    if (!text) {
+      el.className = 'empty';
+      el.textContent = 'Enter text and click Check.';
+      return;
+    }
+    if (!_rules.length) {
+      el.className = 'pass';
+      el.textContent = '✓ No rules configured — input would pass.';
+      return;
+    }
+
+    let matched = null;
+    for (let i = 0; i < _rules.length; i++) {
+      const rule = _rules[i];
+      try {
+        const re = rule.mode === 'regex'
+          ? new RegExp(rule.pattern, 'si')
+          : new RegExp(escapeForRegex(rule.pattern), 'si');
+        if (re.test(text)) { matched = { idx: i, rule }; break; }
+      } catch (_) { /* invalid regex — skip */ }
+    }
+
+    if (matched) {
+      el.className = 'block';
+      el.textContent = `✗ BLOCKED — matched rule #${matched.idx}` +
+        ` (${matched.rule.label || matched.rule.pattern})`;
+    } else {
+      el.className = 'pass';
+      el.textContent = `✓ PASS — no rules matched`;
+    }
+  }
+
+  /* ── Utilities ───────────────────────────────────────────────────────────── */
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  function escapeForRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /* ── Startup ─────────────────────────────────────────────────────────────── */
+  window.addEventListener('DOMContentLoaded', () => {
+    const saved = sessionStorage.getItem('cf_token');
+    if (saved) {
+      document.getElementById('token-input').value = saved;
+      loadRules();
+    }
+  });
+
+  document.getElementById('token-input').addEventListener('change', () => {
+    sessionStorage.setItem('cf_token', token());
+  });
+
+  /* Test on Enter in textarea (Shift+Enter for newline) */
+  document.getElementById('test-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); testInput(); }
+  });
+</script>
+</body>
+</html>

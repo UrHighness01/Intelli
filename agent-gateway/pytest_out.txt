@@ -1,0 +1,30 @@
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+................................s....................................... [ 36%]
+........................................................................ [ 48%]
+........................................................................ [ 60%]
+s....................................................................... [ 72%]
+........................................................................ [ 84%]
+........................................................................ [ 96%]
+....................                                                     [100%]
+============================== warnings summary ===============================
+C:\Users\petit\AppData\Local\Programs\Python\Python312\Lib\site-packages\httpx\_client.py:690: 9 warnings
+tests/test_agent_memory.py: 20 warnings
+tests/test_content_filter.py: 10 warnings
+tests/test_e2e.py: 1 warning
+tests/test_gdpr_export.py: 6 warnings
+tests/test_kill_switch.py: 5 warnings
+tests/test_provider_api.py: 19 warnings
+tests/test_provider_health.py: 11 warnings
+tests/test_rate_limit.py: 1 warning
+tests/test_rate_limit_admin.py: 12 warnings
+tests/test_scheduler.py: 32 warnings
+tests/test_user_management.py: 22 warnings
+tests/test_user_permissions.py: 8 warnings
+tests/test_webhooks.py: 22 warnings
+tests/test_worker_health_api.py: 1 warning
+  C:\Users\petit\AppData\Local\Programs\Python\Python312\Lib\site-packages\httpx\_client.py:690: DeprecationWarning: The 'app' shortcut is now deprecated. Use the explicit style 'transport=WSGITransport(app=...)' instead.
+    warnings.warn(message, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+594 passed, 2 skipped, 179 warnings in 40.49s

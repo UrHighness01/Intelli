@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Webhooks</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+
+    main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+
+    /* -- Auth ---------------------------------------------------------------- */
+    #auth-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; white-space: nowrap;
+    }
+    button:hover { opacity: .85; }
+    button.danger   { background: #7f2a2a; color: var(--red); border: 1px solid #7f2a2a; }
+    button.danger:hover { background: #a03535; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm { padding: 4px 10px; font-size: .78rem; }
+
+    /* -- Layout ------------------------------------------------------------- */
+    #workspace {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* -- Left: hook list ---------------------------------------------------- */
+    #hook-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+
+    /* Add form at top */
+    #add-form {
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+      display: grid; gap: 8px;
+    }
+    #add-form h3 { font-size: .85rem; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+    #add-url {
+      width: 100%;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-family: monospace; font-size: .82rem; outline: none;
+    }
+    #add-url:focus { border-color: var(--accent); }
+
+    .events-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    }
+    .events-grid label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: .78rem; color: var(--muted); cursor: pointer;
+      padding: 3px 6px; border-radius: 4px; border: 1px solid transparent;
+      transition: border-color .15s;
+    }
+    .events-grid label:hover { border-color: var(--accent); }
+    .events-grid input[type=checkbox]:checked + span { color: var(--text); }
+
+    /* Hook list items */
+    #hook-list h2 {
+      padding: 10px 16px; font-size: .85rem; font-weight: 500;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+    }
+    .hook-item {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background .1s;
+    }
+    .hook-item:last-child { border: none; }
+    .hook-item:hover { background: rgba(108,99,255,.06); }
+    .hook-item.active { background: rgba(108,99,255,.14); border-left: 3px solid var(--accent); }
+    .hook-url { font-family: monospace; font-size: .8rem; color: var(--text); word-break: break-all; }
+    .hook-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+    .chip {
+      display: inline-block; border-radius: 10px; padding: 1px 7px;
+      font-size: .7rem; font-weight: 600;
+      background: rgba(108,99,255,.18); color: var(--accent);
+    }
+    .hook-ts { font-size: .72rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+    .hook-del { margin-left: auto; flex-shrink: 0; }
+
+    #hook-empty {
+      padding: 32px 16px; text-align: center; color: var(--muted); font-size: .85rem;
+    }
+    #refresh-hooks { width: 100%; border-radius: 0 0 10px 10px; background: var(--surface2); color: var(--muted); border-top: 1px solid var(--border); }
+
+    /* -- Right: delivery log ------------------------------------------------ */
+    #delivery-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    #delivery-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    #delivery-title { font-size: .95rem; font-weight: 600; flex: 1; }
+    #delivery-hook-id { font-family: monospace; color: var(--muted); font-size: .78rem; }
+
+    #delivery-table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    thead th { text-align: left; padding: 9px 16px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border: none; }
+    tbody tr:hover { background: rgba(108,99,255,.04); }
+    td { padding: 9px 16px; vertical-align: top; }
+    td.mono { font-family: monospace; font-size: .78rem; color: var(--accent); }
+    td.err-msg { font-size: .78rem; color: var(--red); font-family: monospace; max-width: 260px; word-break: break-all; }
+    td.ts { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+
+    .badge { display: inline-block; border-radius: 12px; padding: 2px 8px; font-size: .75rem; font-weight: 700; }
+    .badge-ok    { background: rgba(61,220,132,.15); color: var(--green); }
+    .badge-error { background: rgba(255,107,107,.15); color: var(--red); }
+
+    .empty-state { padding: 48px 24px; text-align: center; color: var(--muted); font-size: .88rem; }
+
+    /* -- Toast --------------------------------------------------------------- */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 18px; font-size: .85rem; color: var(--text);
+      transform: translateY(80px); opacity: 0; transition: all .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.ok   { border-color: var(--green); }
+    #toast.err  { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span>Webhooks</span>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input type="password" id="token-input" placeholder="Paste admin token…" />
+    <button onclick="loadHooks()">Connect</button>
+  </div>
+
+  <div id="workspace">
+    <!-- Left: hook list + add form -->
+    <div id="hook-panel">
+      <div id="add-form">
+        <h3>Register webhook</h3>
+        <input type="url" id="add-url" placeholder="https://hooks.example.com/endpoint" />
+        <div class="events-grid">
+          <label><input type="checkbox" value="approval.created"  checked /><span>approval.created</span></label>
+          <label><input type="checkbox" value="approval.approved" checked /><span>approval.approved</span></label>
+          <label><input type="checkbox" value="approval.rejected" checked /><span>approval.rejected</span></label>
+        </div>
+        <button onclick="addHook()">+ Register</button>
+      </div>
+
+      <div id="hook-list">
+        <h2>Registered hooks</h2>
+        <div id="hook-items">
+          <div id="hook-empty">No webhooks registered.</div>
+        </div>
+      </div>
+      <button id="refresh-hooks" onclick="loadHooks()">⟳ Refresh</button>
+    </div>
+
+    <!-- Right: delivery log -->
+    <div id="delivery-panel">
+      <div id="delivery-header">
+        <span id="delivery-title">Select a webhook →</span>
+        <span id="delivery-hook-id"></span>
+        <button class="secondary sm" id="btn-refresh-del" onclick="loadDeliveries()" style="display:none">⟳ Refresh</button>
+      </div>
+      <div id="delivery-table-wrap">
+        <div class="empty-state" id="delivery-placeholder">Select a hook from the left panel.</div>
+        <table id="delivery-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Event</th>
+              <th>Status</th>
+              <th>HTTP</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="delivery-body"></tbody>
+        </table>
+        <div class="empty-state" id="delivery-empty" style="display:none">No deliveries recorded for this hook yet.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _token = '';
+let _hooks  = [];     // array of hook objects
+let _selId  = null;   // selected hook id
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function tok() {
+  if (!_token) _token = sessionStorage.getItem('ag_token') || '';
+  return _token;
+}
+
+function getToken() {
+  const t = document.getElementById('token-input').value.trim();
+  if (t) { _token = t; sessionStorage.setItem('ag_token', t); }
+  return _token || tok();
+}
+
+function authHeaders() { return { Authorization: 'Bearer ' + tok(), 'Content-Type': 'application/json' }; }
+
+function toast(msg, kind = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.className = '', 2600);
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString(); } catch { return ts; }
+}
+
+// ── Load hooks ────────────────────────────────────────────────────────────────
+async function loadHooks() {
+  getToken();
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  try {
+    const r = await fetch('/admin/webhooks', { headers: authHeaders() });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    _hooks = data.webhooks || [];
+    renderHooks();
+    // refresh delivery panel if a hook is still selected
+    if (_selId && _hooks.find(h => h.id === _selId)) {
+      loadDeliveries();
+    } else if (_selId && !_hooks.find(h => h.id === _selId)) {
+      clearDeliveryPanel();
+    }
+  } catch (e) { toast('Error: ' + e.message, 'err'); }
+}
+
+function renderHooks() {
+  const container = document.getElementById('hook-items');
+  const empty     = document.getElementById('hook-empty');
+  if (_hooks.length === 0) {
+    container.innerHTML = '';
+    container.appendChild(empty);
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  container.innerHTML = _hooks.map(h => `
+    <div class="hook-item${h.id === _selId ? ' active' : ''}" onclick="selectHook('${escHtml(h.id)}')" data-id="${escHtml(h.id)}">
+      <div class="hook-url">${escHtml(h.url)}</div>
+      <div class="hook-meta">
+        ${(h.events || []).map(e => `<span class="chip">${escHtml(e)}</span>`).join('')}
+        <span class="hook-ts">${fmtTs(h.created_at)}</span>
+        <button class="danger sm hook-del" onclick="event.stopPropagation();deleteHook('${escHtml(h.id)}')">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Add hook ─────────────────────────────────────────────────────────────────
+async function addHook() {
+  const t   = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  const url = document.getElementById('add-url').value.trim();
+  if (!url) { toast('Enter a URL', 'err'); return; }
+  const checked = [...document.querySelectorAll('.events-grid input[type=checkbox]:checked')];
+  const events  = checked.length ? checked.map(c => c.value) : null;
+  try {
+    const r = await fetch('/admin/webhooks', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ url, events })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const hook = await r.json();
+    toast('Webhook registered ✓');
+    document.getElementById('add-url').value = '';
+    await loadHooks();
+    selectHook(hook.id);
+  } catch (e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Delete hook ───────────────────────────────────────────────────────────────
+async function deleteHook(id) {
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  if (!confirm('Delete this webhook?')) return;
+  try {
+    const r = await fetch('/admin/webhooks/' + encodeURIComponent(id), {
+      method: 'DELETE', headers: authHeaders()
+    });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Deleted');
+    if (_selId === id) clearDeliveryPanel();
+    await loadHooks();
+  } catch (e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Select hook → load deliveries ────────────────────────────────────────────
+function selectHook(id) {
+  _selId = id;
+  renderHooks();
+  loadDeliveries();
+}
+
+function clearDeliveryPanel() {
+  _selId = null;
+  document.getElementById('delivery-title').textContent = 'Select a webhook →';
+  document.getElementById('delivery-hook-id').textContent = '';
+  document.getElementById('delivery-table').style.display = 'none';
+  document.getElementById('delivery-empty').style.display = 'none';
+  document.getElementById('delivery-placeholder').style.display = 'block';
+  document.getElementById('btn-refresh-del').style.display = 'none';
+}
+
+async function loadDeliveries() {
+  const t = tok(); if (!t || !_selId) return;
+  try {
+    const r = await fetch(`/admin/webhooks/${encodeURIComponent(_selId)}/deliveries?limit=50`, {
+      headers: authHeaders()
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderDeliveries(data.deliveries || []);
+    // Update title with hook URL
+    const hook = _hooks.find(h => h.id === _selId);
+    document.getElementById('delivery-title').textContent = hook ? truncate(hook.url, 40) : 'Deliveries';
+    document.getElementById('delivery-hook-id').textContent = _selId;
+    document.getElementById('btn-refresh-del').style.display = '';
+  } catch (e) { toast('Delivery load error: ' + e.message, 'err'); }
+}
+
+function renderDeliveries(deliveries) {
+  const placeholder = document.getElementById('delivery-placeholder');
+  const table       = document.getElementById('delivery-table');
+  const empty       = document.getElementById('delivery-empty');
+  const body        = document.getElementById('delivery-body');
+
+  placeholder.style.display = 'none';
+
+  if (deliveries.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+  table.style.display = 'table';
+  body.innerHTML = deliveries.map(d => `
+    <tr>
+      <td class="ts">${fmtTs(d.ts || d.timestamp)}</td>
+      <td class="mono">${escHtml(d.event || '—')}</td>
+      <td><span class="badge badge-${d.status === 'ok' ? 'ok' : 'error'}">${escHtml(d.status || '—')}</span></td>
+      <td style="color:var(--muted);font-size:.78rem">${d.status_code ?? '—'}</td>
+      <td class="err-msg">${d.error ? escHtml(String(d.error).slice(0, 120)) : ''}</td>
+    </tr>
+  `).join('');
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('ag_token');
+  if (saved) {
+    document.getElementById('token-input').value = saved;
+    _token = saved;
+    loadHooks();
+  }
+});
+</script>
+</body>
+</html>

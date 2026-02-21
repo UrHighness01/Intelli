@@ -2,7 +2,90 @@ import json
 import re
 from jsonschema import validate, ValidationError
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Literal
+
+try:
+    from tools.capability import CapabilityVerifier
+    _has_cap = True
+except Exception:
+    CapabilityVerifier = None  # type: ignore
+    _has_cap = False
+
+
+# ---------------------------------------------------------------------------
+# Risk scoring
+# ---------------------------------------------------------------------------
+
+RiskLevel = Literal['low', 'medium', 'high']
+
+# Tools that always require human approval regardless of args
+_HIGH_RISK_TOOLS = {
+    'system.exec', 'system.update', 'system.kill',
+    'file.write', 'file.delete', 'file.chmod',
+    'network.request', 'network.proxy',
+}
+# Tools considered medium-risk by default (read-only but potentially sensitive)
+_MEDIUM_RISK_TOOLS = {
+    'file.read', 'file.list', 'system.env',
+    'clipboard.read', 'browser.cookies',
+}
+
+# Patterns in arg *values* that raise risk
+_SENSITIVE_ARG_PATTERNS = re.compile(
+    r'\.\.[\\/]|/etc/|/proc/|/sys/|cmd\.exe|powershell|eval\(|exec\(|'
+    r'drop\s+table|delete\s+from|format\s+c|rm\s+-rf',
+    re.I,
+)
+
+# Suspicious arg key names (beyond SENSITIVE_KEYS)
+_RISKY_ARG_KEYS = re.compile(r'command|cmd|exec|shell|script|query|sql|path|file|url', re.I)
+
+
+def _score_args(args: Dict[str, Any]) -> int:
+    """Return an integer risk contribution from the call's arguments (0–3)."""
+    score = 0
+    for key, val in args.items():
+        val_str = str(val)
+        if _SENSITIVE_ARG_PATTERNS.search(val_str):
+            score += 2  # traversal / injection patterns
+        if _RISKY_ARG_KEYS.search(key):
+            score += 1  # suspicious parameter names
+        if isinstance(val, str) and len(val) > 512:
+            score += 1  # unusually large string payloads
+    return score
+
+
+def compute_risk(payload: Dict[str, Any]) -> RiskLevel:
+    """Compute a risk level for a tool-call payload.
+
+    Returns 'high', 'medium', or 'low' based on:
+      - the tool name (high/medium risk lists),
+      - suspicious arg keys and values (path traversal, injection patterns),
+      - overall arg size.
+
+    Decision table
+    --------------
+      tool in HIGH_RISK_TOOLS   → high (regardless of args)
+      arg_score >= 2            → high
+      tool in MEDIUM_RISK_TOOLS → medium
+      arg_score >= 1            → medium
+      otherwise                 → low
+    """
+    tool = payload.get('tool', '')
+    args = payload.get('args', {})
+    if not isinstance(args, dict):
+        args = {}
+
+    if tool in _HIGH_RISK_TOOLS:
+        return 'high'
+
+    arg_score = _score_args(args)
+
+    if arg_score >= 2:
+        return 'high'
+    if tool in _MEDIUM_RISK_TOOLS or arg_score >= 1:
+        return 'medium'
+    return 'low'
 
 
 class ApprovalQueue:
@@ -10,9 +93,9 @@ class ApprovalQueue:
         self._store = {}
         self._next = 1
 
-    def submit(self, payload: Dict[str, Any]) -> int:
+    def submit(self, payload: Dict[str, Any], risk: RiskLevel = 'high') -> int:
         id_ = self._next
-        self._store[id_] = {"payload": payload, "status": "pending"}
+        self._store[id_] = {"payload": payload, "status": "pending", "risk": risk}
         self._next += 1
         return id_
 
@@ -41,10 +124,12 @@ class Supervisor:
     def __init__(self, schema: Dict[str, Any]):
         self.schema = schema
         self.queue = ApprovalQueue()
-        # Define simple high-risk tool ids
-        self.high_risk_tools = {"system.exec", "file.write", "system.update"}
+        # Kept for backward-compat; actual risk logic lives in compute_risk()
+        self.high_risk_tools = _HIGH_RISK_TOOLS
         # tool schema registry path
         self.schema_dir = Path(__file__).with_name("schemas")
+        # capability verifier — checks declared tool caps against allow-list
+        self._cap_verifier = CapabilityVerifier() if _has_cap else None
 
     def _validate_schema(self, payload: Dict[str, Any]):
         try:
@@ -99,8 +184,8 @@ class Supervisor:
         return None
 
     def approval_required(self, payload: Dict[str, Any]) -> bool:
-        tool = payload.get("tool", "")
-        return tool in self.high_risk_tools
+        """Return True when the tool call must be held for human approval."""
+        return compute_risk(payload) == 'high'
 
     def process_call(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Validate schema
@@ -119,16 +204,38 @@ class Supervisor:
                 except ValidationError as e:
                     return self._make_validation_error(e, payload.get('args', {}), phase="tool_args")
 
-        # Sanitize
+        # Capability check — reject if tool requires capabilities not in allow-list
+        if self._cap_verifier and tool:
+            allowed, denied = self._cap_verifier.check(tool, payload.get('args', {}))
+            if not allowed:
+                return {
+                    'status': 'capability_denied',
+                    'tool': tool,
+                    'denied_capabilities': denied,
+                    'message': (
+                        'This tool requires capabilities that are not permitted in '
+                        'this deployment. Set AGENT_GATEWAY_ALLOWED_CAPS to grant access.'
+                    ),
+                }
+
+        # Sanitize sensitive values
         sanitized = {"tool": payload.get("tool"), "args": self._sanitize(payload.get("args", {}))}
 
-        # If approval required, enqueue and return pending status
-        if self.approval_required(payload):
-            req_id = self.queue.submit(sanitized)
-            return {"status": "pending_approval", "id": req_id}
+        # Risk assessment
+        risk: RiskLevel = compute_risk(payload)
 
-        # Otherwise accept and return sanitized stubbed result
-        return {"tool": sanitized["tool"], "args": sanitized["args"], "status": "accepted", "message": "validated and sanitized (supervisor)"}
+        if risk == 'high':
+            req_id = self.queue.submit(sanitized, risk=risk)
+            return {"status": "pending_approval", "id": req_id, "risk": risk}
+
+        # medium or low — accept immediately, include risk level in response
+        return {
+            "tool": sanitized["tool"],
+            "args": sanitized["args"],
+            "status": "accepted",
+            "risk": risk,
+            "message": "validated and sanitized (supervisor)",
+        }
 
 
 def load_schema_from_file(path: Path):

@@ -1,0 +1,20 @@
+{
+  "openai": {
+    "provider": "openai",
+    "set_at": 1771694498.4022958,
+    "expires_at": 1779470498.4022958,
+    "last_rotated": null
+  },
+  "anthropic": {
+    "provider": "anthropic",
+    "set_at": 1771694497.7295222,
+    "expires_at": 1776878497.7295222,
+    "last_rotated": 1771694497.7295222
+  },
+  "openrouter": {
+    "provider": "openrouter",
+    "set_at": 1771694497.8900936,
+    "expires_at": 1772558497.8900936,
+    "last_rotated": null
+  }
+}

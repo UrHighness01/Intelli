@@ -1,0 +1,10 @@
+{
+  "tool": "network.request",
+  "display_name": "HTTP Request",
+  "description": "Makes an outbound HTTP or HTTPS request to a remote URL.",
+  "required_capabilities": ["net.http"],
+  "optional_capabilities": [],
+  "risk_level": "high",
+  "requires_approval": true,
+  "allowed_arg_keys": ["url", "method", "headers", "body", "timeout"]
+}

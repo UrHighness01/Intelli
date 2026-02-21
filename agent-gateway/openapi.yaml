@@ -1,23 +1,56 @@
 openapi: 3.0.3
 info:
-  title: Intelli Agent Gateway (prototype)
-  version: 0.1.0
+  title: Intelli Agent Gateway
+  version: 0.5.0
   description: |
-    Local agent gateway for validating and proxying agent tool calls. This service is intended to run on localhost and
-    act as a guarded bridge between agents and browser-controlled tools. Do NOT expose to the network without
-    enterprise-level authentication, mTLS, and policy controls.
+    Local agent gateway that validates, authorises, and proxies agent tool calls.
+    Run on localhost only — do NOT expose to the network without enterprise-grade
+    authentication, mTLS, and policy enforcement.
 
 servers:
   - url: http://127.0.0.1:8080
     description: Local-only default
 
+tags:
+  - name: health
+    description: Liveness and readiness probes
+  - name: tools
+    description: Tool invocation and capability discovery
+  - name: approvals
+    description: Human-in-the-loop approval queue
+  - name: consent
+    description: Context-sharing consent timeline
+  - name: auth
+    description: Authentication and token management
+  - name: admin
+    description: Administrative operations (require admin Bearer token)
+  - name: providers
+    description: LLM provider key management and chat proxy
+  - name: tab
+    description: Browser tab context and redaction rules
+  - name: metrics
+    description: Observability endpoints
+  - name: memory
+    description: Per-agent persistent key-value memory store
+  - name: content-filter
+    description: Runtime content moderation / policy deny-list
+  - name: webhooks
+    description: Approval event webhook subscriptions
+  - name: rate-limits
+    description: Runtime rate-limit configuration and usage
+
 paths:
+  # ---------------------------------------------------------------------------
+  # Health
+  # ---------------------------------------------------------------------------
   /health:
     get:
-      summary: Health check
+      summary: Gateway liveness check
+      tags: [health]
+      security: []
       responses:
         '200':
-          description: OK
+          description: Gateway is running
           content:
             application/json:
               schema:
@@ -27,11 +60,46 @@ paths:
                     type: string
                     example: ok
 
+  /health/worker:
+    get:
+      summary: Sandbox worker health check
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Worker health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worker_healthy:
+                    type: boolean
+
+  # ---------------------------------------------------------------------------
+  # Metrics
+  # ---------------------------------------------------------------------------
+  /metrics:
+    get:
+      summary: Prometheus-format metrics
+      tags: [metrics]
+      security: []
+      responses:
+        '200':
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ---------------------------------------------------------------------------
+  # Tool invocation
+  # ---------------------------------------------------------------------------
   /validate:
     post:
       summary: Validate a tool-call payload against the canonical schema
-      description: Validate an incoming agent tool-call payload. This endpoint returns 200 if payload conforms to the
-        `ToolCall` schema, or 400 with a descriptive error when validation fails.
+      tags: [tools]
+      security: []
       requestBody:
         required: true
         content:
@@ -40,7 +108,7 @@ paths:
               $ref: '#/components/schemas/ToolCall'
       responses:
         '200':
-          description: Payload valid
+          description: Payload is valid
           content:
             application/json:
               schema:
@@ -54,11 +122,16 @@ paths:
 
   /tools/call:
     post:
-      summary: Submit a validated tool call for proxying
+      summary: Submit a tool call for validation and proxying
+      tags: [tools]
       description: |
-        Accepts a `ToolCall` payload and returns a `ToolResult`. In the prototype the call is stubbed and not executed.
-        Production implementations MUST include authentication, granular authorization policies, rate limits and an
-        execution approval workflow before any privileged action is executed.
+        Accepts a `ToolCall` payload, runs capability and schema checks, then
+        returns a `ToolResult`.  When the kill-switch is active all calls are
+        rejected with **503**.  If the calling user has an `allowed_tools`
+        restriction, calls to tools outside that list are rejected with **403**.
+      security:
+        - BearerToken: []
+        - {}
       requestBody:
         required: true
         content:
@@ -67,40 +140,88 @@ paths:
               $ref: '#/components/schemas/ToolCall'
       responses:
         '200':
-          description: Tool accepted (stubbed result)
+          description: Tool accepted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResult'
+        '202':
+          description: Pending human approval
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: pending_approval
+                  id:
+                    type: integer
         '400':
           $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
+  /tools/capabilities:
+    get:
+      summary: List all tools with their declared capability manifests
+      tags: [tools]
+      security: []
+      responses:
+        '200':
+          description: Tool capability list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ToolCapabilityEntry'
+
+  # ---------------------------------------------------------------------------
+  # Approval queue
+  # ---------------------------------------------------------------------------
   /approvals:
     get:
       summary: List pending approval requests
-      tags:
-        - gateway
+      tags: [approvals]
+      security: []
       responses:
         '200':
           description: Pending approvals map
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApprovalList'
+                type: object
+                properties:
+                  pending:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/ApprovalRequest'
+
+  /approvals/stream:
+    get:
+      summary: SSE stream of approval queue changes
+      tags: [approvals]
+      security: []
+      responses:
+        '200':
+          description: Server-Sent Events stream (event:approval_update)
+          content:
+            text/event-stream:
+              schema:
+                type: string
 
   /approvals/{id}:
     get:
       summary: Get approval request status
-      tags:
-        - gateway
+      tags: [approvals]
       parameters:
-        - in: path
-          name: id
-          schema:
-            type: integer
-          required: true
+        - $ref: '#/components/parameters/ApprovalId'
       responses:
         '200':
           description: Approval status
@@ -113,15 +234,12 @@ paths:
 
   /approvals/{id}/approve:
     post:
-      summary: Approve a pending request
-      tags:
-        - gateway
+      summary: Approve a pending request (admin)
+      tags: [approvals]
+      security:
+        - BearerToken: []
       parameters:
-        - in: path
-          name: id
-          schema:
-            type: integer
-          required: true
+        - $ref: '#/components/parameters/ApprovalId'
       responses:
         '200':
           description: Approved
@@ -135,20 +253,21 @@ paths:
                     example: approved
                   id:
                     type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
   /approvals/{id}/reject:
     post:
-      summary: Reject a pending request
-      tags:
-        - gateway
+      summary: Reject a pending request (admin)
+      tags: [approvals]
+      security:
+        - BearerToken: []
       parameters:
-        - in: path
-          name: id
-          schema:
-            type: integer
-          required: true
+        - $ref: '#/components/parameters/ApprovalId'
       responses:
         '200':
           description: Rejected
@@ -162,36 +281,2060 @@ paths:
                     example: rejected
                   id:
                     type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ---------------------------------------------------------------------------
+  # Authentication
+  # ---------------------------------------------------------------------------
+  /admin/login:
+    post:
+      summary: Login and obtain tokens
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /admin/refresh:
+    post:
+      summary: Refresh an access token using a refresh token
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /admin/revoke:
+    post:
+      summary: Revoke a token (access or refresh)
+      tags: [auth]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Kill-switch
+  # ---------------------------------------------------------------------------
+  /admin/kill-switch:
+    get:
+      summary: Get kill-switch state
+      tags: [admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Kill-switch state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KillSwitchStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      summary: Activate the kill-switch (blocks all tool calls)
+      tags: [admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: incident CVE-2025-XXXX
+      responses:
+        '200':
+          description: Kill-switch activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KillSwitchStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    delete:
+      summary: Deactivate the kill-switch and resume normal processing
+      tags: [admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Kill-switch cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KillSwitchStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Gateway operational status
+  # ---------------------------------------------------------------------------
+  /admin/status:
+    get:
+      summary: Gateway operational status summary
+      description: |
+        Returns a high-level snapshot of gateway health: version, uptime,
+        kill-switch state, cumulative tool-call count, pending approvals,
+        scheduler task count, and number of agent memory namespaces.
+      tags: [admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Status summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: '0.1.0'
+                  uptime_seconds:
+                    type: number
+                    format: float
+                  kill_switch_active:
+                    type: boolean
+                  kill_switch_reason:
+                    type: string
+                    nullable: true
+                  tool_calls_total:
+                    type: integer
+                  pending_approvals:
+                    type: integer
+                  scheduler_tasks:
+                    type: integer
+                  memory_agents:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Audit log
+  # ---------------------------------------------------------------------------
+  /admin/audit:
+    get:
+      summary: Export audit log entries with optional server-side filtering
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: query
+          name: tail
+          schema:
+            type: integer
+            default: 200
+            maximum: 1000
+          description: Maximum number of lines to read from the end of the log file.
+        - in: query
+          name: actor
+          schema:
+            type: string
+          description: Case-insensitive substring match on the `actor` field.
+        - in: query
+          name: action
+          schema:
+            type: string
+          description: Case-insensitive substring match on the `event` field.
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 datetime lower bound (inclusive). Entries before this timestamp are excluded.
+        - in: query
+          name: until
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 datetime upper bound (inclusive). Entries after this timestamp are excluded.
+      responses:
+        '200':
+          description: Filtered audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+        '400':
+          description: Invalid `since` or `until` datetime value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/audit/export.csv:
+    get:
+      summary: Download audit log as CSV
+      description: |
+        Returns the filtered audit log as a downloadable CSV file (columns: ts, event, actor, details).
+        Accepts the same filter parameters as `GET /admin/audit`.
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: query
+          name: tail
+          schema:
+            type: integer
+            default: 1000
+            maximum: 10000
+          description: Maximum number of lines to read from the end of the log file.
+        - in: query
+          name: actor
+          schema:
+            type: string
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: until
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: CSV file containing audit entries
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: 'attachment; filename="audit.csv"'
+        '400':
+          description: Invalid `since` or `until` datetime value
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # User management CRUD
+  # ---------------------------------------------------------------------------
+  /admin/users:
+    get:
+      summary: List all users
+      description: Returns all registered users (no passwords). Admin Bearer required.
+      tags: [admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      summary: Create a new user
+      tags: [admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: alice
+                password:
+                  type: string
+                  example: s3cr3t
+                roles:
+                  type: array
+                  items:
+                    type: string
+                  default: [user]
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Username already exists
+
+  /admin/users/{username}:
+    delete:
+      summary: Delete a user
+      description: |
+        Permanently removes the user. Returns 403 when attempting to delete the
+        built-in **admin** account. Returns 404 when the user is not found.
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/users/{username}/password:
+    post:
+      summary: Change password for a user
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  example: n3wS3cr3t
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username:
+                    type: string
+                  password_changed:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Per-user tool permissions
+  # ---------------------------------------------------------------------------
+  /admin/users/{username}/permissions:
+    get:
+      summary: Get tool allow-list for a user
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: User tool permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPermissions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    put:
+      summary: Set (or clear) the tool allow-list for a user
+      tags: [admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allowed_tools:
+                  type: array
+                  nullable: true
+                  items:
+                    type: string
+                  description: |
+                    Explicit list of permitted tool identifiers.
+                    Set to `null` or omit to remove all restrictions.
+                  example: ["file.read", "noop"]
+      responses:
+        '200':
+          description: Permissions updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPermissions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------------------
+  # Provider key management
+  # ---------------------------------------------------------------------------
+  /providers:
+    get:
+      summary: List all known providers and their configuration status
+      tags: [providers]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        configured:
+                          type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/providers/{provider}/key:
+    post:
+      summary: Store an API key for a provider
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                ttl_days:
+                  type: integer
+                  nullable: true
+                  default: 90
+      responses:
+        '200':
+          description: Key stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    delete:
+      summary: Remove a provider's stored API key
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      responses:
+        '200':
+          description: Key deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/providers/{provider}/key/rotate:
+    post:
+      summary: Rotate the active API key for a provider
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                ttl_days:
+                  type: integer
+                  nullable: true
+                  default: 90
+      responses:
+        '200':
+          description: Key rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyRotateResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/providers/{provider}/key/status:
+    get:
+      summary: Check whether a provider key exists and its expiry status
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      responses:
+        '200':
+          description: Key status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/providers/{provider}/key/expiry:
+    get:
+      summary: Full TTL metadata for a provider key
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+      responses:
+        '200':
+          description: TTL metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyExpiry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/providers/expiring:
+    get:
+      summary: List provider keys expiring within a given number of days
+      tags: [providers]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: query
+          name: within_days
+          schema:
+            type: number
+            default: 7.0
+      responses:
+        '200':
+          description: Expiring keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expiring:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProviderKeyExpiry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # LLM chat proxy
+  # ---------------------------------------------------------------------------
+  /chat/complete:
+    post:
+      summary: Proxy a chat-completion request to an LLM provider
+      tags: [providers]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Provider response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          description: Provider error
+        '503':
+          description: Provider not configured or unreachable
+
+  # ---------------------------------------------------------------------------
+  # Consent / context-sharing timeline
+  # ---------------------------------------------------------------------------
+  /consent/timeline:
+    get:
+      summary: Return the context-sharing consent timeline
+      tags: [consent]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: query
+          name: origin
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+        - in: query
+          name: actor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Consent timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConsentEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    delete:
+      summary: Clear consent timeline entries
+      tags: [consent]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: query
+          name: origin
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entries removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Tab context and redaction rules
+  # ---------------------------------------------------------------------------
+  /tab/preview:
+    post:
+      summary: Submit a browser tab snapshot for sanitisation and consent logging
+      tags: [tab]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [html, url]
+              properties:
+                html:
+                  type: string
+                url:
+                  type: string
+                  format: uri
+                selected_text:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Sanitised tab snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TabSnapshot'
+
+  /tab/redaction-rules:
+    get:
+      summary: Get redaction rules for an origin
+      tags: [tab]
+      security: []
+      parameters:
+        - in: query
+          name: origin
+          required: true
+          schema:
+            type: string
+            format: uri
+      responses:
+        '200':
+          description: Redaction rules for the origin
+
+    post:
+      summary: Set redaction rules for an origin (admin)
+      tags: [tab]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [origin]
+              properties:
+                origin:
+                  type: string
+                  format: uri
+                fields:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Rules saved
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Agent memory
+  # ---------------------------------------------------------------------------
+  /agents:
+    get:
+      summary: List all agent IDs that have stored memory
+      tags: [memory]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: List of agent IDs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /agents/{agent_id}/memory:
+    get:
+      summary: List all key-value pairs for an agent
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,128}$'
+      responses:
+        '200':
+          description: Agent memory object
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  memory:
+                    type: object
+                    additionalProperties: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    post:
+      summary: Upsert a key-value pair in an agent's memory
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,128}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                value:
+                  description: Any JSON-compatible value
+                ttl_seconds:
+                  type: number
+                  nullable: true
+                  description: If set, key expires after this many seconds
+      responses:
+        '200':
+          description: Key stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  key:
+                    type: string
+                  stored:
+                    type: boolean
+                  ttl_seconds:
+                    type: number
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      summary: Clear ALL memory for an agent
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,128}$'
+      responses:
+        '200':
+          description: All keys cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  cleared:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /agents/{agent_id}/memory/{key}:
+    get:
+      summary: Retrieve a single memory key (with expiry metadata)
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key value and expiry
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  key:
+                    type: string
+                  value: {}
+                  expires_at:
+                    type: number
+                    nullable: true
+                    description: Unix timestamp when the key expires, or null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      summary: Delete a single memory key for an agent
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  key:
+                    type: string
+                  deleted:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /agents/{agent_id}/memory/prune:
+    post:
+      summary: Remove all expired (TTL-elapsed) keys for an agent
+      tags: [memory]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Expired keys pruned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  pruned:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # ---------------------------------------------------------------------------
+  # Memory backup / restore
+  # ---------------------------------------------------------------------------
+  /admin/memory/export:
+    get:
+      summary: Export a full snapshot of all agents' live memory
+      description: >
+        Returns all non-expired memory keys for every agent.
+        Suitable for piping straight back into `POST /admin/memory/import` as a backup/restore workflow.
+      tags: [memory, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Memory snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      description: key→value dict for one agent
+                  agent_count:
+                    type: integer
+                  key_count:
+                    type: integer
+                  exported_at:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/memory/import:
+    post:
+      summary: Restore agent memories from a backup snapshot
+      description: >
+        Imports agent memories from a dict of `{agent_id: {key: value}}`.
+        When `merge` is `true` (default), keys are merged into existing memory;
+        when `false`, each imported agent's memory is fully replaced.
+      tags: [memory, admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agents]
+              properties:
+                agents:
+                  type: object
+                  additionalProperties:
+                    type: object
+                merge:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported_agents:
+                    type: integer
+                  imported_keys:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # ---------------------------------------------------------------------------
+  # Content filter admin
+  # ---------------------------------------------------------------------------
+  /admin/content-filter/rules:
+    get:
+      summary: List all active content-filter rules
+      tags: [content-filter, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: List of rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContentFilterRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: Add a new content-filter deny rule
+      tags: [content-filter, admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContentFilterRule'
+      responses:
+        '200':
+          description: Rule added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: boolean
+                  pattern:
+                    type: string
+                  mode:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/content-filter/rules/{index}:
+    delete:
+      summary: Remove a content-filter rule by index
+      tags: [content-filter, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Rule deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                  index:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/content-filter/reload:
+    post:
+      summary: Reload content-filter rules from disk and env vars
+      tags: [content-filter, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Rules reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reloaded:
+                    type: boolean
+                  active_rules:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Provider health check
+  # ---------------------------------------------------------------------------
+  /admin/providers/{provider}/health:
+    get:
+      summary: Check whether a provider key is configured and the adapter is available
+      tags: [providers, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+            enum: [openai, anthropic, openrouter, ollama]
+      responses:
+        '200':
+          description: Provider health result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  status:
+                    type: string
+                    enum: [ok, no_key, unavailable]
+                  configured:
+                    type: boolean
+                  available:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Rate-limit admin API
+  # ---------------------------------------------------------------------------
+  /admin/rate-limits:
+    get:
+      summary: Return current rate-limit configuration and live usage snapshot
+      tags: [rate-limits, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Config and per-client usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config:
+                    $ref: '#/components/schemas/RateLimitConfig'
+                  usage:
+                    type: object
+                    properties:
+                      clients:
+                        type: array
+                        items:
+                          type: object
+                      total_tracked:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: Update rate-limit settings at runtime (no restart required)
+      tags: [rate-limits, admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RateLimitConfig'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: boolean
+                  config:
+                    $ref: '#/components/schemas/RateLimitConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/rate-limits/clients/{client_key}:
+    delete:
+      summary: Reset the sliding-window state for a specific client IP
+      tags: [rate-limits, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: client_key
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client state reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reset:
+                    type: boolean
+                  client:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/rate-limits/users/{username}:
+    delete:
+      summary: Reset the per-user sliding-window state for a specific user
+      tags: [rate-limits, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User state reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reset:
+                    type: boolean
+                  user:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------------------
+  # Approval webhooks
+  # ---------------------------------------------------------------------------
+  /admin/webhooks:
+    post:
+      summary: Register a webhook URL to receive approval events
+      tags: [webhooks, admin]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+                    enum: [approval.created, approval.approved, approval.rejected]
+                  description: Defaults to all three events if omitted
+                secret:
+                  type: string
+                  description: >
+                    Optional HMAC-SHA256 signing secret. When non-empty, each delivery
+                    includes an `X-Intelli-Signature-256: sha256=<hex>` header so receivers
+                    can verify authenticity.
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    get:
+      summary: List all registered webhooks
+      tags: [webhooks, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: List of webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/webhooks/{hook_id}:
+    get:
+      summary: Retrieve a single registered webhook
+      tags: [webhooks, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: hook_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Webhook details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a registered webhook
+      tags: [webhooks, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: hook_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Webhook deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks/{hook_id}/deliveries:
+    get:
+      summary: Return recent delivery records for a webhook
+      description: >
+        Lists the most recent outbound HTTP delivery attempts for the given
+        webhook, newest-first.  Each record includes timestamp, event name,
+        status (`ok` or `error`), HTTP status code (if a response was received),
+        and error message (if delivery failed).  In-memory only; resets on restart.
+      tags: [webhooks, admin]
+      security:
+        - BearerToken: []
+      parameters:
+        - in: path
+          name: hook_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Delivery records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hook_id:
+                    type: string
+                  count:
+                    type: integer
+                  deliveries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        event:
+                          type: string
+                        status:
+                          type: string
+                          enum: [ok, error]
+                        status_code:
+                          type: integer
+                          nullable: true
+                        error:
+                          type: string
+                          nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Scheduler ─────────────────────────────────────────────────────────────
+  /admin/schedule:
+    get:
+      summary: List scheduled tasks
+      description: Return all recurring tool-call tasks.  Admin Bearer required.
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScheduledTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: Create a scheduled task
+      description: Register a new recurring tool-call task.  Admin Bearer required.
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, tool, interval_seconds]
+              properties:
+                name:
+                  type: string
+                  description: Human-readable label for the task.
+                tool:
+                  type: string
+                  description: Tool name to invoke.
+                args:
+                  type: object
+                  description: Arguments passed to the tool call.
+                  default: {}
+                interval_seconds:
+                  type: integer
+                  minimum: 1
+                  description: How often to run the task (seconds).
+                enabled:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Validation error (empty name/tool, interval < 1)
+
+  /admin/schedule/{task_id}:
+    parameters:
+      - in: path
+        name: task_id
+        required: true
+        schema:
+          type: string
+        description: Hex task identifier returned by POST /admin/schedule.
+    get:
+      summary: Get a scheduled task
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Task detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update a scheduled task (partial)
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                args:
+                  type: object
+                interval_seconds:
+                  type: integer
+                  minimum: 1
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledTask'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Validation error
+    delete:
+      summary: Delete a scheduled task
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Task deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: string
+                    description: ID of the deleted task.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/schedule/{task_id}/trigger:
+    parameters:
+      - in: path
+        name: task_id
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Trigger a scheduled task immediately
+      description: |
+        Sets the task's `next_run_at` to the past so the background scheduler
+        picks it up on its next tick (≤ 1 s).  Admin Bearer required.
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: Task accepted for immediate execution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggered:
+                    type: string
+                    description: ID of the triggered task.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/schedule/{task_id}/history:
+    parameters:
+      - in: path
+        name: task_id
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get run history for a scheduled task
+      description: |
+        Returns the most-recent execution records for a task (newest first,
+        maximum 50 entries).  History is held in memory and is cleared when
+        the task is deleted.  Admin Bearer required.
+      tags: [Admin – Scheduler]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Run history for the task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                  count:
+                    type: integer
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        run:
+                          type: integer
+                          description: Monotonic run counter for this task.
+                        timestamp:
+                          type: string
+                          format: date-time
+                        duration_seconds:
+                          type: number
+                          format: float
+                        ok:
+                          type: boolean
+                        result:
+                          description: Return value from the executor (if successful).
+                        error:
+                          type: string
+                          nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
 components:
+  parameters:
+    ApprovalId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+
+    Provider:
+      in: path
+      name: provider
+      required: true
+      schema:
+        type: string
+        enum: [openai, anthropic, openrouter, ollama]
+
+    Username:
+      in: path
+      name: username
+      required: true
+      schema:
+        type: string
+
   schemas:
+    ScheduledTask:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Hex task identifier.
+        name:
+          type: string
+        tool:
+          type: string
+        args:
+          type: object
+        interval_seconds:
+          type: integer
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        last_run_at:
+          type: string
+          format: date-time
+          nullable: true
+        next_run_at:
+          type: string
+          format: date-time
+        run_count:
+          type: integer
+        last_result:
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+
+    ContentFilterRule:
+      type: object
+      required: [pattern]
+      properties:
+        pattern:
+          type: string
+          description: Literal string or regular expression to block
+        mode:
+          type: string
+          enum: [literal, regex]
+          default: literal
+        label:
+          type: string
+          description: Human-readable name for the rule
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+            enum: [approval.created, approval.approved, approval.rejected]
+        created_at:
+          type: string
+          format: date-time
+
+    RateLimitConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        max_requests:
+          type: integer
+          minimum: 1
+        window_seconds:
+          type: number
+          exclusiveMinimum: 0
+        burst:
+          type: integer
+          minimum: 0
+        user_max_requests:
+          type: integer
+          minimum: 1
+        user_window_seconds:
+          type: number
+          exclusiveMinimum: 0
+
     ToolCall:
       type: object
-      required:
-        - tool
-        - args
+      required: [tool, args]
+      additionalProperties: false
       properties:
         tool:
           type: string
-          description: Canonical tool identifier (e.g., "browser.summarize_page", "file.save")
         args:
           type: object
-          description: Arguments object for the tool. Each tool defines its own schema; gateway enforces a minimal shape here.
-      additionalProperties: false
-      example:
-        tool: "browser.summarize_page"
-        args:
-          url: "https://example.com/article"
-          max_length: 300
 
     ToolResult:
       type: object
       properties:
         tool:
           type: string
-          example: browser.summarize_page
         args:
           type: object
         status:
@@ -199,7 +2342,31 @@ components:
           example: stubbed
         message:
           type: string
-          example: Tool call validated and accepted (stub).
+        risk:
+          type: string
+          nullable: true
+
+    ToolCapabilityEntry:
+      type: object
+      properties:
+        tool:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        required_capabilities:
+          type: array
+          items:
+            type: string
+        optional_capabilities:
+          type: array
+          items:
+            type: string
+        risk_level:
+          type: string
+        requires_approval:
+          type: boolean
 
     ApprovalRequest:
       type: object
@@ -210,24 +2377,229 @@ components:
           type: string
           example: pending
 
-    ApprovalList:
+    TokenPair:
       type: object
       properties:
-        pending:
+        token:
+          type: string
+        refresh_token:
+          type: string
+
+    KillSwitchStatus:
+      type: object
+      properties:
+        active:
+          type: boolean
+        reason:
+          type: string
+
+    AuditEntry:
+      type: object
+      properties:
+        ts:
+          type: string
+          format: date-time
+        event:
+          type: string
+        actor:
+          type: string
+          nullable: true
+        details:
           type: object
-          additionalProperties:
-            $ref: '#/components/schemas/ApprovalRequest'
+
+    UserSummary:
+      type: object
+      properties:
+        username:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        has_tool_restrictions:
+          type: boolean
+
+    UserPermissions:
+      type: object
+      properties:
+        username:
+          type: string
+        allowed_tools:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: "null → no restriction (all tools permitted)"
+
+    ProviderKeyResult:
+      type: object
+      properties:
+        provider:
+          type: string
+        status:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProviderKeyRotateResult:
+      type: object
+      properties:
+        provider:
+          type: string
+        status:
+          type: string
+        last_rotated:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProviderKeyStatus:
+      type: object
+      properties:
+        provider:
+          type: string
+        configured:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_expired:
+          type: boolean
+          nullable: true
+        days_until_expiry:
+          type: number
+          nullable: true
+        last_rotated:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProviderKeyExpiry:
+      type: object
+      properties:
+        provider:
+          type: string
+        set_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_rotated:
+          type: string
+          format: date-time
+          nullable: true
+        is_expired:
+          type: boolean
+        days_until_expiry:
+          type: number
+          nullable: true
+
+    ChatRequest:
+      type: object
+      required: [provider, messages]
+      properties:
+        provider:
+          type: string
+        messages:
+          type: array
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role:
+                type: string
+                enum: [system, user, assistant]
+              content:
+                type: string
+        model:
+          type: string
+          default: ''
+        temperature:
+          type: number
+          default: 0.7
+        max_tokens:
+          type: integer
+          default: 1024
+
+    ChatResponse:
+      type: object
+      properties:
+        content:
+          type: string
+        model:
+          type: string
+          nullable: true
+        usage:
+          type: object
+          nullable: true
+
+    ConsentEntry:
+      type: object
+      properties:
+        ts:
+          type: string
+          format: date-time
+        url:
+          type: string
+        origin:
+          type: string
+        actor:
+          type: string
+          nullable: true
+        fields_shared:
+          type: array
+          items:
+            type: string
+        redacted_fields:
+          type: array
+          items:
+            type: string
+
+    TabSnapshot:
+      type: object
+      properties:
+        url:
+          type: string
+        title:
+          type: string
+          nullable: true
+        inputs:
+          type: array
+          items:
+            type: object
+        links:
+          type: array
+          items:
+            type: string
+        selected_text:
+          type: string
+          nullable: true
 
     Error:
       type: object
       properties:
         error:
           type: string
-          example: "schema validation failed: 'tool' must be a string"
 
   responses:
     ValidationError:
       description: Schema validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Bad request — invalid input or unknown resource
       content:
         application/json:
           schema:
@@ -244,18 +2616,23 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden — insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Service temporarily unavailable (kill-switch active)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
   securitySchemes:
-    LocalApiKey:
-      type: apiKey
-      in: header
-      name: X-AGENT-GATEWAY-KEY
+    BearerToken:
+      type: http
+      scheme: bearer
       description: |
-        Local API key for controlling access to the gateway. For production, replace with mTLS or OS-backed auth.
-
-  security:
-    - LocalApiKey: []
-
-tags:
-  - name: gateway
-    description: Core agent gateway endpoints
+        Bearer token from POST /admin/login.
+        Admin endpoints require the `admin` role.

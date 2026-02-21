@@ -1,0 +1,10 @@
+{
+  "tool": "browser.cookies",
+  "display_name": "Cookie Access",
+  "description": "Reads cookies for the current or specified origin.",
+  "required_capabilities": ["browser.cookies"],
+  "optional_capabilities": [],
+  "risk_level": "medium",
+  "requires_approval": false,
+  "allowed_arg_keys": ["origin", "name"]
+}

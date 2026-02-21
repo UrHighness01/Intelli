@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Approvals</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { color: var(--muted); font-size: .85rem; }
+    header .live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); margin-left: auto; flex-shrink: 0;
+      transition: background .3s;
+    }
+    header .live-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    main { padding: 24px 28px; max-width: 960px; margin: 0 auto; display: grid; gap: 16px; }
+
+    /* -- Auth ---------------------------------------------------------------- */
+    #auth-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; white-space: nowrap;
+    }
+    button:hover { opacity: .85; }
+    button.danger  { background: #7f2a2a; }
+    button.approve { background: #2a5c3a; color: var(--green); border: 1px solid var(--green); }
+    button.approve:hover { background: #3a7a4e; }
+    button.reject  { background: #5c2a2a; color: var(--red); border: 1px solid var(--red); }
+    button.reject:hover { background: #7a3a3a; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm { padding: 4px 10px; font-size: .78rem; }
+
+    /* -- Toolbar ------------------------------------------------------------ */
+    #toolbar {
+      display: flex; align-items: center; gap: 10px;
+    }
+    #toolbar h2 { font-size: 1rem; font-weight: 600; flex: 1; }
+    #pending-count {
+      background: var(--accent); color: #fff; border-radius: 20px;
+      padding: 1px 8px; font-size: .78rem; font-weight: 700;
+    }
+    #pending-count.empty { background: var(--border); color: var(--muted); }
+
+    /* -- Queue cards -------------------------------------------------------- */
+    #queue { display: grid; gap: 12px; }
+
+    .appr-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; animation: fadeIn .25s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .appr-card-header {
+      padding: 12px 18px; display: flex; align-items: center; gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .appr-id    { font-family: monospace; font-size: .78rem; color: var(--muted); }
+    .appr-tool  { font-weight: 600; color: var(--accent); flex: 1; }
+    .appr-risk  { font-size: .78rem; padding: 2px 8px; border-radius: 12px; font-weight: 700; }
+    .risk-low    { background: rgba(61,220,132,.15); color: var(--green); }
+    .risk-medium { background: rgba(255,209,102,.15); color: var(--yellow); }
+    .risk-high   { background: rgba(255,107,107,.15); color: var(--red); }
+    .appr-ts    { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+
+    .appr-body { padding: 12px 18px; }
+    .appr-args {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 14px; font-family: monospace; font-size: .8rem;
+      white-space: pre; overflow-x: auto; max-height: 200px; overflow-y: auto;
+      color: var(--text); line-height: 1.5;
+    }
+
+    .appr-actions {
+      padding: 12px 18px; display: flex; gap: 10px; justify-content: flex-end;
+      border-top: 1px solid var(--border);
+    }
+
+    /* -- Empty / loading ----------------------------------------------------- */
+    #empty-state {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 56px 24px; text-align: center; color: var(--muted); font-size: .9rem;
+      display: none;
+    }
+    #empty-state .check { font-size: 2rem; margin-bottom: 10px; }
+
+    /* -- History ------------------------------------------------------------- */
+    #history-section { display: none; }
+    #history-section h2 { font-size: .95rem; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
+
+    #history-table-wrap {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    thead th { text-align: left; padding: 9px 16px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody tr:last-child { border: none; }
+    tbody tr:hover { background: rgba(108,99,255,.04); }
+    td { padding: 9px 16px; }
+    td.mono { font-family: monospace; color: var(--accent); }
+    .badge {
+      display: inline-block; border-radius: 12px; padding: 2px 8px;
+      font-size: .75rem; font-weight: 700;
+    }
+    .badge-approved { background: rgba(61,220,132,.15); color: var(--green); }
+    .badge-rejected { background: rgba(255,107,107,.15); color: var(--red); }
+
+    /* -- Toast --------------------------------------------------------------- */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 18px; font-size: .85rem; color: var(--text);
+      transform: translateY(80px); opacity: 0; transition: all .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.ok   { border-color: var(--green); }
+    #toast.err  { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span>Approval Queue</span>
+  <span class="live-dot" id="live-dot" title="SSE connection status"></span>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input type="password" id="token-input" placeholder="Paste admin token…" />
+    <button onclick="connect()">Connect</button>
+  </div>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <h2>Pending requests</h2>
+    <span id="pending-count" class="empty">0</span>
+    <button class="secondary sm" onclick="fetchOnce()">⟳ Refresh</button>
+  </div>
+
+  <!-- Pending cards -->
+  <div id="queue"></div>
+  <div id="empty-state">
+    <div class="check">✓</div>
+    No pending approvals — queue is clear.
+  </div>
+
+  <!-- Resolved history -->
+  <div id="history-section">
+    <h2>Resolved this session</h2>
+    <div id="history-table-wrap">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Tool</th><th>Action</th><th>Resolved</th></tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _token   = '';
+let _sse     = null;
+let _pending = {};   // id → item
+let _history = [];   // {id, tool, action, ts}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function tok() {
+  if (!_token) _token = sessionStorage.getItem('ag_token') || '';
+  return _token;
+}
+
+function getToken() {
+  const t = document.getElementById('token-input').value.trim();
+  if (t) { _token = t; sessionStorage.setItem('ag_token', t); }
+  return _token;
+}
+
+function toast(msg, kind = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.className = '', 2600);
+}
+
+function riskClass(r) {
+  if (!r && r !== 0) return '';
+  if (r >= 0.7) return 'risk-high';
+  if (r >= 0.4) return 'risk-medium';
+  return 'risk-low';
+}
+
+function riskLabel(r) {
+  if (r === undefined || r === null) return '';
+  if (r >= 0.7) return 'HIGH';
+  if (r >= 0.4) return 'MED';
+  return 'LOW';
+}
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString(); } catch { return ts; }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  const queue = document.getElementById('queue');
+  const empty = document.getElementById('empty-state');
+  const cnt   = document.getElementById('pending-count');
+  const items = Object.values(_pending);
+
+  cnt.textContent = items.length;
+  cnt.classList.toggle('empty', items.length === 0);
+
+  if (items.length === 0) {
+    queue.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    // keep existing cards; add new ones; remove vanished ones
+    const existing = new Set([...queue.querySelectorAll('.appr-card')].map(c => c.dataset.id));
+    const current  = new Set(items.map(i => String(i.id)));
+    // remove resolved
+    existing.forEach(id => { if (!current.has(id)) document.getElementById('card-' + id)?.remove(); });
+    // add new
+    items.forEach(item => {
+      if (!existing.has(String(item.id))) {
+        queue.appendChild(buildCard(item));
+      }
+    });
+  }
+
+  // history
+  const histSec  = document.getElementById('history-section');
+  const histBody = document.getElementById('history-body');
+  if (_history.length === 0) {
+    histSec.style.display = 'none';
+  } else {
+    histSec.style.display = 'block';
+    histBody.innerHTML = _history.slice().reverse().map(h => `
+      <tr>
+        <td class="mono">#${h.id}</td>
+        <td>${escHtml(h.tool)}</td>
+        <td><span class="badge badge-${h.action}">${h.action}</span></td>
+        <td style="color:var(--muted);font-size:.78rem">${fmtTs(h.ts)}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function buildCard(item) {
+  const risk   = item.risk ?? item.risk_score ?? null;
+  const args   = item.args ?? item.payload ?? {};
+  const div    = document.createElement('div');
+  div.className = 'appr-card';
+  div.id        = 'card-' + item.id;
+  div.dataset.id = item.id;
+  div.innerHTML = `
+    <div class="appr-card-header">
+      <span class="appr-id">#${item.id}</span>
+      <span class="appr-tool">${escHtml(item.tool || '—')}</span>
+      ${risk !== null ? `<span class="appr-risk ${riskClass(risk)}">${riskLabel(risk)} ${(risk*100).toFixed(0)}%</span>` : ''}
+      <span class="appr-ts">${fmtTs(item.created_at || item.ts)}</span>
+    </div>
+    <div class="appr-body">
+      <div class="appr-args">${escHtml(JSON.stringify(args, null, 2))}</div>
+    </div>
+    <div class="appr-actions">
+      <button class="reject sm" onclick="doReject(${item.id})">✗ Reject</button>
+      <button class="approve sm" onclick="doApprove(${item.id})">✓ Approve</button>
+    </div>
+  `;
+  return div;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+async function doApprove(id) {
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  try {
+    const r = await fetch(`/approvals/${id}/approve`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + t }
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const item = _pending[id];
+    if (item) _history.push({ id, tool: item.tool, action: 'approved', ts: new Date().toISOString() });
+    delete _pending[id];
+    render();
+    toast(`#${id} approved ✓`);
+  } catch (e) { toast(`Error: ${e.message}`, 'err'); }
+}
+
+async function doReject(id) {
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  try {
+    const r = await fetch(`/approvals/${id}/reject`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + t }
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const item = _pending[id];
+    if (item) _history.push({ id, tool: item.tool, action: 'rejected', ts: new Date().toISOString() });
+    delete _pending[id];
+    render();
+    toast(`#${id} rejected`, 'err');
+  } catch (e) { toast(`Error: ${e.message}`, 'err'); }
+}
+
+async function fetchOnce() {
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  try {
+    const r = await fetch('/approvals', { headers: { Authorization: 'Bearer ' + t } });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    // data.pending is an object {id: {...}} or array
+    _pending = {};
+    if (Array.isArray(data.pending)) {
+      data.pending.forEach(item => { _pending[item.id] = item; });
+    } else if (data.pending && typeof data.pending === 'object') {
+      Object.entries(data.pending).forEach(([k, v]) => { _pending[k] = { id: k, ...v }; });
+    }
+    render();
+  } catch (e) { toast(`Fetch error: ${e.message}`, 'err'); }
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+function connect() {
+  const t = getToken();
+  if (!t) { toast('Paste a token first', 'err'); return; }
+  disconnectSSE();
+  fetchOnce();           // immediate snapshot
+  openSSE();
+}
+
+function openSSE() {
+  const t = tok();
+  // EventSource doesn't support custom headers; pass token as query param
+  // The server currently has no auth check on /approvals/stream — safe for LAN deployment
+  _sse = new EventSource('/approvals/stream');
+  const dot = document.getElementById('live-dot');
+
+  _sse.addEventListener('approval_update', e => {
+    try {
+      const data = JSON.parse(e.data);
+      const list = data.pending || [];
+      // Rebuild pending from SSE payload (retains items not in list as-is —
+      // the server only sends updates on change, so we merge)
+      const newIds = new Set(list.map(i => String(i.id)));
+      // Add/update arrived items
+      list.forEach(item => { _pending[item.id] = item; });
+      // Note: items disappear from the SSE payload only when resolved on the server.
+      // We do full replacement to stay in sync.
+      _pending = {};
+      list.forEach(item => { _pending[item.id] = item; });
+      render();
+    } catch {}
+  });
+
+  _sse.onopen  = () => dot.classList.add('connected');
+  _sse.onerror = () => {
+    dot.classList.remove('connected');
+    _sse.close();
+    // auto-reconnect after 4 s
+    setTimeout(() => { if (tok()) openSSE(); }, 4000);
+  };
+}
+
+function disconnectSSE() {
+  if (_sse) { _sse.close(); _sse = null; }
+  document.getElementById('live-dot').classList.remove('connected');
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('ag_token');
+  if (saved) {
+    document.getElementById('token-input').value = saved;
+    _token = saved;
+    connect();
+  }
+  render();
+});
+</script>
+</body>
+</html>
