@@ -15,6 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Add repo root to PYTHONPATH
+        run: |
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: Set SANDBOX_WORKER_PATH for tests
+        run: |
+          echo "SANDBOX_WORKER_PATH=$GITHUB_WORKSPACE/agent-gateway/sandbox/worker.py" >> $GITHUB_ENV
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -26,7 +32,7 @@ jobs:
           pip install pip-licenses pip-audit
       - name: Start gateway for integration tests
         run: |
-          nohup uvicorn agent-gateway.app:app --host 127.0.0.1 --port 8080 &
+          nohup python -m uvicorn agent_gateway.app:app --host 127.0.0.1 --port 8080 &
           echo $! > uvicorn.pid
           for i in {1..15}; do
             if curl -sS http://127.0.0.1:8080/health >/dev/null; then

@@ -43,15 +43,20 @@ def main():
         if not raw:
             print(json.dumps({"error": "no input"}))
             sys.exit(2)
+        # Protect against very large inputs
+        if len(raw) > 256 * 1024:
+            print(json.dumps({"error": "input too large"}))
+            sys.exit(4)
         payload = json.loads(raw)
+        req_id = payload.get("id")
         action = payload.get("action")
         params = payload.get("params") or {}
         if action not in _ALLOWED:
-            print(json.dumps({"error": f"action not allowed: {action}"}))
+            print(json.dumps({"id": req_id, "error": f"action not allowed: {action}"}))
             sys.exit(3)
         handler = _ALLOWED[action]
         result = handler(params)
-        print(json.dumps({"result": result}))
+        print(json.dumps({"id": req_id, "result": result}))
         sys.exit(0)
     except Exception as e:
         try:

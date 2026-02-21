@@ -147,6 +147,11 @@ Created by: Intelli design draft
 - [x] Persisted redaction rules + audit log: redaction rules persisted to `agent-gateway/redaction_rules.json`, audit entries appended to `agent-gateway/audit.log`, and admin-protected endpoints (`X-API-Key`).
 - [x] Tests: unit/integration tests covering gateway, supervisor, tab bridge, and approval flows.
 - [x] OS-backed user credential storage: passwords stored in the OS keyring when available, with safe fallback to local storage.
+- [x] Subprocess sandbox worker: `agent-gateway/sandbox/worker.py` and IPC integration in `agent-gateway/sandbox/proxy.py` (delegation when worker present).
+- [x] Worker lifecycle & health checks: `agent-gateway/sandbox/manager.py` and `/health/worker` + `/metrics` endpoints in `agent-gateway/app.py`.
+- [x] Sandbox tests: `agent-gateway/tests/test_sandbox_worker.py`, `test_sandbox_manager.py`, and `test_worker_health_api.py`.
+- [x] Import shim `agent_gateway/__init__.py` to allow package imports from the hyphenated folder.
+- [x] ProviderKeyStore resilient fallback: made `keyring` optional and added file-backed fallback in `agent-gateway/providers/provider_adapter.py` for dev/test.
 - [ ] Browser integration: embed Chromium + sidebar UI and wire the renderer to POST snapshots to the gateway.
 - [ ] Provider adapters & secure key storage: OS-backed secure storage / vault integration for provider keys.
 - [ ] Harden Tool Proxy: sandbox helper process, capability model, and strict execution limits for tool actions.

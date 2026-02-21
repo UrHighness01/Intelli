@@ -112,14 +112,19 @@ class SandboxProxy:
         if not os.path.exists(self._worker_path):
             raise SandboxError('worker binary not found')
 
-        payload = {'action': action, 'params': params}
+        import uuid
+
+        payload = {'id': str(uuid.uuid4()), 'action': action, 'params': params}
+        # enforce max payload size (avoid spawning worker with huge stdin)
+        inp = json.dumps(payload)
+        if len(inp) > 256 * 1024:
+            raise SandboxError('payload too large')
         proc = subprocess.Popen([sys.executable, self._worker_path],
                                 stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 text=True)
         try:
-            inp = json.dumps(payload)
             out, err = proc.communicate(inp, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -133,6 +138,11 @@ class SandboxProxy:
             data = json.loads(out)
         except Exception as e:
             raise SandboxError(f'bad worker output: {e}')
+
+        # verify response id matches
+        resp_id = data.get('id')
+        if resp_id and resp_id != payload['id']:
+            raise SandboxError('mismatched response id from worker')
 
         if 'error' in data:
             raise SandboxError(data['error'])

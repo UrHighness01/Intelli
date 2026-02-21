@@ -9,6 +9,8 @@ from tab_bridge import TabContextBridge
 import os
 from datetime import datetime
 import auth
+from sandbox.manager import WorkerManager
+import time
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
 
@@ -52,6 +54,13 @@ def _audit(event: str, details: dict, actor: str = None):
 # load persisted rules on startup
 _load_rules()
 
+# startup time for basic metrics
+_start_time = datetime.utcnow()
+
+# Worker manager (checks bundled or env-provided worker)
+_worker_path = os.environ.get('SANDBOX_WORKER_PATH')
+_worker_manager = WorkerManager(worker_path=_worker_path) if _worker_path or True else None
+
 
 def _require_admin_token(request: Request):
     # Expect header Authorization: Bearer <token>
@@ -80,6 +89,26 @@ class ToolCall(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get('/health/worker')
+def health_worker():
+    """Check the sandbox worker health (noop call)."""
+    try:
+        ok = _worker_manager.check_health()
+    except Exception:
+        ok = False
+    return {"worker_healthy": ok}
+
+
+@app.get('/metrics')
+def metrics():
+    uptime = (datetime.utcnow() - _start_time).total_seconds()
+    try:
+        worker_ok = _worker_manager.check_health()
+    except Exception:
+        worker_ok = False
+    return {"uptime_seconds": uptime, "worker_healthy": worker_ok}
 
 
 @app.post("/validate")
