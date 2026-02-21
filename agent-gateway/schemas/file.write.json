@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "file.write args",
+  "type": "object",
+  "required": ["path","content"],
+  "properties": {
+    "path": { "type": "string" },
+    "content": { "type": "string" },
+    "mode": { "type": "string", "enum": ["w","a"] }
+  },
+  "additionalProperties": false
+}

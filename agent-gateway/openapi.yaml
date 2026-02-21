@@ -218,6 +218,13 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/ApprovalRequest'
 
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "schema validation failed: 'tool' must be a string"
+
   responses:
     ValidationError:
       description: Schema validation failed
@@ -238,24 +245,16 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
 
-  schemas:
-    Error:
-      type: object
-      properties:
-        error:
-          type: string
-          example: schema validation failed: 'tool' must be a string
+  securitySchemes:
+    LocalApiKey:
+      type: apiKey
+      in: header
+      name: X-AGENT-GATEWAY-KEY
+      description: |
+        Local API key for controlling access to the gateway. For production, replace with mTLS or OS-backed auth.
 
-securitySchemes:
-  LocalApiKey:
-    type: apiKey
-    in: header
-    name: X-AGENT-GATEWAY-KEY
-    description: |
-      Local API key for controlling access to the gateway. For production, replace with mTLS or OS-backed auth.
-
-security:
-  - LocalApiKey: []
+  security:
+    - LocalApiKey: []
 
 tags:
   - name: gateway

@@ -43,12 +43,35 @@ class Supervisor:
         self.queue = ApprovalQueue()
         # Define simple high-risk tool ids
         self.high_risk_tools = {"system.exec", "file.write", "system.update"}
+        # tool schema registry path
+        self.schema_dir = Path(__file__).with_name("schemas")
 
     def _validate_schema(self, payload: Dict[str, Any]):
         try:
             validate(instance=payload, schema=self.schema)
         except ValidationError as e:
             raise e
+
+    def _make_validation_error(self, exc: ValidationError, payload: Dict[str, Any], phase: str = "schema") -> Dict[str, Any]:
+        """Create a deterministic error token and structured feedback for validation errors."""
+        import hashlib, json
+
+        # canonical payload string
+        try:
+            canon = json.dumps(payload, sort_keys=True)
+        except Exception:
+            canon = str(payload)
+
+        token_source = f"{phase}:{exc.message}:{canon}"
+        token = hashlib.sha256(token_source.encode('utf-8')).hexdigest()[:12]
+
+        feedback = {
+            'error_code': f'{phase}_validation_error',
+            'message': exc.message,
+            'path': list(exc.path) if hasattr(exc, 'path') else [],
+            'token': token,
+        }
+        return {'status': 'validation_error', 'error_token': token, 'feedback': feedback}
 
     def _sanitize(self, obj: Any):
         if isinstance(obj, dict):
@@ -63,6 +86,18 @@ class Supervisor:
             return [self._sanitize(i) for i in obj]
         return obj
 
+    def _load_tool_schema(self, tool_name: str):
+        # map tool id to filename: replace dots with path separators
+        filename = tool_name.replace('.', '/') + '.json'
+        candidate = self.schema_dir.joinpath(filename)
+        if candidate.exists():
+            return load_tool_schema(candidate)
+        # also try direct filename under schema_dir (tool names with slashes not used)
+        candidate2 = self.schema_dir.joinpath(tool_name + '.json')
+        if candidate2.exists():
+            return load_tool_schema(candidate2)
+        return None
+
     def approval_required(self, payload: Dict[str, Any]) -> bool:
         tool = payload.get("tool", "")
         return tool in self.high_risk_tools
@@ -72,7 +107,17 @@ class Supervisor:
         try:
             self._validate_schema(payload)
         except ValidationError as e:
-            return {"error": f"schema validation failed: {e.message}"}
+            return self._make_validation_error(e, payload, phase="schema")
+
+        # If there's a per-tool schema, validate args against it
+        tool = payload.get("tool")
+        if tool:
+            tschema = self._load_tool_schema(tool)
+            if tschema is not None:
+                try:
+                    validate(instance=payload.get("args", {}), schema=tschema)
+                except ValidationError as e:
+                    return self._make_validation_error(e, payload.get('args', {}), phase="tool_args")
 
         # Sanitize
         sanitized = {"tool": payload.get("tool"), "args": self._sanitize(payload.get("args", {}))}
@@ -89,6 +134,15 @@ class Supervisor:
 def load_schema_from_file(path: Path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_tool_schema(path: Path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 
 
 if __name__ == "__main__":

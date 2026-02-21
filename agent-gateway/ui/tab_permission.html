@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tab Snapshot Preview</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:24px} textarea{width:100%;height:160px}</style>
+</head>
+<body>
+  <h2>Tab Snapshot Preview</h2>
+  <p>Paste page HTML and URL, preview sanitized snapshot and set redaction fields for this origin.</p>
+  <label>Page URL</label>
+  <input id="url" style="width:100%" placeholder="https://example.com" />
+  <label>Selected text (optional)</label>
+  <input id="selected" style="width:100%" />
+  <label>Page HTML</label>
+  <textarea id="html" placeholder="&lt;html&gt;...&lt;/html&gt;"></textarea>
+  <button id="preview">Preview Snapshot</button>
+
+  <h3>Sanitized Snapshot</h3>
+  <pre id="out" style="background:#f5f5f5;padding:12px;border-radius:6px;white-space:pre-wrap;max-height:360px;overflow:auto"></pre>
+
+  <h3>Redaction Fields (for this origin)</h3>
+  <input id="fields" placeholder="comma separated input names" style="width:100%" />
+  <button id="set">Set Redaction Rules</button>
+
+  <script>
+  async function postJSON(url, body){
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    return res.json();
+  }
+
+  document.getElementById('preview').addEventListener('click', async ()=>{
+    const html = document.getElementById('html').value;
+    const url = document.getElementById('url').value;
+    const selected = document.getElementById('selected').value;
+    const snap = await postJSON('/tab/preview', {html, url, selected_text: selected});
+    document.getElementById('out').textContent = JSON.stringify(snap, null, 2);
+  });
+
+  document.getElementById('set').addEventListener('click', async ()=>{
+    const origin = document.getElementById('url').value;
+    const fields = document.getElementById('fields').value.split(',').map(s=>s.trim()).filter(Boolean);
+    const res = await postJSON('/tab/redaction-rules', {origin, fields});
+    alert('Saved: '+JSON.stringify(res));
+  });
+  </script>
+</body>
+</html>

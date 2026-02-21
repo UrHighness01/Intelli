@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Intelli — Approvals</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      .req { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+      pre { background:#f7f7f7; padding:8px; overflow:auto }
+      button { margin-right:8px }
+    </style>
+  </head>
+  <body>
+    <h1>Pending Approvals</h1>
+    <div id="list">Loading…</div>
+
+    <script>
+      async function fetchPending(){
+        const res = await fetch('/approvals');
+        if(!res.ok){ document.getElementById('list').innerText = 'Error fetching approvals'; return }
+        const body = await res.json();
+        const pending = body.pending || {};
+        const el = document.getElementById('list');
+        el.innerHTML = '';
+        const keys = Object.keys(pending);
+        if(keys.length === 0){ el.innerText = 'No pending approvals'; return }
+        keys.forEach(id => {
+          const item = pending[id];
+          const wrap = document.createElement('div'); wrap.className = 'req';
+          const h = document.createElement('div'); h.innerHTML = `<strong>Request ${id}</strong> — status: ${item.status}`;
+          const pre = document.createElement('pre'); pre.textContent = JSON.stringify(item.payload, null, 2);
+          const approve = document.createElement('button'); approve.textContent = 'Approve';
+          approve.onclick = async () => { await action(id, 'approve'); };
+          const reject = document.createElement('button'); reject.textContent = 'Reject';
+          reject.onclick = async () => { await action(id, 'reject'); };
+          wrap.appendChild(h); wrap.appendChild(pre); wrap.appendChild(approve); wrap.appendChild(reject);
+          el.appendChild(wrap);
+        });
+      }
+
+      async function action(id, verb){
+        const res = await fetch(`/approvals/${id}/${verb}`, { method: 'POST' });
+        if(!res.ok){ alert('Action failed'); return }
+        await fetchPending();
+      }
+
+      fetchPending();
+      setInterval(fetchPending, 5000);
+    </script>
+  </body>
+</html>

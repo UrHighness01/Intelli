@@ -5,3 +5,5 @@ httpx>=0.24
 pytest>=7.4
 beautifulsoup4>=4.12
 lxml>=4.9
+keyring>=23.8
+requests>=2.31

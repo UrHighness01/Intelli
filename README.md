@@ -29,5 +29,3 @@ Project layout:
 - `ARCHITECTURE.md` — mermaid architecture diagram
 - `THREAT_MODEL.md` — threat model and privacy controls
 - `agent-gateway/` — prototype local agent gateway (FastAPI)
-
-If you want, I can create a remote GitHub repo and push this workspace (you may need to provide a token), or I can give you the git commands to run locally and push.

@@ -135,9 +135,76 @@ If you want, I can now:
 
 Created by: Intelli design draft
 
----
 
-## Additional Operational, Compliance & QA Considerations
+## Implementation status (updated 2026-02-21)
+
+- [x] Prototype Agent Gateway: local FastAPI gateway (`agent-gateway/`) with schema validation, supervisor pipeline, and tests.
+- [x] Review and refine roadmap with hybrid pipeline sketch (this document now includes a detailed hybrid supervisor design).
+- [x] Tab Context Bridge: DOM snapshotter with input-field redaction and a preview UI (`agent-gateway/tab_bridge.py`, `agent-gateway/ui/tab_permission.html`).
+- [x] Schema validator with deterministic error tokens: Supervisor now emits structured validation errors with deterministic tokens and feedback.
+- [x] Approval workflow: approval API endpoints, minimal approval UI, and approval queue tests.
+- [x] Per-tool schema registry: example JSON schemas and runtime enforcement in the supervisor.
+- [x] Persisted redaction rules + audit log: redaction rules persisted to `agent-gateway/redaction_rules.json`, audit entries appended to `agent-gateway/audit.log`, and admin-protected endpoints (`X-API-Key`).
+- [x] Tests: unit/integration tests covering gateway, supervisor, tab bridge, and approval flows.
+- [x] OS-backed user credential storage: passwords stored in the OS keyring when available, with safe fallback to local storage.
+- [ ] Browser integration: embed Chromium + sidebar UI and wire the renderer to POST snapshots to the gateway.
+- [ ] Provider adapters & secure key storage: OS-backed secure storage / vault integration for provider keys.
+- [ ] Harden Tool Proxy: sandbox helper process, capability model, and strict execution limits for tool actions.
+- [ ] CI/CD security hardening: SBOM generation, dependency scanning, signed releases.
+- [x] CI/CD security hardening: SBOM generation, dependency scanning (CI updated to generate SBOM and run pip-audit). 
+- [ ] E2E tests and fuzzing harness: DOM/agent payload fuzzing and full end-to-end automation.
+
+The prototype implementation lives under `agent-gateway/` and includes tests and a README with quickstart instructions.
+
+## Remaining steps — recommended priority
+
+1. Wire the Tab Snapshot Preview into the browser renderer and expose a per-tab permission prompt (high priority).
+2. Implement provider adapters and move API keys into an OS keyring or vault; add secrets rotation and scoped permissions (high priority before enabling external providers).
+3. Harden the Tool Proxy: create a sandboxed helper process with capability restrictions (file, network) and enforce signed tool contracts (medium-high priority).
+4. Replace dev `X-API-Key` with an auth system (local RBAC, operator accounts) and add a UI for audit/event review (medium priority).
+5. Expand the OpenAPI/tool contracts and generate client SDKs for plugins and provider adapters (medium priority).
+6. Add CI gates: SBOM, dependency scanning, unit+integration tests, and a signed-release workflow (medium priority).
+7. Add E2E tests and a fuzzing harness for the Tab Bridge and supervisor (medium priority).
+8. UX polish: preview UI with selectable input redaction checkboxes, realtime approval stream (SSE/WebSocket), and consent timeline (low-medium priority).
+
+Refined Hybrid Supervisor Pipeline (implementation details)
+--------------------------------------------------------
+
+Overview:
+- The hybrid supervisor mediates between local small models and optional cloud/specialized verifiers. It ensures tool-call correctness, enforces per-tool schemas, redacts sensitive fields, and decides whether a call requires elevation (human approval or a stronger verifier).
+
+Components & responsibilities:
+- Ingress adapter: receives model outputs (pseudo-structured suggestions) and normalizes them into a canonical ToolCall envelope.
+- Schema validator: validates `ToolCall.args` against per-tool JSON Schema; on failure, returns a deterministic error token and structured feedback for the model to retry.
+- Sanitizer/Redactor: applies per-origin and per-user redaction rules (from `redaction_rules.json` / keyring-backed policies) and removes or replaces sensitive fields before downstream processing.
+- Risk scorer: lightweight heuristics + policy rules that mark calls as `low`, `medium`, or `high` risk (file writes, network access, system commands count as higher risk). Risk score influences whether approvals or a cloud verifier are required.
+- Approver/Escalation queue: stores pending high-risk calls for operator approval; includes audit metadata and a replayable sanitized snapshot.
+- Verifier (optional cloud/large model): performs deterministic reformatting/validation for strict function-call adherence when local models fail; should be auditable and rate-limited.
+- Executor (sandbox proxy): receives approved calls and runs them in a tightly constrained sandbox process with capability and resource limits, returning structured results.
+
+Runtime flow:
+1. Model emits pseudo-ToolCall -> Ingress adapter normalizes it.
+2. Schema validator checks args.
+   - On validation error: return standardized error token + guidance for model to correct format.
+3. Sanitizer redacts sensitive fields and records audit entry.
+4. Risk scorer computes risk; if `high` then enqueue for approval and return `pending_approval` to orchestrator.
+5. If `low/medium`: optionally invoke verifier for deterministic formatting, then dispatch to sandboxed executor.
+6. Executor returns result; supervisor records result and emits audit + metrics.
+
+Design constraints & tests:
+- Deterministic error tokens for validation failures so models can detect and retry without leaking secrets.
+- Unit tests: schema validation, sanitizer redaction, risk scoring rules, approval queue lifecycle.
+- Integration tests: full flow with stubbed verifier and sandbox, including replay of sanitized snapshots.
+- Fuzzing: feed random DOM snapshots and malformed ToolCalls to the ingress + validator pipeline (CI harness already includes a fuzzer entry point).
+
+Operational notes:
+- All approval and audit actions are append-only and signed by the gateway process identity; retain logs for at least 90 days by default.
+- Metricization: per-tool invocation counts, failures, mean validation latency, approval rates, and executor resource usage.
+- Privacy-by-default: local models operate in a local-only mode; any call that would send data externally must require explicit site-level opt-in.
+
+
+Choose a next task and I will implement it: (A) wire the renderer preview + selectable input UI, (B) scaffold a sandboxed Tool Proxy, or (C) scaffold provider adapters + secure key storage.
+
 - **Compliance & Data Governance:** implement GDPR/CCPA compliance flows, data residency controls, Data Processing Addenda, and user data export/deletion APIs.
 - **Secure Updates & Supply Chain:** signed updates, reproducible builds, SBOM for third-party components, and an automated CI/CD pipeline with security gates.
 - **Secrets & Key Recovery:** store API keys in OS-backed secure storage or hardware-backed keystores; provide encrypted backup/escrow and recovery UI.
