@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+.env
+.venv/
+venv/
+build/
+dist/
+eggs/
+*.egg-info/
+*.egg
+
+# VSCode
+.vscode/
+
+# PyTest
+.pytest_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Agent gateway venv
+agent-gateway/.venv/
+
+# node
+node_modules/

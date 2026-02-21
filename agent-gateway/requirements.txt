@@ -1,0 +1,7 @@
+fastapi>=0.95,<1
+uvicorn[standard]>=0.22
+jsonschema>=4.21.0,<5
+httpx>=0.24
+pytest>=7.4
+beautifulsoup4>=4.12
+lxml>=4.9

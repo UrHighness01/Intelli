@@ -1,0 +1,262 @@
+openapi: 3.0.3
+info:
+  title: Intelli Agent Gateway (prototype)
+  version: 0.1.0
+  description: |
+    Local agent gateway for validating and proxying agent tool calls. This service is intended to run on localhost and
+    act as a guarded bridge between agents and browser-controlled tools. Do NOT expose to the network without
+    enterprise-level authentication, mTLS, and policy controls.
+
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local-only default
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /validate:
+    post:
+      summary: Validate a tool-call payload against the canonical schema
+      description: Validate an incoming agent tool-call payload. This endpoint returns 200 if payload conforms to the
+        `ToolCall` schema, or 400 with a descriptive error when validation fails.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCall'
+      responses:
+        '200':
+          description: Payload valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /tools/call:
+    post:
+      summary: Submit a validated tool call for proxying
+      description: |
+        Accepts a `ToolCall` payload and returns a `ToolResult`. In the prototype the call is stubbed and not executed.
+        Production implementations MUST include authentication, granular authorization policies, rate limits and an
+        execution approval workflow before any privileged action is executed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCall'
+      responses:
+        '200':
+          description: Tool accepted (stubbed result)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /approvals:
+    get:
+      summary: List pending approval requests
+      tags:
+        - gateway
+      responses:
+        '200':
+          description: Pending approvals map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalList'
+
+  /approvals/{id}:
+    get:
+      summary: Get approval request status
+      tags:
+        - gateway
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: integer
+          required: true
+      responses:
+        '200':
+          description: Approval status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /approvals/{id}/approve:
+    post:
+      summary: Approve a pending request
+      tags:
+        - gateway
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: integer
+          required: true
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: approved
+                  id:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /approvals/{id}/reject:
+    post:
+      summary: Reject a pending request
+      tags:
+        - gateway
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: integer
+          required: true
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: rejected
+                  id:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  schemas:
+    ToolCall:
+      type: object
+      required:
+        - tool
+        - args
+      properties:
+        tool:
+          type: string
+          description: Canonical tool identifier (e.g., "browser.summarize_page", "file.save")
+        args:
+          type: object
+          description: Arguments object for the tool. Each tool defines its own schema; gateway enforces a minimal shape here.
+      additionalProperties: false
+      example:
+        tool: "browser.summarize_page"
+        args:
+          url: "https://example.com/article"
+          max_length: 300
+
+    ToolResult:
+      type: object
+      properties:
+        tool:
+          type: string
+          example: browser.summarize_page
+        args:
+          type: object
+        status:
+          type: string
+          example: stubbed
+        message:
+          type: string
+          example: Tool call validated and accepted (stub).
+
+    ApprovalRequest:
+      type: object
+      properties:
+        payload:
+          type: object
+        status:
+          type: string
+          example: pending
+
+    ApprovalList:
+      type: object
+      properties:
+        pending:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ApprovalRequest'
+
+  responses:
+    ValidationError:
+      description: Schema validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: schema validation failed: 'tool' must be a string
+
+securitySchemes:
+  LocalApiKey:
+    type: apiKey
+    in: header
+    name: X-AGENT-GATEWAY-KEY
+    description: |
+      Local API key for controlling access to the gateway. For production, replace with mTLS or OS-backed auth.
+
+security:
+  - LocalApiKey: []
+
+tags:
+  - name: gateway
+    description: Core agent gateway endpoints
