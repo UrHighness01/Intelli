@@ -21,3 +21,6 @@ pyyaml>=6.0
 backports.tarfile>=1.2.0
 secretstorage>=3.2
 jeepney>=0.4.2
+# importlib_metadata: required by keyring on Python<3.12; omitted when
+# pip-tools compiles on 3.12 but needed in CI on 3.11.
+importlib_metadata>=4.11.4
