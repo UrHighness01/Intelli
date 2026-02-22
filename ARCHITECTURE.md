@@ -6,7 +6,8 @@ and data flows for Intelli.
 ```mermaid
 flowchart TD
   subgraph ElectronShell["Electron Browser Shell (browser-shell/)"]
-    BrowserUI["Browser UI\n(tabs + nav bar)"]
+    BrowserUI["Browser UI\n(tabs + nav bar + panels)"]
+    PanelSystem["Chrome Panels (360 px)\nbookmarks · history · settings\nclear-data · dev-addons"]
     TabBridge["Tab Context Bridge\n(browser.js + preload)"]
     Splash["Splash Screen\n(splash.html)"]
     MainProc["Electron Main Process\n(main.js)"]
@@ -49,6 +50,7 @@ flowchart TD
   end
 
   BrowserUI -->|"DOM snapshot (policy-gated)"| TabBridge
+  BrowserUI <-->|"panel-visible IPC"| PanelSystem
   TabBridge -->|"structured context"| MainProc
   MainProc -->|"spawn / IPC"| Router
   Splash --> MainProc
@@ -91,8 +93,9 @@ flowchart TD
 
 | Component | Location | Technology | Role |
 |---|---|---|---|
-| Electron Main Process | `browser-shell/main.js` | Electron 29 + Node.js | Spawns/kills gateway, manages windows |
-| Browser UI | `browser-shell/browser.{html,js,css}` | Chromium renderer | Multi-tab browser chrome |
+| Electron Main Process | `browser-shell/main.js` | Electron 29 + Node.js | Spawns/kills gateway, manages windows; `panel-visible` + `toggle-chrome-devtools` IPC |
+| Browser UI | `browser-shell/browser.{html,js,css}` | Chromium renderer | Multi-tab browser chrome + 5 overlay panels (bookmarks, history, settings, clear-data, dev-addons) |
+| Chrome Panel System | `browser-shell/src/browser.{html,js,css}` | DOM overlay (360 px) | Bookmark star, zoom indicator, ⋮ menu, per-panel data loaders |
 | Tab Context Bridge | `browser-shell/preload.js` | contextBridge API | Isolates renderer from Node.js |
 | Agent Gateway | `agent-gateway/app.py` | FastAPI + uvicorn | Central HTTP API |
 | Supervisor | `agent-gateway/supervisor.py` | Python | Schema validation + routing |
@@ -118,6 +121,11 @@ flowchart TD
 - The **Tab Context Bridge** serializes the active tab to a structured snapshot
   and enforces per-site permissions and redaction rules before any context leaves
   the renderer process.
+- The **Chrome Panel System** renders five `position:fixed` overlay panels (bookmarks,
+  history, settings, clear-data, dev-addons) inside the chrome renderer. When any panel
+  is open, `browser.js` calls `electronAPI.setPanelVisible(true)` which fires the
+  `panel-visible` IPC handler in `main.js`; `tabBounds()` subtracts `PANEL_WIDTH = 360 px`
+  from the active BrowserView so the DOM panel is never hidden behind it.
 - The **Agent Gateway** is the local HTTP/IPC endpoint; on desktop it is spawned
   by Electron and its lifecycle is tied to the browser window.
 - The **Supervisor** performs schema validation, escaping, sanitization, and

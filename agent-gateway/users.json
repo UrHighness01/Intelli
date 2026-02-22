@@ -3,8 +3,8 @@
   "openrouter": "or-key-abc",
   "anthropic": "",
   "admin": {
-    "salt": "26f7e458358660af5d88b7d64fde683c",
-    "hash": "4ad1a53027c9b50fcf5ff51dce76fead8faf2bffcca43b397dff2caa01184dbc",
+    "salt": "5d902d3bc11359751e9bd892d997ebaa",
+    "hash": "28818b60f75d156a3b708e51b1feefbd3e681de8a6cb6cce714ecb546bb740d2",
     "roles": [
       "admin"
     ]

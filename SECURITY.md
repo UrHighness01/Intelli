@@ -24,6 +24,7 @@ You will receive an acknowledgement within 72 hours.
 | Audit log tampering | Append-only log; archive recommended | Implemented |
 | SSRF via provider adapters | Adapter calls are scaffolded (no live network) | Scaffold |
 | Denial of service (large payloads) | 256 KB IPC payload limit in worker | Implemented |
+| Denial of service (oversized tool-call names) | `max_length=256` on `ToolCall.tool` via Pydantic `Field` — returns 422 | Implemented |
 
 ---
 
@@ -47,6 +48,7 @@ You will receive an acknowledgement within 72 hours.
 ### Sandboxing
 - [x] Subprocess worker with action whitelist
 - [x] IPC payload size limit (256 KB)
+- [x] Tool call name size limit — Pydantic `Field(..., max_length=256)` on `ToolCall.tool`; returns 422 for oversized identifiers
 - [x] Per-call timeout enforcement
 - [x] Docker runner scaffold with `network_disabled=True`
 - [ ] seccomp profile for subprocess worker (Linux)

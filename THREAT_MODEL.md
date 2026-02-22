@@ -92,6 +92,8 @@ The table below tracks the current implementation state of all major threat miti
 | Append-only audit log | `audit_log.py` | ✅ Implemented |
 | Subprocess sandbox worker + whitelist | `tool_proxy.py` | ✅ Implemented |
 | IPC payload size limit (256 KB) | `tool_proxy.py` | ✅ Implemented |
+| Tool call name size limit (`max_length=256`) | `app.py` — Pydantic `Field(..., max_length=256)` on `ToolCall.tool`; returns 422 for oversized names | ✅ Implemented |
+| Fuzzer payload coverage (94 adversarial cases) | `tests/test_fuzzer_payloads.py` — oversized names, emoji flood, lone surrogates, injection strings | ✅ Implemented |
 | Per-call timeout enforcement | `tool_proxy.py` | ✅ Implemented |
 | Docker runner scaffold | `sandbox.py` | ✅ Scaffold |
 | OS keyring + Vault + env fallback | `key_rotation.py` | ✅ Implemented |

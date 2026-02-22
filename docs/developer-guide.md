@@ -39,7 +39,7 @@ Intelli/
 │   ├── tools/
 │   │   └── capability.py         ← CapabilityVerifier + ToolManifest
 │   ├── ui/                       ← 15 dark-mode admin HTML pages
-│   └── tests/                    ← ~1087 pytest tests (57 test files)
+│   └── tests/                    ← 1 087 pytest tests (57 test files, 1087 passing)
 │
 ├── browser-shell/           ← Electron desktop browser
 │   ├── main.js              ← Electron main process: gateway lifecycle + tab management
@@ -310,15 +310,53 @@ ALLOWED = {
 
 The `browser-shell/` directory is a complete Electron 29 application.
 
-Key extension points:
+### Architecture notes
+
+Electron `BrowserView` objects are native OS overlays — they render **above** all DOM
+elements in the chrome renderer. Two constants control layout:
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `SIDEBAR_WIDTH` | `340` px | Admin-hub `BrowserView` sidebar |
+| `PANEL_WIDTH` | `360` px | Chrome-renderer overlay panels |
+
+`tabBounds()` in `main.js` subtracts whichever of these are open from the tab width so
+visible DOM panels are never hidden behind a native layer.
+
+### Chrome-style panel system
+
+Five overlay panels are implemented in `src/browser.js` / `src/browser.html`:
+
+| Panel ID | Trigger | Content |
+|---|---|---|
+| `#panel-bookmarks` | ★ star button in address bar | Bookmark list; add/remove current page |
+| `#panel-history` | History item in ⋮ menu | Browsing history with day separators |
+| `#panel-settings` | Settings item in ⋮ menu | Hub: Addons, Downloads, DevTools links |
+| `#panel-cleardata` | Clear Data item in ⋮ menu | Checkbox-gated data wipe |
+| `#panel-devaddons` | Dev Addons item in ⋮ menu | JS inject textarea; Store / Mgr open new tab |
+
+`openPanel(name)` removes `.hidden` from the selected panel and calls
+`electronAPI.setPanelVisible(true)`, which fires the `panel-visible` IPC handler in
+`main.js` to shrink the active `BrowserView` by `PANEL_WIDTH`.
+`closeAllPanels()` reverses this by calling `electronAPI.setPanelVisible(false)`.
+
+### IPC surface (preload.js)
+
+| API | IPC channel | Purpose |
+|---|---|---|
+| `electronAPI.setPanelVisible(bool)` | `panel-visible` | Resize active BrowserView when panels open/close |
+| `electronAPI.toggleSidebar()` | `toggle-sidebar` | Toggle admin-hub BrowserView sidebar |
+| `electronAPI.toggleChromeDevTools()` | `toggle-chrome-devtools` | Open DevTools on chrome renderer window |
+
+### Key extension points
 
 | File | What to modify |
 |---|---|
 | `main.js` — `registerIPC()` | Add new IPC handlers |
 | `main.js` — `buildAppMenu()` | Add menu items |
 | `preload.js` | Expose new `electronAPI.*` methods |
-| `src/browser.js` | Wire new UI events |
-| `src/browser.html + .css` | Modify chrome UI |
+| `src/browser.js` | Wire new UI events; add panels via `openPanel()` |
+| `src/browser.html + .css` | Add panel `<div>` elements and CSS |
 
 The gateway origin is `http://127.0.0.1:8080`. Gateway-origin URLs open in a new tab;
 all other URLs open in the system browser via `shell.openExternal()`.

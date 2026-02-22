@@ -71,8 +71,12 @@ The Electron shell (`browser-shell/`) wraps the gateway with a full tabbed brows
 | **Multi-tab** | Create, switch, close tabs; each is an isolated BrowserView |
 | **Live tab bar** | Tab bar stays in sync with main process via `tabs-updated` IPC events |
 | **Address bar** | URL display, smart navigation, DuckDuckGo fallback for queries |
+| **Bookmark star** | ★ button in address bar toggles bookmark for the current page; bookmark list in the panel |
+| **Zoom indicator** | Zoom level badge in address bar; updated on `did-finish-load` |
 | **Window controls** | Custom minimize / maximize / close buttons (hidden-titlebar mode) |
-| **Admin sidebar** | 340 px panel with the admin hub; toggle via Ctrl+Shift+A or ☰ |
+| **Admin sidebar** | 340 px `BrowserView` with the admin hub; toggle via Ctrl+Shift+A or ☰ |
+| **⋮ App menu** | Three-dot native popup with History, Settings, Clear Data, Dev Addons items |
+| **Chrome panels** | Five 360 px overlay panels (bookmarks, history, settings, clear-data, dev-addons); `panel-visible` IPC shrinks active BrowserView so panels are never hidden behind it |
 | **Tab snapshot** | Page HTML pushed to gateway 1.8 s after each navigation |
 | **Addon injection** | Polls `GET /tab/inject-queue` every 3 s; executes pending JS in active tab |
 | **Keyboard shortcuts** | Ctrl+T new tab, Ctrl+W close, Ctrl+1-8 switch, Ctrl+L focus URL |
