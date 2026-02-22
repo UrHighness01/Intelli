@@ -251,7 +251,6 @@ colorama==0.4.6 \
     # via
     #   click
     #   pytest
-    #   uvicorn
 cryptography==46.0.5 \
     --hash=sha256:02f547fce831f5096c9a567fd41bc12ca8f11df260959ecc7c3202555cc47a72 \
     --hash=sha256:039917b0dc418bb9f6edce8a906572d69e74bd330b0b3fea4f79dab7f8ddd235 \
@@ -361,9 +360,7 @@ httptools==0.7.1 \
     --hash=sha256:f25bbaf1235e27704f1a7b86cd3304eabc04f569c828101d94a0e605ef7205a5 \
     --hash=sha256:f65744d7a8bdb4bda5e1fa23e4ba16832860606fcc09d674d56e425e991539ec \
     --hash=sha256:f72fdbae2dbc6e68b8239defb48e6a5937b12218e6ffc2c7846cc37befa84362
-    # via
-    #   -r requirements.in
-    #   uvicorn
+    # via -r requirements.in
 httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
@@ -711,9 +708,7 @@ pytest==9.0.2 \
 python-dotenv==1.2.1 \
     --hash=sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6 \
     --hash=sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61
-    # via
-    #   -r requirements.in
-    #   uvicorn
+    # via -r requirements.in
 pywin32-ctypes==0.2.3 \
     --hash=sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8 \
     --hash=sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755
@@ -792,9 +787,7 @@ pyyaml==6.0.3 \
     --hash=sha256:f7057c9a337546edc7973c0d3ba84ddcdf0daa14533c2065749c9075001090e6 \
     --hash=sha256:fa160448684b4e94d80416c0fa4aac48967a969efe22931448d853ada8baf926 \
     --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
-    # via
-    #   -r requirements.in
-    #   uvicorn
+    # via -r requirements.in
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231 \
     --hash=sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8
@@ -958,7 +951,7 @@ urllib3==2.6.3 \
     --hash=sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed \
     --hash=sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4
     # via requests
-uvicorn[standard]==0.41.0 \
+uvicorn==0.41.0 \
     --hash=sha256:09d11cf7008da33113824ee5a1c6422d89fbc2ff476540d69a34c87fab8b571a \
     --hash=sha256:29e35b1d2c36a04b9e180d4007ede3bcb32a85fbdfd6c6aeb3f26839de088187
     # via -r requirements.in
@@ -1072,9 +1065,7 @@ watchfiles==1.1.1 \
     --hash=sha256:f57b396167a2565a4e8b5e56a5a1c537571733992b226f4f1197d79e94cf0ae5 \
     --hash=sha256:f8979280bdafff686ba5e4d8f97840f929a87ed9cdf133cbbd42f7766774d2aa \
     --hash=sha256:f9a2ae5c91cecc9edd47e041a930490c31c3afb1f5e6d71de3dc671bfaca02bf
-    # via
-    #   -r requirements.in
-    #   uvicorn
+    # via -r requirements.in
 websockets==16.0 \
     --hash=sha256:0298d07ee155e2e9fda5be8a9042200dd2e3bb0b8a38482156576f863a9d457c \
     --hash=sha256:04cdd5d2d1dacbad0a7bf36ccbcd3ccd5a30ee188f2560b7a62a30d14107b31a \
@@ -1137,9 +1128,7 @@ websockets==16.0 \
     --hash=sha256:eaded469f5e5b7294e2bdca0ab06becb6756ea86894a47806456089298813c89 \
     --hash=sha256:f4a32d1bd841d4bcbffdcb3d2ce50c09c3909fbead375ab28d0181af89fd04da \
     --hash=sha256:fd3cb4adb94a2a6e2b7c0d8d05cb94e6f1c81a0cf9dc2694fb65c7e8d94c42e4
-    # via
-    #   -r requirements.in
-    #   uvicorn
+    # via -r requirements.in
 zipp==3.23.0 \
     --hash=sha256:071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e \
     --hash=sha256:a07157588a12518c9d4034df3fbbee09c814741a33ff63c05fa29d26a2404166

@@ -3,7 +3,11 @@
 # to regenerate the pinned lock file.
 
 fastapi>=0.95,<1
-uvicorn[standard]>=0.22
+# uvicorn without [standard] extras bracket — the extras (httptools,
+# websockets, python-dotenv, watchfiles) are pinned individually below
+# so uvicorn's extras metadata no longer introduces unpinned deps like
+# uvloop (Linux-only, no Windows wheel, cannot be hashed cross-platform).
+uvicorn>=0.22
 jsonschema>=4.21.0,<5
 httpx>=0.24
 pytest>=7.4
