@@ -44,6 +44,15 @@ const { randomBytes } = require('crypto');
 const BOOTSTRAP_SECRET = randomBytes(24).toString('hex');
 let adminToken = null;  // populated in app.whenReady after gateway start
 
+// ─── Auto-updater (graceful degradation — not available in dev without publish) ─
+let autoUpdater = null;
+try {
+  autoUpdater = require('electron-updater').autoUpdater;
+  autoUpdater.autoDownload          = true;
+  autoUpdater.autoInstallOnAppQuit  = true;
+  autoUpdater.logger                = null;  // suppress verbose file logging
+} catch { /* dev env or stripped build without electron-updater */ }
+
 // ─── Tab state ────────────────────────────────────────────────────────────────
 // tabs[id] = { view: BrowserView, id: number }
 let tabs        = {};
@@ -545,6 +554,71 @@ function registerIPC() {
     }
   });
 
+  // ── captureTab — on-demand agent snapshot via POST /tab/preview ──────────
+  // Captures page HTML, posts to the gateway's sanitization + consent endpoint,
+  // and returns the sanitized preview JSON to the caller (sidebar / agent panel).
+  ipcMain.handle('capture-tab', async () => {
+    const tab = tabs[activeTabId];
+    if (!tab) return null;
+    const wc  = tab.view.webContents;
+    const url = wc.getURL();
+    const title = wc.getTitle();
+
+    let html = '';
+    try {
+      html = await wc.executeJavaScript('document.documentElement.outerHTML');
+    } catch (e) {
+      console.error('[capture-tab] HTML capture failed:', e.message);
+    }
+
+    // Optionally capture a page screenshot (NativeImage → base64 PNG)
+    let screenshotDataUrl = null;
+    try {
+      const image = await wc.capturePage();
+      if (!image.isEmpty()) screenshotDataUrl = image.toDataURL();
+    } catch (e) {
+      console.error('[capture-tab] capturePage failed:', e.message);
+    }
+
+    // POST to gateway /tab/preview (handles sanitization + consent logging)
+    const payload = JSON.stringify({ html, url, title });
+    return new Promise((resolve) => {
+      const reqOpts = {
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/tab/preview',
+        method:   'POST',
+        headers:  {
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          ...(adminToken ? { Authorization: 'Bearer ' + adminToken } : {}),
+        },
+      };
+      const req = http.request(reqOpts, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          let result = null;
+          try { result = JSON.parse(body); } catch { /* non-JSON */ }
+          resolve({
+            ok:                res.statusCode >= 200 && res.statusCode < 300,
+            status:            res.statusCode,
+            url,
+            title,
+            screenshotDataUrl, // null if capturePage failed / not available
+            result,            // sanitized preview from gateway
+          });
+        });
+      });
+      req.on('error', (e) => {
+        console.error('[capture-tab] gateway POST failed:', e.message);
+        resolve({ ok: false, status: 0, url, title, screenshotDataUrl: null, result: null });
+      });
+      req.write(payload);
+      req.end();
+    });
+  });
+
   // ── Script injection — run JS in the active tab (used by addon system) ───
   ipcMain.handle('inject-script', async (_, code) => {
     const tab = tabs[activeTabId];
@@ -728,7 +802,7 @@ function registerIPC() {
           webviewTag:       false,
         },
       });
-      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/`);
+      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/chat.html`);
     }
 
     sidebarOpen = !sidebarOpen;
@@ -797,6 +871,11 @@ function buildAppMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+
+  // ── Auto-updater IPC ─────────────────────────────────────────────────────
+  ipcMain.handle('install-update', () => {
+    autoUpdater?.quitAndInstall();
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -940,6 +1019,27 @@ app.whenReady().then(async () => {
   // first, window-all-closed fires immediately and app.quit() kills the process.
   createMainWindow();
   splash.destroy();
+
+  // Auto-update: listen for events and relay to the chrome renderer.
+  // checkForUpdates() is deferred 5 s so the window has time to fully load.
+  if (autoUpdater) {
+    autoUpdater.on('update-available', (info) => {
+      mainWin?.webContents.send('update-available', {
+        version: info.version,
+        releaseDate: info.releaseDate,
+      });
+    });
+    autoUpdater.on('update-downloaded', () => {
+      mainWin?.webContents.send('update-downloaded');
+    });
+    autoUpdater.on('error', (e) => {
+      console.warn('[updater] error:', e.message);
+    });
+    setTimeout(() => {
+      try { autoUpdater.checkForUpdates(); }
+      catch (e) { console.warn('[updater] checkForUpdates failed:', e.message); }
+    }, 5000);
+  }
 });
 
 // macOS: re-create window on dock icon click

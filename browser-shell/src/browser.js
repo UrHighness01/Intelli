@@ -219,8 +219,8 @@ async function toggleSidebar() {
   if ($btnSidebar) {
     $btnSidebar.style.color = result.open ? 'var(--accent)' : '';
     $btnSidebar.title = result.open
-      ? 'Close admin sidebar (Ctrl+Shift+A)'
-      : 'Admin hub sidebar (Ctrl+Shift+A)';
+      ? 'Close AI Chat sidebar (Ctrl+Shift+A)'
+      : 'Open AI Chat sidebar (Ctrl+Shift+A)';
   }
 }
 if ($btnSidebar) $btnSidebar.addEventListener('click', toggleSidebar);
@@ -537,6 +537,36 @@ async function init() {
   await pollGateway();
   setInterval(pollGateway, 5000);
   refreshZoomIndicator();
+
+  // ── Auto-update notifications ─────────────────────────────────────────────
+  const $updateBar     = document.getElementById('update-bar');
+  const $updateMsg     = document.getElementById('update-msg');
+  const $updateVersion = document.getElementById('update-version');
+  const $btnInstall    = document.getElementById('btn-update-install');
+  const $btnDismiss    = document.getElementById('btn-update-dismiss');
+
+  if (window.electronAPI?.onUpdateAvailable) {
+    window.electronAPI.onUpdateAvailable((info) => {
+      if ($updateVersion) $updateVersion.textContent = info.version || '';
+      if ($updateMsg)     $updateMsg.firstChild.textContent = 'Update available: ';
+      if ($btnInstall)    $btnInstall.textContent = 'Download & Install';
+      $updateBar?.classList.remove('hidden');
+    });
+
+    window.electronAPI.onUpdateDownloaded(() => {
+      if ($updateMsg)  $updateMsg.firstChild.textContent = 'Update downloaded — ';
+      if ($btnInstall) $btnInstall.textContent = 'Restart & Install';
+      $updateBar?.classList.remove('hidden');
+    });
+
+    $btnInstall?.addEventListener('click', () => {
+      window.electronAPI.installUpdate();
+    });
+
+    $btnDismiss?.addEventListener('click', () => {
+      $updateBar?.classList.add('hidden');
+    });
+  }
 }
 
 init();

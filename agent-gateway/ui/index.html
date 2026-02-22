@@ -177,6 +177,12 @@
     <span id="card-search-count"></span>
   </div>
   <div class="tool-grid">
+    <a class="tool-card" href="chat.html">
+      <div class="card-icon">💬</div>
+      <div class="card-name">AI Chat</div>
+      <div class="card-desc">Streaming chat panel — talk directly to any configured LLM provider via POST /chat/complete with SSE token streaming.</div>
+      <span class="card-badge badge-live">Stream</span>
+    </a>
     <a class="tool-card" href="approvals.html">
       <div class="card-icon">⏳</div>
       <div class="card-name">Approvals</div>
@@ -350,5 +356,6 @@ function filterCards(query) {
 // Clear search if the user clicks the ✕ button built into <input type="search">
 document.getElementById('card-search').addEventListener('search', e => filterCards(e.target.value));
 </script>
+  <script type="module" src="i18n.js"></script>
 </body>
 </html>

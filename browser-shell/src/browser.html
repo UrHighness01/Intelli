@@ -50,11 +50,20 @@
     </div>
 
     <button class="nav-btn" id="btn-sidebar"
-            title="Admin hub sidebar (Ctrl+Shift+A)">&#9776;</button>
+            title="AI Chat sidebar (Ctrl+Shift+A)" aria-label="Toggle AI Chat sidebar">&#9776;</button>
 
     <!-- three-dot menu -->
     <button class="nav-btn" id="btn-app-menu"
             title="Intelli menu">&#8942;</button>
+  </div>
+
+  <!-- Update notification bar — hidden until an update is available -->
+  <div id="update-bar" class="hidden">
+    <span id="update-msg">Update available: <strong id="update-version"></strong></span>
+    <div class="update-actions">
+      <button id="btn-update-install" class="update-btn-primary">Restart &amp; Install</button>
+      <button id="btn-update-dismiss" class="update-btn-dismiss">&#10005;</button>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════

@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Tab snapshot & script injection (addon / agent capabilities) ──────────
   /** Capture the active tab's full HTML. Resolves { url, title, html } or null. */
   getTabSnapshot: ()       => ipcRenderer.invoke('get-tab-snapshot'),
+  /**
+   * On-demand agent snapshot: captures tab HTML + optional screenshot, posts
+   * to POST /tab/preview for sanitization + consent logging, and resolves with
+   * { ok, status, url, title, screenshotDataUrl, result } where `result` is
+   * the gateway's sanitized preview JSON.
+   */
+  captureTab: () => ipcRenderer.invoke('capture-tab'),
   /** Execute arbitrary JS in the active tab BrowserView. Use with care. */
   injectScript:   (code)   => ipcRenderer.invoke('inject-script', code),
   /** Toggle DevTools for the active page (same as Ctrl+Shift+I in Chrome). */
@@ -92,6 +99,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNavState:          (cb) => ipcRenderer.on('nav-state',           (_, d) => cb(d)),
   /** Called whenever tabs are created, closed, or switched. cb receives the full tab array. */
   onTabsUpdated:       (cb) => ipcRenderer.on('tabs-updated',        (_, tabs) => cb(tabs)),
+
+  // ── Auto-updater notifications ────────────────────────────────────────────
+  /** Called with { version, releaseDate } when a new release is available. */
+  onUpdateAvailable:   (cb) => ipcRenderer.on('update-available',  (_, info) => cb(info)),
+  /** Called with no arguments once the update binary has been downloaded. */
+  onUpdateDownloaded:  (cb) => ipcRenderer.on('update-downloaded', ()        => cb()),
+  /** Quit and install the downloaded update immediately. */
+  installUpdate:       ()   => ipcRenderer.invoke('install-update'),
 
   // Remove all listeners for a channel (cleanup)
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

@@ -94,6 +94,7 @@ The table below tracks the current implementation state of all major threat miti
 | IPC payload size limit (256 KB) | `tool_proxy.py` | ✅ Implemented |
 | Tool call name size limit (`max_length=256`) | `app.py` — Pydantic `Field(..., max_length=256)` on `ToolCall.tool`; returns 422 for oversized names | ✅ Implemented |
 | Fuzzer payload coverage (94 adversarial cases) | `tests/test_fuzzer_payloads.py` — oversized names, emoji flood, lone surrogates, injection strings | ✅ Implemented |
+| SSE streaming endpoint (`/chat/complete?stream=true`) rate-limited | existing `rate_limiter` + `check_user_rate_limit` Depends applied before stream branch; `Access-Control-Allow-Origin: *` scoped to localhost-bound interface only | ✅ Implemented |
 | Per-call timeout enforcement | `tool_proxy.py` | ✅ Implemented |
 | Docker runner scaffold | `sandbox.py` | ✅ Scaffold |
 | OS keyring + Vault + env fallback | `key_rotation.py` | ✅ Implemented |
@@ -107,14 +108,14 @@ The table below tracks the current implementation state of all major threat miti
 | Consent / context timeline | `consent_log.py` | ✅ Implemented |
 | Agent memory (per-agent key-value + TTL) | `agent_memory.py` | ✅ Implemented |
 | Scheduler (recurring tool calls) | `scheduler.py` | ✅ Implemented |
-| seccomp profile for worker (Linux) | — | ❌ Pending |
+| seccomp profile for worker (Linux) | `agent-gateway/sandbox/seccomp-worker.json` — deny-all default; allowlist for Python runtime; blocks net/exec/ptrace/bpf/kexec/… | ✅ Done |
 | Read-only filesystem for worker container | — | ❌ Pending |
 | CPU / memory quota in production | — | ❌ Pending |
 | TLS termination (nginx / Caddy) | deployment docs | ❌ Pending (ops) |
-| CORS restriction to localhost | — | ❌ Pending |
-| Outbound allowlist for provider adapters | — | ❌ Pending |
-| Log shipping to external SIEM | — | ❌ Pending |
-| Pinned dependency hashes | `requirements.txt` | ❌ Pending |
+| CORS restriction to localhost | `CORSMiddleware` + `AGENT_GATEWAY_CORS_ORIGINS` env var | ✅ Implemented |
+| Outbound allowlist for provider adapters | `_check_outbound_url()` in `providers/adapters.py`; `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST` env var; 16 tests | ✅ Done |
+| Log shipping to external SIEM | `scripts/log_shipper.py` — NDJSON batches, Bearer auth, retries | ✅ Done |
+| Pinned dependency hashes | `requirements.lock` (`pip-compile --generate-hashes`); CI uses `--require-hashes` | ✅ Done |
 | Signed release tags + provenance | — | ❌ Pending |
 | OAuth2 / OIDC federation | — | ❌ Future |
 | Encrypted audit log at rest | — | ❌ Future |

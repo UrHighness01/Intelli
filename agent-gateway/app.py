@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import json
 from jsonschema import validate, ValidationError
@@ -32,9 +33,58 @@ import addons as _addons
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
 
+# ---------------------------------------------------------------------------
+# CORS — restrict to localhost by default; override via env var
+# ---------------------------------------------------------------------------
+_cors_origins_raw = os.environ.get('AGENT_GATEWAY_CORS_ORIGINS', 'http://127.0.0.1:8080')
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(',') if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
 SCHEMA_PATH = Path(__file__).with_name("tool_schema.json")
 RULES_PATH = Path(__file__).with_name('redaction_rules.json')
 AUDIT_PATH = Path(__file__).with_name('audit.log')
+
+# ---------------------------------------------------------------------------
+# Audit-log encryption (AES-256-GCM) — Item 13
+# Set INTELLI_AUDIT_ENCRYPT_KEY to a 64-hex-char (32-byte) random key to
+# enable at-rest encryption of every audit log line.
+# Generate key: python -c "import secrets; print(secrets.token_hex(32))"
+# ---------------------------------------------------------------------------
+import base64 as _b64
+
+def _audit_key() -> bytes | None:
+    """Return 32-byte AES-256-GCM key from INTELLI_AUDIT_ENCRYPT_KEY, or None."""
+    raw = os.environ.get('INTELLI_AUDIT_ENCRYPT_KEY', '').strip()
+    if not raw:
+        return None
+    key = bytes.fromhex(raw)
+    if len(key) != 32:
+        raise ValueError(
+            f'INTELLI_AUDIT_ENCRYPT_KEY must be 64 hex chars (32 bytes), got {len(key)}'
+        )
+    return key
+
+def _encrypt_audit_line(line: str, key: bytes) -> str:
+    """Encrypt a JSONL audit line with AES-256-GCM; return base64(nonce+ciphertext)."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    import secrets as _sec
+    nonce = _sec.token_bytes(12)
+    ct = AESGCM(key).encrypt(nonce, line.encode('utf-8'), None)
+    return _b64.b64encode(nonce + ct).decode('ascii')
+
+def _decrypt_audit_line(enc: str, key: bytes) -> str:
+    """Decrypt a base64-encoded AES-256-GCM audit line; return plaintext JSON."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    raw = _b64.b64decode(enc)
+    nonce, ct = raw[:12], raw[12:]
+    return AESGCM(key).decrypt(nonce, ct, None).decode('utf-8')
+
 TOOL_SCHEMA = load_schema_from_file(SCHEMA_PATH)
 supervisor = Supervisor(TOOL_SCHEMA)
 # Wire the scheduler to execute tool calls via the supervisor
@@ -66,8 +116,12 @@ def _save_rules():
 def _audit(event: str, details: dict, actor: str = None):
     try:
         entry = {'ts': datetime.now(timezone.utc).isoformat(), 'event': event, 'actor': actor, 'details': details}
+        json_line = json.dumps(entry, ensure_ascii=False)
+        key = _audit_key()
+        if key:
+            json_line = _encrypt_audit_line(json_line, key)
         with AUDIT_PATH.open('a', encoding='utf-8') as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.write(json_line + "\n")
     except Exception:
         pass
 
@@ -283,11 +337,17 @@ def audit_export(
     actor_f  = actor.lower()  if actor  else ''
     action_f = action.lower() if action else ''
 
+    _key = _audit_key()
     entries = []
     for line in lines:
         line = line.strip()
         if not line:
             continue
+        if _key:
+            try:
+                line = _decrypt_audit_line(line, _key)
+            except Exception:
+                pass  # plaintext fallback for mixed / unencrypted lines
         try:
             entry = json.loads(line)
         except Exception:
@@ -622,6 +682,13 @@ def admin_revoke(payload: dict, request: Request):
 @app.get('/tab/redaction-rules')
 def list_redaction_rules(origin: str):
     return {origin: list(_redaction_rules.get(origin, set()))}
+
+
+@app.get('/admin/redaction-rules')
+def admin_list_all_redaction_rules(request: Request):
+    """List every configured origin and its redaction fields (admin-gated)."""
+    _require_admin_token(request)
+    return {'rules': {k: sorted(v) for k, v in _redaction_rules.items()}}
 
 
 @app.post('/tab/redaction-rules')
@@ -1011,11 +1078,21 @@ class ChatRequest(BaseModel):
 
 
 @app.post('/chat/complete')
-def chat_complete(req: ChatRequest, request: Request, _rl=Depends(rate_limiter)):
+def chat_complete(
+    req: ChatRequest,
+    request: Request,
+    _rl=Depends(rate_limiter),
+    stream: bool = Query(False, description='Return response as SSE text/event-stream'),
+):
     """Proxy a chat-completion request to the configured provider.
 
     Requires a valid Bearer token (any authenticated user).
     Returns the provider's reply in a unified format.
+
+    When ``?stream=true`` is passed the response is sent as ``text/event-stream``.
+    Each ``data:`` event carries a JSON object:
+      - ``{"token": "<word>", "done": false}``  – one word token at a time
+      - ``{"content": "...", "model": "...", "done": true}``  – final event with full reply
     """
     authh = request.headers.get('authorization') or request.headers.get('Authorization')
     if not authh:
@@ -1048,6 +1125,42 @@ def chat_complete(req: ChatRequest, request: Request, _rl=Depends(rate_limiter))
     kwargs: dict = {}
     if req.model:
         kwargs['model'] = req.model
+
+    if stream:
+        # SSE streaming: run the blocking adapter call synchronously inside a
+        # generator that emits word-by-word token events followed by a final
+        # done event with the complete result payload.
+        def _sse_gen():
+            import json as _json
+            try:
+                result = adapter.chat_complete(
+                    messages=req.messages,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                    **kwargs,
+                )
+                _metrics.inc('provider_requests_total', labels={'provider': req.provider})
+                content: str = result.get('content', '')
+                # Emit tokens word by word for a streaming-feel UX
+                words = content.split(' ')
+                for i, word in enumerate(words):
+                    token = word + (' ' if i < len(words) - 1 else '')
+                    yield f"data: {_json.dumps({'token': token, 'done': False})}\n\n"
+                # Final event: full result + done=True
+                yield f"data: {_json.dumps({**result, 'done': True})}\n\n"
+            except Exception as exc:
+                _metrics.inc('provider_errors_total', labels={'provider': req.provider})
+                yield f"data: {_json.dumps({'error': str(exc), 'done': True})}\n\n"
+
+        return StreamingResponse(
+            _sse_gen(),
+            media_type='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+                'Access-Control-Allow-Origin': '*',
+            },
+        )
 
     try:
         result = adapter.chat_complete(

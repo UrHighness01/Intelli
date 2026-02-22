@@ -25,6 +25,7 @@ You will receive an acknowledgement within 72 hours.
 | SSRF via provider adapters | Adapter calls are scaffolded (no live network) | Scaffold |
 | Denial of service (large payloads) | 256 KB IPC payload limit in worker | Implemented |
 | Denial of service (oversized tool-call names) | `max_length=256` on `ToolCall.tool` via Pydantic `Field` — returns 422 | Implemented |
+| Outbound SSRF via provider adapters | `_check_outbound_url()` in `providers/adapters.py` + `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST` | Implemented |
 
 ---
 
@@ -51,7 +52,7 @@ You will receive an acknowledgement within 72 hours.
 - [x] Tool call name size limit — Pydantic `Field(..., max_length=256)` on `ToolCall.tool`; returns 422 for oversized identifiers
 - [x] Per-call timeout enforcement
 - [x] Docker runner scaffold with `network_disabled=True`
-- [ ] seccomp profile for subprocess worker (Linux)
+- [x] seccomp allowlist profile for worker process — `agent-gateway/sandbox/seccomp-worker.json` (Linux/Docker; denies networking, process-spawning, and dangerous kernel interfaces)
 - [ ] Read-only filesystem for worker container
 - [ ] CPU and memory quota enforcement in production
 
@@ -59,18 +60,19 @@ You will receive an acknowledgement within 72 hours.
 - [ ] TLS termination (run behind nginx/Caddy in production)
 - [ ] CORS policy — restrict `/tools/call` to localhost in production
 - [ ] Outbound allowlist for provider adapter HTTP calls
+- [x] SSE streaming CORS — `POST /chat/complete?stream=true` returns `Access-Control-Allow-Origin: *`; safe in practice because the gateway binds to `127.0.0.1` only; in production, pin this header to the local origin instead of `*`
 
 ### Audit & Monitoring
 - [x] Append-only audit log for all admin actions
 - [x] Prometheus metrics endpoint
 - [x] Audit export endpoint (`/admin/audit`)
-- [ ] Log shipping to external SIEM
+- [x] Log shipping to external SIEM
 - [ ] Alerting on `worker_healthy=0` or high validation error rate
 
 ### Supply Chain
 - [x] `pip-audit` in CI (checks for known CVEs)
 - [x] SBOM generation via `pip-licenses`
-- [ ] Pinned dependency hashes in `requirements.txt`
+- [x] Pinned dependency hashes in `requirements.lock` (`pip-compile --generate-hashes`)
 - [ ] Signed release tags and provenance attestation
 
 ### Data Privacy

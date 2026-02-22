@@ -1,0 +1,14 @@
+# requirements.in — abstract dependencies (version ranges)
+# Run: python -m piptools compile --generate-hashes requirements.in -o requirements.lock
+# to regenerate the pinned lock file.
+
+fastapi>=0.95,<1
+uvicorn[standard]>=0.22
+jsonschema>=4.21.0,<5
+httpx>=0.24
+pytest>=7.4
+beautifulsoup4>=4.12
+lxml>=4.9
+keyring>=23.8
+requests>=2.31
+pyyaml>=6.0

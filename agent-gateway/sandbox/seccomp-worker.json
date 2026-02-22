@@ -1,0 +1,162 @@
+{
+  "comment": "seccomp allowlist for the Intelli sandbox worker process (Linux/Docker only). Default action is ERRNO (deny). Only the syscalls required for a Python JSON-in/JSON-out worker with no network or subprocess spawning are allowed. Apply via: docker run --security-opt seccomp=/path/to/seccomp-worker.json ...",
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "archMap": [
+    { "architecture": "SCMP_ARCH_X86_64",  "subArchitectures": ["SCMP_ARCH_X86", "SCMP_ARCH_X32"] },
+    { "architecture": "SCMP_ARCH_AARCH64", "subArchitectures": ["SCMP_ARCH_ARM"] }
+  ],
+  "syscalls": [
+    {
+      "comment": "Basic file descriptor I/O — stdin/stdout/stderr + source file reads",
+      "names": [
+        "read", "write", "pread64", "pwrite64", "readv", "writev",
+        "open", "openat", "creat", "close", "close_range"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "File metadata and directory traversal needed by Python importer",
+      "names": [
+        "fstat", "stat", "lstat", "newfstatat", "statx",
+        "getdents", "getdents64",
+        "access", "faccessat", "faccessat2",
+        "readlink", "readlinkat",
+        "getcwd", "chdir", "fchdir"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Memory management — Python allocator, GC, ctypes, mmap",
+      "names": [
+        "mmap", "munmap", "mprotect", "mremap", "brk",
+        "madvise", "mincore", "msync",
+        "mlock", "munlock", "mlockall", "munlockall", "mlock2",
+        "memfd_create", "membarrier"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Signal handling — Python signal module + thread signals",
+      "names": [
+        "rt_sigaction", "rt_sigprocmask", "rt_sigreturn",
+        "rt_sigpending", "rt_sigtimedwait", "rt_sigqueueinfo",
+        "rt_sigsuspend", "rt_tgsigqueueinfo", "sigaltstack"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Thread and futex primitives — threading module, GIL",
+      "names": [
+        "futex", "clone", "set_robust_list", "get_robust_list",
+        "set_tid_address", "gettid",
+        "sched_yield", "sched_getaffinity",
+        "sched_getscheduler", "sched_getparam"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Process identity — getpid, uid/gid queries (read-only)",
+      "names": [
+        "getpid", "getppid", "getpgid", "getpgrp", "getsid",
+        "getuid", "getgid", "geteuid", "getegid",
+        "getgroups", "getresuid", "getresgid"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Resource limits — query only",
+      "names": ["getrlimit", "getrusage", "prlimit64"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Clock and time — datetime, time.sleep, perf_counter",
+      "names": [
+        "clock_gettime", "clock_getres", "clock_nanosleep",
+        "gettimeofday", "time", "nanosleep"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "File descriptor management — dup + non-blocking flags",
+      "names": ["dup", "dup2", "dup3", "fcntl", "ioctl", "flock"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Process exit — clean shutdown",
+      "names": ["exit", "exit_group"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "prctl / arch_prctl — thread naming (PR_SET_NAME) and TLS setup",
+      "names": ["prctl", "arch_prctl"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Entropy — secrets, uuid, hashlib random bytes",
+      "names": ["getrandom"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Uname — platform.system() / platform.machine()",
+      "names": ["uname"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Writable temp files — tempfile module",
+      "names": [
+        "mkdir", "mkdirat", "unlink", "unlinkat",
+        "rename", "renameat", "renameat2",
+        "ftruncate", "fallocate", "fsync", "fdatasync",
+        "chmod", "fchmod", "fchmodat",
+        "utimensat", "utimes", "futimesat"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Pipes and polling — logging handlers and stdlib I/O helpers",
+      "names": ["pipe", "pipe2", "select", "pselect6", "poll", "ppoll"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "Extended attributes — pkg_resources / importlib.metadata may query them",
+      "names": [
+        "getxattr", "lgetxattr", "fgetxattr",
+        "listxattr", "llistxattr", "flistxattr"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "inotify — importlib reloader / watchdog in dev mode",
+      "names": ["inotify_init", "inotify_init1", "inotify_add_watch", "inotify_rm_watch"],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "comment": "BLOCKED: network access — worker must not initiate outbound connections",
+      "names": [
+        "socket", "connect", "bind", "listen", "accept", "accept4",
+        "sendto", "recvfrom", "sendmsg", "recvmsg", "sendmmsg", "recvmmsg",
+        "getsockname", "getpeername", "setsockopt", "getsockopt", "socketpair", "shutdown"
+      ],
+      "action": "SCMP_ACT_ERRNO"
+    },
+    {
+      "comment": "BLOCKED: process spawning — worker must not exec new binaries",
+      "names": ["fork", "vfork", "execve", "execveat"],
+      "action": "SCMP_ACT_ERRNO"
+    },
+    {
+      "comment": "BLOCKED: dangerous kernel interfaces",
+      "names": [
+        "ptrace", "process_vm_readv", "process_vm_writev",
+        "reboot", "mount", "umount2", "pivot_root", "chroot",
+        "swapon", "swapoff", "sethostname", "setdomainname",
+        "init_module", "delete_module", "finit_module",
+        "kexec_load", "kexec_file_load",
+        "bpf", "perf_event_open", "seccomp",
+        "add_key", "request_key", "keyctl",
+        "acct", "quotactl", "iopl", "ioperm"
+      ],
+      "action": "SCMP_ACT_ERRNO"
+    }
+  ]
+}

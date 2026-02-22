@@ -337,7 +337,9 @@ python gateway_ctl.py metrics tools
 
 ---
 
-## 17. Log Rotation
+## 17. Log Rotation & SIEM Shipping
+
+### Rotation
 
 The audit log is append-only at `agent-gateway/audit.log`.
 
@@ -347,7 +349,66 @@ tail -n 50000 agent-gateway/audit.log > /tmp/audit.tmp \
   && mv /tmp/audit.tmp agent-gateway/audit.log
 ```
 
-Recommended: ship to an external log aggregator (Loki / CloudWatch / Splunk) via log tailing.
+The log shipper handles rotation gracefully: if the file shrinks between polls it
+resets its read position to the beginning automatically.
+
+### Log Shipping Sidecar (`scripts/log_shipper.py`)
+
+`scripts/log_shipper.py` tails `audit.log` and POSTs batches of JSONL entries to
+a configurable SIEM / log-aggregation endpoint.
+
+**Quick start**
+
+```bash
+# Required: set your SIEM destination
+export INTELLI_SIEM_URL=https://my-siem.example.com/api/v1/logs
+
+# Optional: Bearer auth, batch size, poll interval
+export INTELLI_SIEM_TOKEN=mytoken
+export INTELLI_SIEM_BATCH_SIZE=100
+export INTELLI_SIEM_INTERVAL_SECS=5
+
+python scripts/log_shipper.py
+```
+
+**Environment variables**
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_SIEM_URL` | *(required)* | HTTP(S) endpoint to POST batches to |
+| `INTELLI_SIEM_BATCH_SIZE` | `50` | Entries per POST request |
+| `INTELLI_SIEM_INTERVAL_SECS` | `10` | Poll interval in seconds |
+| `INTELLI_AUDIT_LOG` | `agent-gateway/audit.log` | Path to the audit log |
+| `INTELLI_SIEM_TOKEN` | — | Bearer token for the SIEM endpoint |
+| `INTELLI_SIEM_RETRIES` | `3` | Max retries per batch on 5xx / network error |
+| `INTELLI_SIEM_RETRY_DELAY` | `2` | Seconds between retry attempts |
+
+**Behaviour**
+
+* Starts reading from the **end** of the existing file — historical entries are not
+  re-shipped on first run.
+* Lines that are not valid JSON are wrapped as `{"raw": "<line>"}` before shipping.
+* Batches are shipped as NDJSON (`Content-Type: application/x-ndjson`).
+* Retries up to `INTELLI_SIEM_RETRIES` times for HTTP 5xx responses or network
+  errors; client errors (4xx) are not retried.
+* Exits cleanly on `Ctrl-C` and prints the total number of shipped entries.
+
+**Running as a background service (systemd example)**
+
+```ini
+[Unit]
+Description=Intelli audit log shipper
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/intelli/siem.env
+ExecStart=/usr/bin/python3 /opt/intelli/scripts/log_shipper.py
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ---
 

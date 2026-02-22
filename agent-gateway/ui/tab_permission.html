@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Tab Snapshot Preview</title>
+  <title>Tab Snapshot & Redaction</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -10,15 +10,15 @@
       background: #0f1117;
       color: #e2e4f0;
       padding: 32px;
-      max-width: 960px;
+      max-width: 1020px;
       margin: 0 auto;
     }
-    h2 { font-size: 1.35rem; font-weight: 700; color: #6c63ff; margin-bottom: 6px; }
-    h3 { font-size: 1rem; font-weight: 600; color: #a9adc9; margin: 24px 0 8px; }
-    p  { color: #7b7f9e; font-size: 0.88rem; margin-bottom: 20px; }
+    h2 { font-size: 1.35rem; font-weight: 700; color: #6c63ff; margin-bottom: 4px; }
+    h3 { font-size: 1rem; font-weight: 600; color: #a9adc9; margin: 28px 0 8px; }
+    p  { color: #7b7f9e; font-size: 0.87rem; margin-bottom: 16px; }
     label {
       display: block;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
       color: #7b7f9e;
       text-transform: uppercase;
@@ -38,21 +38,25 @@
       transition: border-color 0.15s;
     }
     input:focus, textarea:focus { border-color: #6c63ff; }
-    textarea { height: 160px; resize: vertical; }
+    textarea { height: 130px; resize: vertical; }
     button {
-      margin-top: 12px;
-      padding: 8px 20px;
+      padding: 7px 18px;
       background: #6c63ff;
       color: #fff;
       border: none;
       border-radius: 6px;
-      font-size: 0.9rem;
+      font-size: 0.87rem;
       font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
     }
-    button:hover { background: #574fd6; }
-    button + button { margin-left: 8px; }
+    button:hover  { background: #574fd6; }
+    button.danger { background: #c0392b; }
+    button.danger:hover { background: #a93226; }
+    button.ghost  { background: #2e3150; color: #c0c4e0; }
+    button.ghost:hover  { background: #3b3f6a; }
+    .row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+    .row button { flex-shrink: 0; }
     pre {
       background: #1a1d2e;
       color: #c9d1d9;
@@ -61,21 +65,127 @@
       padding: 14px;
       white-space: pre-wrap;
       word-break: break-all;
-      max-height: 400px;
+      max-height: 380px;
       overflow: auto;
       font-size: 0.82rem;
       line-height: 1.55;
     }
-    .row { display: flex; gap: 8px; align-items: flex-start; }
-    .row button { margin-top: 0; }
+    /* ─── per-origin rules table ─── */
+    .rules-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .origin-card {
+      background: #1a1d2e;
+      border: 1px solid #2e3150;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .origin-card .origin-url {
+      font-size: 0.8rem;
+      color: #9d99c9;
+      margin-bottom: 8px;
+      word-break: break-all;
+      cursor: pointer;
+    }
+    .origin-card .origin-url:hover { color: #6c63ff; text-decoration: underline; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #23264a;
+      border: 1px solid #353870;
+      color: #c0c4e0;
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 0.78rem;
+    }
+    .tag .rm {
+      cursor: pointer;
+      color: #7b7f9e;
+      font-size: 0.9rem;
+      line-height: 1;
+    }
+    .tag .rm:hover { color: #e05c5c; }
+    .no-rules { font-size: 0.82rem; color: #4a4e72; font-style: italic; }
+    hr { border: none; border-top: 1px solid #1e2140; margin: 28px 0; }
+    /* ─── auth header ─── */
+    .auth-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      align-items: center;
+    }
+    .auth-bar input { max-width: 380px; }
+    .status-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #4a4e72;
+      flex-shrink: 0;
+    }
+    .status-dot.ok  { background: #27ae60; }
+    .status-dot.err { background: #c0392b; }
+    /* toast */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #23264a; color: #e2e4f0;
+      border: 1px solid #353870; border-radius: 8px;
+      padding: 10px 18px; font-size: 0.87rem;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    #toast.show { opacity: 1; }
   </style>
 </head>
 <body>
-  <h2>Tab Snapshot Preview</h2>
-  <p>Paste page HTML and URL to preview the sanitized snapshot, and set redaction fields for this origin.</p>
+  <h2>Tab Snapshot &amp; Redaction Rules</h2>
+  <p>Preview the sanitized DOM snapshot and manage per-origin field redaction rules inline.</p>
 
-  <label>Page URL</label>
-  <input id="url" placeholder="https://example.com" />
+  <!-- auth -->
+  <div class="auth-bar">
+    <div class="status-dot" id="dot"></div>
+    <input id="token" type="password" placeholder="Admin Bearer token" style="max-width:360px" />
+    <button onclick="loadAllRules()">Connect</button>
+  </div>
+
+  <!-- ── all configured origins ── -->
+  <h3>Configured Redaction Rules <small style="font-weight:400;font-size:0.8rem;color:#7b7f9e">(all origins)</small></h3>
+  <div id="rules-grid" class="rules-grid">
+    <p class="no-rules" style="grid-column:span 2">Not connected — enter an admin token and click Connect.</p>
+  </div>
+
+  <hr />
+
+  <!-- ── manage one origin ── -->
+  <h3>Manage Rules for an Origin</h3>
+  <p>Enter a URL (or click an origin above). Existing fields load automatically. Save appends or replaces the full field list.</p>
+
+  <label>Origin URL</label>
+  <input id="url" placeholder="https://example.com" oninput="debouncedLoad()" />
+
+  <label>Add field names <span style="font-weight:400;text-transform:none">(comma-separated or one at a time)</span></label>
+  <div class="row">
+    <input id="new-fields" placeholder="e.g. password, ssn, card_number" style="flex:1" />
+    <button onclick="addFields()">Add</button>
+  </div>
+
+  <label style="margin-top:14px">Current fields for this origin</label>
+  <div id="field-tags" class="tags" style="padding:10px; background:#1a1d2e; border:1px solid #2e3150; border-radius:6px; min-height:38px;">
+    <span class="no-rules">No fields configured</span>
+  </div>
+
+  <div class="row" style="margin-top:12px">
+    <button onclick="saveRules()">Save Rules</button>
+    <button class="ghost" onclick="clearOrigin()">Clear All Fields</button>
+  </div>
+
+  <hr />
+
+  <!-- ── snapshot preview ── -->
+  <h3>Preview Snapshot</h3>
+  <p>Paste raw HTML to see the sanitized output with the current redaction rules applied.</p>
 
   <label>Selected text <span style="font-weight:400;text-transform:none">(optional)</span></label>
   <input id="selected" placeholder="Highlighted text from the page" />
@@ -83,50 +193,194 @@
   <label>Page HTML</label>
   <textarea id="html" placeholder="&lt;html&gt;...&lt;/html&gt;"></textarea>
 
-  <button id="preview">Preview Snapshot</button>
+  <button style="margin-top:12px" id="preview-btn" onclick="previewSnapshot()">Preview Snapshot</button>
 
-  <h3>Sanitized Snapshot</h3>
+  <h3>Sanitized Output</h3>
   <pre id="out">— output will appear here —</pre>
 
-  <h3>Redaction Fields <span style="font-weight:400;font-size:0.82rem;color:#7b7f9e">(comma-separated input names for this origin)</span></h3>
-  <div class="row">
-    <input id="fields" placeholder="e.g. password, ssn, card_number" />
-    <button id="set">Save Rules</button>
-  </div>
+  <div id="toast"></div>
 
   <script>
-  async function postJSON(url, body) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return res.json();
+  // ─── state ───────────────────────────────────────────────────────────────
+  let _currentFields = [];   // pending fields for the selected origin
+  let _debounce = null;
+
+  // ─── helpers ─────────────────────────────────────────────────────────────
+  function token() { return document.getElementById('token').value.trim(); }
+  function url()   { return document.getElementById('url').value.trim(); }
+
+  function toast(msg, ms = 2200) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), ms);
   }
 
-  document.getElementById('preview').addEventListener('click', async () => {
-    const html     = document.getElementById('html').value;
-    const url      = document.getElementById('url').value;
-    const selected = document.getElementById('selected').value;
+  function authHeaders() {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() };
+  }
+
+  function setDot(state) {
+    const d = document.getElementById('dot');
+    d.className = 'status-dot' + (state === 'ok' ? ' ok' : state === 'err' ? ' err' : '');
+  }
+
+  // ─── field tag rendering ──────────────────────────────────────────────────
+  function renderFieldTags() {
+    const el = document.getElementById('field-tags');
+    if (_currentFields.length === 0) {
+      el.innerHTML = '<span class="no-rules">No fields configured</span>';
+      return;
+    }
+    el.innerHTML = _currentFields.map(f =>
+      `<span class="tag">${f}<span class="rm" onclick="removeField('${f}')" title="Remove">×</span></span>`
+    ).join('');
+  }
+
+  function removeField(name) {
+    _currentFields = _currentFields.filter(f => f !== name);
+    renderFieldTags();
+  }
+
+  function addFields() {
+    const raw = document.getElementById('new-fields').value;
+    const toAdd = raw.split(',').map(s => s.trim()).filter(Boolean);
+    toAdd.forEach(f => { if (!_currentFields.includes(f)) _currentFields.push(f); });
+    document.getElementById('new-fields').value = '';
+    renderFieldTags();
+  }
+
+  // ─── load rules for one origin ────────────────────────────────────────────
+  async function loadOriginRules(origin) {
+    if (!origin) { _currentFields = []; renderFieldTags(); return; }
     try {
-      const snap = await postJSON('/tab/preview', { html, url, selected_text: selected });
-      document.getElementById('out').textContent = JSON.stringify(snap, null, 2);
+      const r = await fetch('/tab/redaction-rules?origin=' + encodeURIComponent(origin));
+      const data = await r.json();
+      _currentFields = data[origin] || [];
+    } catch { _currentFields = []; }
+    renderFieldTags();
+  }
+
+  function debouncedLoad() {
+    clearTimeout(_debounce);
+    _debounce = setTimeout(() => loadOriginRules(url()), 420);
+  }
+
+  // ─── load ALL configured origins ─────────────────────────────────────────
+  async function loadAllRules() {
+    if (!token()) { toast('⚠ Enter an admin token first'); return; }
+    try {
+      const r = await fetch('/admin/redaction-rules', { headers: authHeaders() });
+      if (r.status === 401 || r.status === 403) { setDot('err'); toast('Token rejected'); return; }
+      const data = await r.json();
+      setDot('ok');
+      renderRulesGrid(data.rules || {});
+    } catch (e) {
+      setDot('err');
+      toast('Error loading rules: ' + e.message);
+    }
+  }
+
+  function renderRulesGrid(rules) {
+    const grid = document.getElementById('rules-grid');
+    const origins = Object.keys(rules).filter(o => rules[o].length > 0);
+    if (origins.length === 0) {
+      grid.innerHTML = '<p class="no-rules" style="grid-column:span 2">No redaction rules configured yet.</p>';
+      return;
+    }
+    grid.innerHTML = origins.map(origin => {
+      const fields = rules[origin];
+      const tags = fields.map(f =>
+        `<span class="tag">${f}<span class="rm" onclick="removeRemoteField('${origin}','${f}')" title="Remove">×</span></span>`
+      ).join('');
+      return `
+        <div class="origin-card">
+          <div class="origin-url" onclick="selectOrigin('${origin}')" title="Click to edit">${origin}</div>
+          <div class="tags">${tags}</div>
+        </div>`;
+    }).join('');
+  }
+
+  // click origin card → populate URL input and load its fields
+  function selectOrigin(origin) {
+    document.getElementById('url').value = origin;
+    loadOriginRules(origin);
+    window.scrollTo({top: document.getElementById('url').getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth'});
+  }
+
+  // remove a single field from an origin directly from the grid
+  async function removeRemoteField(origin, field) {
+    try {
+      const r = await fetch('/tab/redaction-rules?origin=' + encodeURIComponent(origin));
+      const data = await r.json();
+      const current = (data[origin] || []).filter(f => f !== field);
+      await fetch('/tab/redaction-rules', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ origin, fields: current }),
+      });
+      toast('Removed "' + field + '" from ' + origin);
+      // If this origin is currently selected, update local state too
+      if (url() === origin) { _currentFields = current; renderFieldTags(); }
+      await loadAllRules();
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  // ─── save / clear ─────────────────────────────────────────────────────────
+  async function saveRules() {
+    const origin = url();
+    if (!origin) { toast('⚠ Enter an origin URL first'); return; }
+    if (!token()) { toast('⚠ Enter an admin token first'); return; }
+    try {
+      const r = await fetch('/tab/redaction-rules', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ origin, fields: _currentFields }),
+      });
+      if (!r.ok) { toast('Error ' + r.status + ': ' + (await r.text())); return; }
+      toast('✓ Rules saved for ' + origin);
+      await loadAllRules();
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  async function clearOrigin() {
+    const origin = url();
+    if (!origin || !confirm('Clear ALL redaction fields for ' + origin + '?')) return;
+    _currentFields = [];
+    await saveRules();
+    renderFieldTags();
+  }
+
+  // ─── snapshot preview ─────────────────────────────────────────────────────
+  async function previewSnapshot() {
+    const html     = document.getElementById('html').value;
+    const origin   = url();
+    const selected = document.getElementById('selected').value;
+    if (!html) { toast('⚠ Paste some HTML first'); return; }
+    try {
+      const r = await fetch('/tab/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html, url: origin, selected_text: selected }),
+      });
+      document.getElementById('out').textContent = JSON.stringify(await r.json(), null, 2);
     } catch (e) {
       document.getElementById('out').textContent = 'Error: ' + e.message;
     }
-  });
+  }
 
-  document.getElementById('set').addEventListener('click', async () => {
-    const origin = document.getElementById('url').value;
-    const fields = document.getElementById('fields').value
-      .split(',').map(s => s.trim()).filter(Boolean);
-    try {
-      const res = await postJSON('/tab/redaction-rules', { origin, fields });
-      alert('Saved: ' + JSON.stringify(res));
-    } catch (e) {
-      alert('Error: ' + e.message);
+  // ─── init ──────────────────────────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    const cached = sessionStorage.getItem('gateway_token');
+    if (cached) {
+      document.getElementById('token').value = cached;
+      loadAllRules();
     }
+    document.getElementById('token').addEventListener('change', () => {
+      sessionStorage.setItem('gateway_token', document.getElementById('token').value.trim());
+    });
   });
   </script>
+  <script type="module" src="i18n.js"></script>
 </body>
 </html>

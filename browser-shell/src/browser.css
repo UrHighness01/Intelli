@@ -273,6 +273,33 @@ button { cursor: pointer; }
 }
 .zoom-reset-btn:hover { color: var(--danger); }
 
+/* ── Update notification bar ─────────────────────────────────────── */
+#update-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 14px;
+  background: #2a4a7f;
+  color: #d0e4ff;
+  font-size: 12px;
+  border-bottom: 1px solid #1a3a6f;
+}
+#update-bar.hidden { display: none; }
+#update-bar #update-version { font-weight: 600; }
+.update-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.update-btn-primary {
+  background: #4a90d9; border: none; border-radius: 4px;
+  color: #fff; font-size: 11px; padding: 3px 10px;
+  cursor: pointer; font-weight: 600;
+}
+.update-btn-primary:hover { background: #5aa0e9; }
+.update-btn-dismiss {
+  background: transparent; border: none; color: #a0b8d8;
+  font-size: 13px; padding: 2px 6px; cursor: pointer; border-radius: 3px;
+}
+.update-btn-dismiss:hover { color: #d0e4ff; background: rgba(255,255,255,0.1); }
+
 /* ── Side panels ────────────────────────────────────────────────── */
 /* The chrome window is only 88px tall; panels must sit BELOW the chrome
    so they overlay the BrowserView area. We make body overflow:visible

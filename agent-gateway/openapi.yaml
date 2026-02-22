@@ -1211,6 +1211,36 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /admin/redaction-rules:
+    get:
+      summary: List all per-origin redaction rules
+      description: >
+        Returns every configured origin and its list of redacted input-field names.
+        Requires admin Bearer token. Used by the tab_permission admin UI to display
+        and manage the full rules table.
+      tags: [tab, admin]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Map of origin → field list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+                    description: origin URL → sorted list of redacted field names
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   # ---------------------------------------------------------------------------
   # Agent memory
   # ---------------------------------------------------------------------------

@@ -113,6 +113,52 @@ docker run -d \
 
 ---
 
+## 4.1 Sandbox Worker — seccomp Hardening (Linux only)
+
+The file `agent-gateway/sandbox/seccomp-worker.json` contains a minimal
+syscall allowlist for the `sandbox/worker.py` subprocess. When applied it:
+
+- **Default action** — `SCMP_ACT_ERRNO` (deny everything not listed).
+- **Blocks outbound networking** — `socket`, `connect`, `bind`, `listen`, … all return `ENOSYS`.
+- **Blocks process spawning** — `fork`, `vfork`, `execve`, `execveat` are denied.
+- **Blocks dangerous kernel interfaces** — `ptrace`, `bpf`, `perf_event_open`,
+  `init_module`, `kexec_load`, `reboot`, `mount`, and others.
+- **Allows** the full Python runtime I/O, memory, thread/futex, clock, and
+  temporary-file syscalls required for JSON-in/JSON-out tool execution.
+
+### Applying via Docker
+
+```bash
+docker run -d \
+  --security-opt seccomp=agent-gateway/sandbox/seccomp-worker.json \
+  -e AGENT_GATEWAY_ADMIN_PASS=changeme \
+  intelli-gateway
+```
+
+### Applying via Docker Compose
+
+```yaml
+services:
+  gateway:
+    security_opt:
+      - seccomp:agent-gateway/sandbox/seccomp-worker.json
+```
+
+### Verifying the profile
+
+```bash
+# Confirm it is loaded — docker inspect shows the profile hash
+docker inspect intelli-gateway | grep -A2 SeccompProfile
+
+# Quick smoke test: worker should run fine
+python agent-gateway/sandbox/worker.py <<< '{"action":"echo","params":{"x":1}}'
+```
+
+> **Note** — seccomp is Linux-only. The profile is silently ignored on
+> macOS/Windows Docker Desktop builds, so local dev is unaffected.
+
+---
+
 ## 5. Docker Compose (Gateway + Vault dev mode)
 
 ```yaml
@@ -211,6 +257,12 @@ export VAULT_TOKEN=<your-token>
 | Variable | Default | Description |
 |---|---|---|
 | `AGENT_GATEWAY_WEBHOOK_MAX_RETRIES` | `3` | Delivery retry attempts (exponential back-off) |
+
+### Network & CORS
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_GATEWAY_CORS_ORIGINS` | `http://127.0.0.1:8080` | Comma-separated list of allowed CORS origins. The gateway uses `CORSMiddleware` and only echoes `Access-Control-Allow-Origin` for origins in this list. Add additional origins for development (e.g. `http://localhost:3000`) — never use `*` in production. |
 
 ### Capabilities
 

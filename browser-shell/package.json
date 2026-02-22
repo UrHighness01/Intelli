@@ -12,6 +12,9 @@
     "build:linux": "electron-builder --linux",
     "pack": "electron-builder --dir"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
   "devDependencies": {
     "electron": "^29.0.0",
     "electron-builder": "^24.9.1"
@@ -74,6 +77,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Intelli"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "UrHighness01",
+      "repo": "Intelli"
     }
   }
 }

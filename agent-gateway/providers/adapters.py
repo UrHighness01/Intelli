@@ -37,6 +37,7 @@ Usage
 from __future__ import annotations
 
 import os
+import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional
 
 _requests: Any = None
@@ -53,6 +54,53 @@ try:
     _vault: Optional[_VaultKeyStore] = _VaultKeyStore()
 except Exception:
     _vault = None
+
+
+# ---------------------------------------------------------------------------
+# Outbound allowlist
+# ---------------------------------------------------------------------------
+
+def _build_default_allowlist() -> List[str]:
+    """Derive the default allowed provider origins from env + known hosts."""
+    raw_origins = [
+        os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        'https://api.anthropic.com',
+        'https://openrouter.ai',
+        os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434'),
+    ]
+    result: List[str] = []
+    for url in raw_origins:
+        p = _urlparse.urlparse(url)
+        origin = f'{p.scheme}://{p.netloc}'
+        if origin not in result:
+            result.append(origin)
+    return result
+
+
+_OUTBOUND_ALLOWLIST_RAW: str = os.environ.get('INTELLI_PROVIDER_OUTBOUND_ALLOWLIST', '')
+_OUTBOUND_ALLOWLIST: List[str] = (
+    [o.strip().rstrip('/') for o in _OUTBOUND_ALLOWLIST_RAW.split(',') if o.strip()]
+    if _OUTBOUND_ALLOWLIST_RAW.strip()
+    else _build_default_allowlist()
+)
+
+
+def _check_outbound_url(url: str) -> None:
+    """Raise ``RuntimeError`` if *url*'s origin is not in the configured allowlist.
+
+    Configure via comma-separated env var::
+
+        INTELLI_PROVIDER_OUTBOUND_ALLOWLIST=https://api.openai.com,https://api.anthropic.com
+
+    When the variable is unset every built-in provider origin is allowed.
+    """
+    p = _urlparse.urlparse(url)
+    origin = f'{p.scheme}://{p.netloc}'
+    if not any(origin == allowed or origin.startswith(allowed + '/') for allowed in _OUTBOUND_ALLOWLIST):
+        raise RuntimeError(
+            f'Outbound request to {origin!r} is blocked by INTELLI_PROVIDER_OUTBOUND_ALLOWLIST. '
+            f'Allowed origins: {_OUTBOUND_ALLOWLIST}'
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +188,7 @@ class OpenAIAdapter(BaseAdapter):
         key = _resolve_key('openai', ['OPENAI_API_KEY'])
         if not key:
             raise RuntimeError('OpenAI API key not configured')
+        _check_outbound_url(self.BASE_URL)
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
@@ -191,6 +240,7 @@ class AnthropicAdapter(BaseAdapter):
             raise RuntimeError('Anthropic API key not configured')
 
         # Anthropic requires system to be top-level, not in messages
+        _check_outbound_url(self.BASE_URL)
         body: Dict[str, Any] = {
             'model': model,
             'messages': messages,
@@ -246,6 +296,7 @@ class OpenRouterAdapter(BaseAdapter):
         key = _resolve_key('openrouter', [])
         if not key:
             raise RuntimeError('OpenRouter API key not configured')
+        _check_outbound_url(self.BASE_URL)
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
             headers={
@@ -290,6 +341,7 @@ class OllamaAdapter(BaseAdapter):
         if not _HAS_REQUESTS:
             return False
         try:
+            _check_outbound_url(self.base_url)
             r = _requests.get(f'{self.base_url}/api/tags', timeout=2)
             return r.status_code == 200
         except Exception:
@@ -304,6 +356,7 @@ class OllamaAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         self._check_requests()
+        _check_outbound_url(self.base_url)
         resp = _requests.post(
             f'{self.base_url}/api/chat',
             json={

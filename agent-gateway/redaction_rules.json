@@ -1,5 +1,14 @@
 {
   "https://example.test": [
     "token"
+  ],
+  "https://test.corp.local": [],
+  "https://app.corp.local": [
+    "card_number",
+    "cvv"
+  ],
+  "https://hr.corp.local": [
+    "salary",
+    "dob"
   ]
 }
