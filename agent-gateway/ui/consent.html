@@ -267,10 +267,22 @@
     }
     const data = await res.json();
     _token = data.token || '';
+    sessionStorage.setItem('gw_token', _token);
     loginPanel.style.display = 'none';
     appEl.style.display = 'flex';
     loadTimeline();
   }
+
+  // ── Auto-login from shared token ──────────────────────────────────────────
+  (function tryAutoLogin() {
+    const saved = sessionStorage.getItem('gw_token');
+    if (saved) {
+      _token = saved;
+      loginPanel.style.display = 'none';
+      appEl.style.display = 'flex';
+      loadTimeline();
+    }
+  })();
 
   function authHeaders() {
     return { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' };

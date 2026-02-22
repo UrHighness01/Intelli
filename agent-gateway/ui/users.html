@@ -253,12 +253,12 @@ let _lastSeen = {};  // actor → latest audit ts
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function tok() {
-  if (!_token) _token = sessionStorage.getItem('ag_token') || '';
+  if (!_token) _token = sessionStorage.getItem('gw_token') || '';
   return _token;
 }
 function getToken() {
   const t = document.getElementById('token-input').value.trim();
-  if (t) { _token = t; sessionStorage.setItem('ag_token', t); }
+  if (t) { _token = t; sessionStorage.setItem('gw_token', t); }
   return _token || tok();
 }
 function authHeaders() { return { Authorization: 'Bearer ' + tok(), 'Content-Type': 'application/json' }; }
@@ -509,7 +509,7 @@ function clearDetail() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = sessionStorage.getItem('ag_token');
+  const saved = sessionStorage.getItem('gw_token');
   if (saved) {
     document.getElementById('token-input').value = saved;
     _token = saved;

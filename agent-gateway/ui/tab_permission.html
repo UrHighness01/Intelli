@@ -371,13 +371,13 @@
 
   // ─── init ──────────────────────────────────────────────────────────────────
   window.addEventListener('DOMContentLoaded', () => {
-    const cached = sessionStorage.getItem('gateway_token');
+    const cached = sessionStorage.getItem('gw_token');
     if (cached) {
       document.getElementById('token').value = cached;
       loadAllRules();
     }
     document.getElementById('token').addEventListener('change', () => {
-      sessionStorage.setItem('gateway_token', document.getElementById('token').value.trim());
+      sessionStorage.setItem('gw_token', document.getElementById('token').value.trim());
     });
   });
   </script>

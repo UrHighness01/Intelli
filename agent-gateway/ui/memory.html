@@ -539,14 +539,14 @@
 
   /* ── Startup ────────────────────────────────────────────────────────────── */
   window.addEventListener('DOMContentLoaded', () => {
-    const saved = sessionStorage.getItem('memory_token');
+    const saved = sessionStorage.getItem('gw_token');
     if (saved) {
       document.getElementById('token-input').value = saved;
       loadAgents();
     }
   });
   document.getElementById('token-input').addEventListener('change', () => {
-    sessionStorage.setItem('memory_token', token());
+    sessionStorage.setItem('gw_token', token());
   });
 </script>
   <script type="module" src="i18n.js"></script>

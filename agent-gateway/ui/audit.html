@@ -235,7 +235,7 @@
 
 <script>
   const BASE = '';   // same origin
-  let _token = sessionStorage.getItem('audit_token') || '';
+  let _token = sessionStorage.getItem('gw_token') || '';
   let _allEntries = [];
   let _sortCol = 'ts';
   let _sortDir = -1; // -1 = descending (newest first)
@@ -256,7 +256,7 @@
       if (!r.ok) { errEl.textContent = 'Invalid credentials.'; return; }
       const data = await r.json();
       _token = data.token;
-      sessionStorage.setItem('audit_token', _token);
+      sessionStorage.setItem('gw_token', _token);
       showMain();
     } catch (e) {
       errEl.textContent = 'Connection error: ' + e.message;
@@ -268,7 +268,7 @@
   });
 
   function logout() {
-    sessionStorage.removeItem('audit_token');
+    sessionStorage.removeItem('gw_token');
     _token = '';
     document.getElementById('main-panel').style.display = 'none';
     document.getElementById('login-panel').style.display = 'block';

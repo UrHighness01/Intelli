@@ -757,7 +757,7 @@
 
   // Auto-start if token is already in storage
   window.addEventListener('DOMContentLoaded', () => {
-    const saved = sessionStorage.getItem('metrics_token');
+    const saved = sessionStorage.getItem('gw_token');
     if (saved) {
       document.getElementById('token-input').value = saved;
       startPolling();
@@ -765,7 +765,7 @@
   });
 
   document.getElementById('token-input').addEventListener('change', () => {
-    sessionStorage.setItem('metrics_token', document.getElementById('token-input').value.trim());
+    sessionStorage.setItem('gw_token', document.getElementById('token-input').value.trim());
   });
 </script>
   <script type="module" src="i18n.js"></script>
