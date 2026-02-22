@@ -25,6 +25,10 @@ attrs==25.4.0 \
     # via
     #   jsonschema
     #   referencing
+backports-tarfile==1.2.0 \
+    --hash=sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34 \
+    --hash=sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991
+    # via -r requirements.in
 beautifulsoup4==4.14.3 \
     --hash=sha256:0918bfe44902e6ad8d57732ba310582e98da931428d231a5ecb9e7c703a735bb \
     --hash=sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86
@@ -162,9 +166,9 @@ colorama==0.4.6 \
     #   click
     #   pytest
     #   uvicorn
-fastapi==0.130.0 \
-    --hash=sha256:367142b4ae02d26091b5a0ec7f2d3e1e57e5583bb50c34066dab939cd697176d \
-    --hash=sha256:e953151592638d18270d435c5ac9e90735531db2e3abf4b42e95a1c3624df511
+fastapi==0.131.0 \
+    --hash=sha256:6531155e52bee2899a932c746c9a8250f210e3c3303a5f7b9f8a808bfe0548ff \
+    --hash=sha256:ed0e53decccf4459de78837ce1b867cd04fa9ce4579497b842579755d20b405a
     # via -r requirements.in
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \

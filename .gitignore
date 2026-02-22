@@ -5,6 +5,7 @@ __pycache__/
 .Python
 env/
 .env
+.env.*
 .venv/
 venv/
 build/
@@ -16,18 +17,61 @@ eggs/
 # VSCode
 .vscode/
 
-# PyTest
+# PyTest / coverage
 .pytest_cache/
+coverage.xml
+.coverage
+htmlcov/
+*_err.txt
+pytest_err.txt
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Logs
+# Logs (all log files and NDJSON runtime logs)
 *.log
+*.log.*
 
 # Agent gateway venv
 agent-gateway/.venv/
 
 # node
 node_modules/
+browser-shell/dist/
+
+# ─── Runtime state — NEVER commit these ────────────────────────────────────
+# User database (PBKDF2 hashes + roles). Seeded at first run.
+agent-gateway/users.json
+
+# Revoked-token store (SHA-256 token hashes + expiry timestamps)
+agent-gateway/revoked_tokens.json
+
+# API key metadata (provider, set_at, expires_at fields)
+agent-gateway/key_metadata.json
+
+# Consent / browsing timeline (URLs + actor tokens)
+agent-gateway/consent_timeline.jsonl
+agent-gateway/*.jsonl
+
+# ─── Secrets / credentials ─────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+id_rsa
+id_ed25519
+*.asc
+
+# ─── Databases ─────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ─── Temp / scratch ────────────────────────────────────────────────────────
+tmp/
+temp/
+scratch/

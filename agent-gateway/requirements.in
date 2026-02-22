@@ -12,3 +12,7 @@ lxml>=4.9
 keyring>=23.8
 requests>=2.31
 pyyaml>=6.0
+# Explicit pin: jaraco-context>=6 pulls this in for Python<3.12 but pip-tools
+# compiling on Python 3.12 omits it.  Pin it here so CI (Python 3.11) can use
+# --require-hashes without "versions pinned with ==" errors.
+backports.tarfile>=1.2.0
