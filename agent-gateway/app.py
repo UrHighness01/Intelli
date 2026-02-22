@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 from jsonschema import validate, ValidationError
 from pathlib import Path
@@ -165,7 +165,7 @@ if UI_DIR.exists():
 
 
 class ToolCall(BaseModel):
-    tool: str
+    tool: str = Field(..., max_length=256)
     args: dict
 
 

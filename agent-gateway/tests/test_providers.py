@@ -22,8 +22,7 @@ def test_openai_adapter_raises_when_no_key(monkeypatch):
         assert False, 'expected RuntimeError for missing key'
     except RuntimeError:
         pass
-    finally:
-        monkeypatch.setattr(keyring, 'get_password', orig)
+    # monkeypatch restores get_password automatically at teardown
     # also test when env provides key
     monkeypatch.setenv('INTELLI_OPENAI_KEY', 'env-key-123')
     adapter = OpenAIAdapter()

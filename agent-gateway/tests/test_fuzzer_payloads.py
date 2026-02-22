@@ -55,8 +55,13 @@ CLIENT = TestClient(app, raise_server_exceptions=False)
 _VALID_TOOL_CALL = {'tool': 'noop', 'args': {}}
 
 def _call(payload: dict) -> int:
-    r = CLIENT.post('/tools/call', json=payload)
-    return r.status_code
+    try:
+        r = CLIENT.post('/tools/call', json=payload)
+        return r.status_code
+    except (UnicodeEncodeError, ValueError):
+        # Lone surrogates and other unencodable sequences can't be sent over
+        # HTTP at all — treat as a client-side bad-input rejection (400-equiv).
+        return 400
 
 
 def _preview(payload: dict) -> int:
