@@ -16,14 +16,20 @@ def test_openai_adapter_raises_when_no_key(monkeypatch):
     keyring = pytest.importorskip('keyring', reason='keyring not installed; skipping')
     # Ensure keyring returns None by monkeypatching get_password
     monkeypatch.setattr(keyring, 'get_password', lambda service, username: None)
+    # Block the file-backed fallback so users.json cannot supply a key either.
+    # Using a plain function and swapping the classmethod descriptor works
+    # because Python's descriptor protocol invokes it with the class as first arg.
+    import providers.provider_adapter as _pa
+    monkeypatch.setattr(_pa.ProviderKeyStore, '_read_fallback',
+                        classmethod(lambda cls: {}))
     adapter = OpenAIAdapter()
     try:
         adapter.call({'prompt': 'hi'})
         assert False, 'expected RuntimeError for missing key'
     except RuntimeError:
         pass
-    # monkeypatch restores get_password automatically at teardown
-    # also test when env provides key
+    # monkeypatch restores everything automatically at teardown.
+    # also test when env provides key (get_key env-var branch must still work)
     monkeypatch.setenv('INTELLI_OPENAI_KEY', 'env-key-123')
     adapter = OpenAIAdapter()
     out = adapter.call({'prompt': 'hi'})
