@@ -242,6 +242,17 @@ def cmd_permissions(args: argparse.Namespace) -> None:
         _pretty(result)
 
 
+def _fmt_audit_entry(entry: dict) -> str:
+    """Format a single audit log entry as a fixed-width terminal line."""
+    ts      = entry.get('ts', '')
+    event   = entry.get('event', '')
+    actor   = entry.get('actor', '') or '—'
+    details = json.dumps(entry.get('details', {}))
+    if len(details) > 120:
+        details = details[:119] + '\u2026'
+    return f'{ts:<32s}  {actor:<16s}  {event:<28s}  {details}'
+
+
 def cmd_audit(args: argparse.Namespace) -> None:
     """Fetch or export audit log entries."""
     token = _get_token(args)
@@ -262,12 +273,8 @@ def cmd_audit(args: argparse.Namespace) -> None:
         result = _request('GET', _url(args, f'/admin/audit?{qs}'), token=token)
         entries = result.get('entries', [])
         for entry in entries:
-            ts    = entry.get('ts', '')
-            event = entry.get('event', '')
-            actor = entry.get('actor', '')
-            details = entry.get('details', {})
-            print(f'{ts}  [{actor}]  {event}  {json.dumps(details)}')
-        print(f'\n--- {len(entries)} entries ---')
+            print(_fmt_audit_entry(entry))
+        print(f'\n--- {len(entries)} entr{"y" if len(entries) == 1 else "ies"} ---')
 
     elif action == 'export-csv':
         qs = _audit_params(tail_default=1000)
@@ -300,12 +307,8 @@ def cmd_audit(args: argparse.Namespace) -> None:
                 entries = result.get('entries', [])
                 new_entries = [e for e in entries if e.get('ts', '') not in seen]
                 for entry in sorted(new_entries, key=lambda e: e.get('ts', '')):
-                    ts      = entry.get('ts', '')
-                    event   = entry.get('event', '')
-                    actor   = entry.get('actor', '')
-                    details = entry.get('details', {})
-                    print(f'{ts}  [{actor}]  {event}  {json.dumps(details)}')
-                    seen.add(ts)
+                    print(_fmt_audit_entry(entry))
+                    seen.add(entry.get('ts', ''))
                 _time.sleep(interval)
         except KeyboardInterrupt:
             print('\nStopped.')

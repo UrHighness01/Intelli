@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src  'self';
+                 style-src   'self';
+                 img-src     'self' data: https: http://127.0.0.1:8080;
+                 connect-src http://127.0.0.1:8080;" />
+  <title>Intelli</title>
+  <link rel="stylesheet" href="browser.css" />
+</head>
+<body>
+
+  <!-- ── Tab bar ──────────────────────────────────────────────── -->
+  <div id="tab-bar">
+    <div id="tabs"></div>
+    <div class="tab-bar-spacer"></div>
+    <button id="new-tab-btn" title="New tab (Ctrl+T)">+</button>
+    <!-- Custom window controls (titleBarStyle=hidden removes OS buttons) -->
+    <div id="win-controls">
+      <button class="wc-btn" id="btn-win-min"   title="Minimize">&#8211;</button>
+      <button class="wc-btn" id="btn-win-max"   title="Maximize">&#9633;</button>
+      <button class="wc-btn" id="btn-win-close" title="Close">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- ── Address / navigation bar ────────────────────────────── -->
+  <div id="address-bar">
+    <button class="nav-btn" id="btn-back"    title="Back (Alt+Left)">&#8592;</button>
+    <button class="nav-btn" id="btn-forward" title="Forward (Alt+Right)">&#8594;</button>
+    <button class="nav-btn" id="btn-reload"  title="Reload (Ctrl+R)">&#8635;</button>
+    <button class="nav-btn" id="btn-home"    title="Home">&#8962;</button>
+
+    <div id="url-wrap">
+      <div id="gw-dot" class="loading" title="Gateway status"></div>
+      <input id="url-input" type="text" spellcheck="false"
+             placeholder="Search or enter address" autocomplete="off" />
+      <!-- bookmark star inside url bar -->
+      <button id="btn-bookmark-star" class="url-action-btn" title="Bookmark this tab (Ctrl+D)">&#9734;</button>
+    </div>
+
+    <!-- zoom indicator (hidden when at 100%) -->
+    <div id="zoom-indicator" class="hidden">
+      <button id="btn-zoom-out"   class="zoom-step" title="Zoom out">&#8722;</button>
+      <span   id="zoom-pct">100%</span>
+      <button id="btn-zoom-in"    class="zoom-step" title="Zoom in">&#43;</button>
+      <button id="btn-zoom-reset" class="zoom-reset-btn" title="Reset zoom">&#10006;</button>
+    </div>
+
+    <button class="nav-btn" id="btn-sidebar"
+            title="Admin hub sidebar (Ctrl+Shift+A)">&#9776;</button>
+
+    <!-- three-dot menu -->
+    <button class="nav-btn" id="btn-app-menu"
+            title="Intelli menu">&#8942;</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PANELS — slide in from the right, rendered above BrowserViews
+       because they are part of the chrome renderer (not a BrowserView).
+       They are absolutely positioned relative to the body.
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Bookmark star tooltip / quick-add -->
+  <div id="panel-bookmark" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Bookmarks</span>
+      <button class="panel-close" id="bm-panel-close">&#10005;</button>
+    </div>
+    <!-- quick-add form (shown when bookmarking current page) -->
+    <div id="bm-quick-add" class="hidden">
+      <div class="panel-section-label">Bookmark added</div>
+      <label class="field-label">Name</label>
+      <input id="bm-name-input" class="panel-input" type="text" />
+      <div class="panel-row">
+        <button id="bm-save-btn"   class="btn-primary">Done</button>
+        <button id="bm-remove-btn" class="btn-danger">Remove</button>
+      </div>
+    </div>
+    <!-- bookmark list -->
+    <div class="panel-section-label">All Bookmarks</div>
+    <input id="bm-search" class="panel-input" type="text" placeholder="Search bookmarks…" />
+    <div id="bm-list" class="panel-list"></div>
+  </div>
+
+  <!-- History panel -->
+  <div id="panel-history" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">History</span>
+      <button class="panel-close" id="hist-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-row">
+      <input id="hist-search" class="panel-input" type="text" placeholder="Search history…" style="flex:1" />
+      <button id="hist-clear-btn" class="btn-danger" style="flex-shrink:0">Clear all</button>
+    </div>
+    <div id="hist-list" class="panel-list"></div>
+  </div>
+
+  <!-- Settings panel -->
+  <div id="panel-settings" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Settings</span>
+      <button class="panel-close" id="settings-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-section-label">Appearance</div>
+    <div class="settings-row">
+      <span>Theme</span>
+      <select id="setting-theme" class="panel-select">
+        <option value="dark">Dark</option>
+        <option value="light">Light (coming soon)</option>
+      </select>
+    </div>
+    <div class="settings-row">
+      <span>New tab page</span>
+      <select id="setting-newtab" class="panel-select">
+        <option value="home">Intelli Admin Hub</option>
+        <option value="blank">about:blank</option>
+      </select>
+    </div>
+    <div class="panel-section-label" style="margin-top:16px">Gateway</div>
+    <div class="settings-row">
+      <span>Admin Hub</span>
+      <button class="btn-primary" id="setting-open-hub">Open</button>
+    </div>
+    <div class="settings-row">
+      <span>Extensions</span>
+      <button class="btn-primary" id="setting-open-addons">Manage Addons</button>
+    </div>
+    <div class="settings-row">
+      <span>Downloads folder</span>
+      <button class="btn-primary" id="setting-open-downloads">Open Folder</button>
+    </div>
+    <div class="panel-section-label" style="margin-top:16px">Developer</div>
+    <div class="settings-row">
+      <span>DevTools (page)</span>
+      <button class="btn-primary" id="setting-devtools-page">Open</button>
+    </div>
+    <div class="settings-row">
+      <span>DevTools (chrome)</span>
+      <button class="btn-primary" id="setting-devtools-chrome">Open</button>
+    </div>
+  </div>
+
+  <!-- Clear browsing data panel -->
+  <div id="panel-clear-data" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Clear browsing data</span>
+      <button class="panel-close" id="clear-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-section-label">Intelli Browser data</div>
+    <label class="check-row"><input type="checkbox" id="clr-history"   checked /> Browsing history</label>
+    <label class="check-row"><input type="checkbox" id="clr-bookmarks"          /> Bookmarks</label>
+    <div class="panel-section-label" style="margin-top:12px">Web page data (clears for all sites)</div>
+    <label class="check-row"><input type="checkbox" id="clr-cookies"   checked /> Cookies &amp; site data</label>
+    <label class="check-row"><input type="checkbox" id="clr-cache"     checked /> Cached images &amp; files</label>
+    <div class="panel-row" style="margin-top:16px">
+      <button id="clr-cancel-btn" class="btn-secondary">Cancel</button>
+      <button id="clr-clear-btn"  class="btn-danger">Clear data</button>
+    </div>
+  </div>
+
+  <!-- Dev addons / local extension loader panel -->
+  <div id="panel-dev-addons" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Developer Addons</span>
+      <button class="panel-close" id="devaddon-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-section-label">Load unpacked addon</div>
+    <p class="panel-hint">Paste JavaScript to inject into the active page. It runs immediately and is also queued in the Intelli addon system.</p>
+    <textarea id="devaddon-code" class="panel-textarea" placeholder="// Your addon JS code here…"></textarea>
+    <div class="panel-row">
+      <input id="devaddon-name" class="panel-input" type="text" placeholder="Addon name (optional)" style="flex:1" />
+      <button id="devaddon-run-btn" class="btn-primary">Inject &amp; Run</button>
+    </div>
+    <div id="devaddon-status" class="panel-status"></div>
+    <div class="panel-section-label" style="margin-top:16px">External resources</div>
+    <div class="settings-row">
+      <span>Chrome Web Store</span>
+      <button id="devaddon-store-btn" class="btn-primary">Open</button>
+    </div>
+    <div class="settings-row">
+      <span>Intelli Addon Manager</span>
+      <button id="devaddon-mgr-btn" class="btn-primary">Open</button>
+    </div>
+  </div>
+
+  <!-- panel backdrop (click to dismiss) -->
+  <div id="panel-backdrop" class="hidden"></div>
+
+  <script src="browser.js"></script>
+</body>
+</html>

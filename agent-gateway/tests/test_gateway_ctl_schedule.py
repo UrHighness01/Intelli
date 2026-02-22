@@ -69,6 +69,7 @@ def _args(**kwargs) -> argparse.Namespace:
         'interval': 3600,
         'disabled': False,
         'n': None,
+        'next': False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -286,3 +287,81 @@ class TestScheduleParser:
             ['--token', 'x', 'schedule', 'trigger', 'xyz']
         )
         assert args.sched_action == 'trigger'
+
+    def test_list_next_not_set_by_default(self):
+        args = self.parser.parse_args(['--token', 'x', 'schedule', 'list'])
+        assert not getattr(args, 'next', False)
+
+    def test_list_next_flag_parsed(self):
+        args = self.parser.parse_args(['--token', 'x', 'schedule', 'list', '--next'])
+        assert args.next is True
+
+
+# ===========================================================================
+# list --next  (behaviour)
+# ===========================================================================
+
+class TestScheduleListNext:
+    """Tests for the schedule list --next countdown annotation."""
+
+    @staticmethod
+    def _future(seconds: float) -> str:
+        from datetime import datetime, timezone, timedelta
+        return (datetime.now(tz=timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def _past(seconds: float) -> str:
+        from datetime import datetime, timezone, timedelta
+        return (datetime.now(tz=timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def _task(name: str = 'T', next_run_at: str = '', **kwargs) -> dict:
+        from copy import deepcopy
+        t = deepcopy(_TASK_A)
+        t['name'] = name
+        if next_run_at:
+            t['next_run_at'] = next_run_at
+        else:
+            t.pop('next_run_at', None)
+        t.update(kwargs)
+        return t
+
+    def test_overdue_annotation(self, capsys):
+        task = self._task(next_run_at=self._past(300))
+        _run(_args(sched_action='list', next=True), ret={'tasks': [task]})
+        assert '(overdue)' in capsys.readouterr().out
+
+    def test_seconds_annotation(self, capsys):
+        task = self._task(next_run_at=self._future(30))
+        _run(_args(sched_action='list', next=True), ret={'tasks': [task]})
+        out = capsys.readouterr().out
+        assert 'in ' in out and 's' in out
+
+    def test_minutes_annotation(self, capsys):
+        task = self._task(next_run_at=self._future(600))   # 10 minutes
+        _run(_args(sched_action='list', next=True), ret={'tasks': [task]})
+        out = capsys.readouterr().out
+        assert 'in ' in out and 'm' in out
+
+    def test_hours_annotation(self, capsys):
+        task = self._task(next_run_at=self._future(7200))  # 2 hours
+        _run(_args(sched_action='list', next=True), ret={'tasks': [task]})
+        out = capsys.readouterr().out
+        assert 'in ' in out and 'h' in out
+
+    def test_no_next_run_at_does_not_crash(self):
+        task = self._task()   # no next_run_at key
+        _run(_args(sched_action='list', next=True), ret={'tasks': [task]})  # must not raise
+
+    def test_without_next_flag_no_annotation(self, capsys):
+        task = self._task(next_run_at=self._past(300))
+        _run(_args(sched_action='list', next=False), ret={'tasks': [task]})
+        assert 'overdue' not in capsys.readouterr().out
+
+    def test_sorts_ascending_by_next_run(self, capsys):
+        t_soon  = self._task('AlphaSoon',  next_run_at=self._future(10))
+        t_later = self._task('ZetaLater', next_run_at=self._future(7200))
+        # pass in reverse order; --next should sort by next_run_at ascending
+        _run(_args(sched_action='list', next=True), ret={'tasks': [t_later, t_soon]})
+        out = capsys.readouterr().out
+        assert out.index('AlphaSoon') < out.index('ZetaLater')

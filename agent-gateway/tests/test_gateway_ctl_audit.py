@@ -42,6 +42,7 @@ def _args(**kwargs) -> argparse.Namespace:
         'since': '',
         'until': '',
         'output': 'audit.csv',
+        'interval': 5.0,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -99,7 +100,7 @@ class TestAuditTail:
         ]}
         _run_tail(_args(audit_action='tail'), ret=ret)
         out = capsys.readouterr().out
-        assert '1 entries' in out
+        assert '1 entry' in out
 
 
 # ===========================================================================
@@ -185,3 +186,99 @@ class TestAuditParser:
     def test_func_wired(self):
         ns = self.parser.parse_args(['audit', 'tail'])
         assert ns.func is gateway_ctl.cmd_audit
+
+    def test_follow_parsed(self):
+        ns = self.parser.parse_args(['audit', 'follow'])
+        assert ns.audit_action == 'follow'
+
+    def test_follow_interval_flag(self):
+        ns = self.parser.parse_args(['audit', 'follow', '--interval', '10'])
+        assert ns.interval == 10.0
+
+    def test_follow_actor_flag(self):
+        ns = self.parser.parse_args(['audit', 'follow', '--actor', 'bob'])
+        assert ns.actor == 'bob'
+
+    def test_follow_action_flag(self):
+        ns = self.parser.parse_args(['audit', 'follow', '--action', 'approve'])
+        assert ns.action == 'approve'
+
+
+# ===========================================================================
+# follow
+# ===========================================================================
+
+class TestAuditFollow:
+    """Tests for the `audit follow` live-poll action."""
+
+    def _run(self, entries, sleep_effect=None, **kwargs):
+        """Run follow for one poll (KeyboardInterrupt from sleep by default)."""
+        args = _args(audit_action='follow', interval=1.0, **kwargs)
+        printed = []
+        with patch.object(gateway_ctl, '_get_token', return_value='tok'), \
+             patch.object(gateway_ctl, '_request', return_value={'entries': entries}), \
+             patch('time.sleep', side_effect=sleep_effect or KeyboardInterrupt), \
+             patch('builtins.print',
+                   side_effect=lambda *a, **kw: printed.append(str(a[0]) if a else '')):
+            gateway_ctl.cmd_audit(args)
+        return printed
+
+    def test_calls_audit_endpoint(self):
+        with patch.object(gateway_ctl, '_get_token', return_value='tok'), \
+             patch.object(gateway_ctl, '_request', return_value={'entries': []}) as m, \
+             patch('time.sleep', side_effect=KeyboardInterrupt), \
+             patch('builtins.print'):
+            gateway_ctl.cmd_audit(_args(audit_action='follow', interval=1.0))
+        assert '/admin/audit' in m.call_args[0][1]
+
+    def test_prints_new_entries(self):
+        entry = {'ts': '2026-01-01T00:00:00Z', 'event': 'approve', 'actor': 'admin', 'details': {}}
+        lines = self._run([entry])
+        assert any('approve' in line for line in lines)
+
+    def test_prints_stopped_on_interrupt(self):
+        lines = self._run([])
+        assert any('Stopped' in line for line in lines)
+
+    def test_uses_interval_argument(self):
+        """The sleep call should receive the --interval value."""
+        sleep_calls: list = []
+
+        def fake_sleep(secs):
+            sleep_calls.append(secs)
+            raise KeyboardInterrupt
+
+        with patch.object(gateway_ctl, '_get_token', return_value='tok'), \
+             patch.object(gateway_ctl, '_request', return_value={'entries': []}), \
+             patch('time.sleep', side_effect=fake_sleep), \
+             patch('builtins.print'):
+            gateway_ctl.cmd_audit(_args(audit_action='follow', interval=7.5))
+        assert sleep_calls == [7.5]
+
+    def test_actor_filter_forwarded_to_url(self):
+        with patch.object(gateway_ctl, '_get_token', return_value='tok'), \
+             patch.object(gateway_ctl, '_request', return_value={'entries': []}) as m, \
+             patch('time.sleep', side_effect=KeyboardInterrupt), \
+             patch('builtins.print'):
+            gateway_ctl.cmd_audit(_args(audit_action='follow', interval=1.0, actor='alice'))
+        assert 'actor=alice' in m.call_args[0][1]
+
+    def test_deduplicates_repeated_entries(self):
+        """An entry seen in poll 1 must not be re-printed in poll 2."""
+        entry = {'ts': '2026-01-01T00:00:00Z', 'event': 'login', 'actor': 'bob', 'details': {}}
+        printed: list = []
+        call_count = 0
+
+        def fake_req(method, url, token=None, **kw):
+            nonlocal call_count
+            call_count += 1
+            return {'entries': [entry]}
+
+        with patch.object(gateway_ctl, '_get_token', return_value='tok'), \
+             patch.object(gateway_ctl, '_request', side_effect=fake_req), \
+             patch('time.sleep', side_effect=[None, KeyboardInterrupt]), \
+             patch('builtins.print',
+                   side_effect=lambda *a, **kw: printed.append(str(a[0]) if a else '')):
+            gateway_ctl.cmd_audit(_args(audit_action='follow', interval=1.0))
+        login_lines = [line for line in printed if 'login' in line]
+        assert len(login_lines) == 1

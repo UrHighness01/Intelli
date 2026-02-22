@@ -68,3 +68,51 @@ This document outlines primary attack surfaces, threat scenarios, mitigations, a
 - Keep the Supervisor deterministic and auditable: validation rules must be explicit JSON-schemas and sanitizer transforms stored in version-controlled files.
 - Avoid dynamic eval of agent-sent code. If the system scaffolds code (addons), require static analysis + user approval + signing before enabling.
 - Design privacy UX with minimal friction: use safe defaults but enable advanced controls for power users and enterprises.
+
+
+---
+
+## Implementation Status
+
+The table below tracks the current implementation state of all major threat mitigations.
+
+| Control | Module | Status |
+|---|---|---|
+| JSON Schema validation + sanitizer | `supervisor.py` | ✅ Implemented |
+| Capability-based tool model | `capabilities.py` | ✅ Implemented |
+| Approval queue (human-in-the-loop) | `approvals.py` | ✅ Implemented |
+| PBKDF2 auth + Bearer tokens with TTL | `auth.py` | ✅ Implemented |
+| In-memory token revocation | `auth.py` | ✅ Implemented |
+| Persistent token revocation (survive restart) | `auth.py` + `revoked_tokens.json` | ✅ Implemented |
+| Rate limiting (per-IP/user + global) | `rate_limit.py` | ✅ Implemented |
+| Rate limiting on `/admin/login` | `rate_limit.py` wired in `app.py` | ✅ Implemented |
+| Content filter (literal + regex deny rules) | `content_filter.py` | ✅ Implemented |
+| Per-origin DOM redaction | `tab_permissions.py` | ✅ Implemented |
+| Emergency kill-switch | `kill_switch.py` | ✅ Implemented |
+| Append-only audit log | `audit_log.py` | ✅ Implemented |
+| Subprocess sandbox worker + whitelist | `tool_proxy.py` | ✅ Implemented |
+| IPC payload size limit (256 KB) | `tool_proxy.py` | ✅ Implemented |
+| Per-call timeout enforcement | `tool_proxy.py` | ✅ Implemented |
+| Docker runner scaffold | `sandbox.py` | ✅ Scaffold |
+| OS keyring + Vault + env fallback | `key_rotation.py` | ✅ Implemented |
+| Secret rotation workflow + TTL | `key_rotation.py` | ✅ Implemented |
+| GDPR/CCPA data export + erasure | `consent_log.py` | ✅ Implemented |
+| RBAC per-user tool scoping | `auth.py` + `users.py` | ✅ Implemented |
+| Approval webhooks (HMAC + retry) | `webhooks.py` | ✅ Implemented |
+| Prometheus metrics endpoint | `metrics.py` | ✅ Implemented |
+| `pip-audit` in CI | `.github/workflows/ci.yml` | ✅ Implemented |
+| SBOM generation | `.github/workflows/ci.yml` | ✅ Implemented |
+| Consent / context timeline | `consent_log.py` | ✅ Implemented |
+| Agent memory (per-agent key-value + TTL) | `agent_memory.py` | ✅ Implemented |
+| Scheduler (recurring tool calls) | `scheduler.py` | ✅ Implemented |
+| seccomp profile for worker (Linux) | — | ❌ Pending |
+| Read-only filesystem for worker container | — | ❌ Pending |
+| CPU / memory quota in production | — | ❌ Pending |
+| TLS termination (nginx / Caddy) | deployment docs | ❌ Pending (ops) |
+| CORS restriction to localhost | — | ❌ Pending |
+| Outbound allowlist for provider adapters | — | ❌ Pending |
+| Log shipping to external SIEM | — | ❌ Pending |
+| Pinned dependency hashes | `requirements.txt` | ❌ Pending |
+| Signed release tags + provenance | — | ❌ Pending |
+| OAuth2 / OIDC federation | — | ❌ Future |
+| Encrypted audit log at rest | — | ❌ Future |

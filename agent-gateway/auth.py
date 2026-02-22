@@ -91,19 +91,36 @@ def _verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
 
 
 def _load_users() -> Dict[str, Dict]:
+    """Load only user account entries (dict values) from users.json.
+
+    Non-dict entries (e.g. plain-string API keys stored in the same file)
+    are silently skipped so callers never trip over them.
+    """
     try:
         if USERS_PATH.exists():
             with USERS_PATH.open('r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                return {k: v for k, v in data.items() if isinstance(v, dict)}
     except Exception:
         pass
     return {}
 
 
 def _save_users(users: Dict[str, Dict]):
+    """Write user accounts back to users.json, preserving any non-dict
+    entries (e.g. plain-string API keys) that share the file.
+    """
     try:
+        # Re-read the full file to keep non-user entries intact
+        existing: dict = {}
+        if USERS_PATH.exists():
+            with USERS_PATH.open('r', encoding='utf-8') as f:
+                existing = json.load(f)
+        # Retain plain-string (API-key) entries; overwrite user dicts
+        merged = {k: v for k, v in existing.items() if not isinstance(v, dict)}
+        merged.update(users)
         with USERS_PATH.open('w', encoding='utf-8') as f:
-            json.dump(users, f, indent=2)
+            json.dump(merged, f, indent=2)
     except Exception:
         pass
 

@@ -1,0 +1,79 @@
+{
+  "name": "intelli-browser",
+  "version": "0.1.0",
+  "description": "Intelli — AI-native browser with embedded agent gateway",
+  "main": "main.js",
+  "author": "Intelli",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "pack": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.intelli.browser",
+    "productName": "Intelli",
+    "copyright": "Copyright © 2026 Intelli",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../agent-gateway",
+        "to": "agent-gateway",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!tests/**",
+          "!dist/**",
+          "!.venv/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "Intelli-Setup-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Network;WebBrowser"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowDirChange": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Intelli"
+    }
+  }
+}

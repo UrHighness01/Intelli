@@ -11,6 +11,13 @@ The gateway sits between AI agents and privileged browser/filesystem/network too
 - **Provider key management** — store, rotate, and track expiry of LLM API keys
 - **Consent/context timeline** — logs every tab snapshot shared with an agent
 - **Emergency kill-switch** — instantly blocks all tool calls for incident response
+- **Content filtering** — literal and regex deny-lists applied to every tool call
+- **Rate limiting** — per-token and global request-rate caps
+- **Agent memory** — persistent key-value memory per agent, optionally with TTL
+- **Scheduled tasks** — recurring tool-call tasks with cron-like intervals
+- **Approval webhooks** — push notifications to external systems on queue events
+- **Audit log** — append-only immutable JSONL trail with CSV export
+- **Metrics** — per-tool call counts and latency histograms
 - **Signed releases** — CI builds are signed with Sigstore/cosign
 
 ---
@@ -43,19 +50,32 @@ uvicorn app:app --host 127.0.0.1 --port 8080
 
 ```powershell
 pytest -q
-# Expected: 179 passed, 2 skipped
+# Expected: ~1087 passed, 2 skipped
 ```
 
 ---
 
 ## UI pages
 
-| URL | Description |
-|-----|-------------|
-| `http://127.0.0.1:8080/ui/` | Main UI index |
-| `http://127.0.0.1:8080/ui/tab_permission.html` | Browser tab snapshot permission request |
-| `http://127.0.0.1:8080/ui/audit.html` | Audit log viewer (dark mode) |
-| `http://127.0.0.1:8080/ui/consent.html` | Consent / context-sharing timeline viewer |
+All pages are served at `http://127.0.0.1:8080/ui/<page>`.
+
+| Page | Description |
+|------|-------------|
+| `index.html` | Admin hub with searchable nav cards |
+| `status.html` | Live gateway status dashboard (calls, uptime, alerts, scheduler) |
+| `audit.html` | Audit log viewer — sort, filter, group-by, CSV export |
+| `approvals.html` | Pending approval queue — approve / reject tool calls |
+| `users.html` | User management — create, delete, roles, tool restrictions, last-seen chip |
+| `providers.html` | LLM provider key management + chat proxy test panel |
+| `schedule.html` | Scheduler task management — create, enable/disable, history sparkline |
+| `metrics.html` | Per-tool call counts and p50 latency table |
+| `memory.html` | Agent memory viewer — export all / import JSON |
+| `content-filter.html` | Content-filter deny-rule management |
+| `rate-limits.html` | Per-token and global rate-limit configuration |
+| `webhooks.html` | Approval webhook registration and testing |
+| `capabilities.html` | Tool capability manifest browser |
+| `consent.html` | Consent / context-sharing timeline viewer |
+| `tab_permission.html` | Browser tab snapshot permission request |
 
 ---
 
@@ -138,7 +158,73 @@ All endpoints are documented in [`openapi.yaml`](openapi.yaml). Quick summary:
 ### Audit log
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/admin/audit` | admin | Export last N audit entries |
+| GET | `/admin/audit` | admin | Tail last N audit entries (filterable by actor, action, since, until) |
+| GET | `/admin/audit/export.csv` | admin | Download filtered entries as CSV |
+
+### Users
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/users` | admin | List all users |
+| POST | `/admin/users` | admin | Create a user |
+| DELETE | `/admin/users/{username}` | admin | Delete a user |
+| POST | `/admin/users/{username}/password` | admin | Change password |
+| GET | `/admin/users/{username}/permissions` | admin | Get tool allow-list |
+| PUT | `/admin/users/{username}/permissions` | admin | Set or clear tool allow-list |
+
+### Content filter
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/content-filter/rules` | admin | List all deny rules |
+| POST | `/admin/content-filter/rules` | admin | Add a rule (literal or regex) |
+| DELETE | `/admin/content-filter/rules/{index}` | admin | Remove a rule by index |
+| POST | `/admin/content-filter/reload` | admin | Reload rules from env/file |
+
+### Rate limits
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/rate-limits` | admin | Get current rate-limit config |
+| PUT | `/admin/rate-limits` | admin | Update rate-limit config |
+
+### Agent memory
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/memory/agents` | admin | List all agent IDs with memory |
+| GET | `/agents/{id}/memory` | admin | List keys for an agent |
+| GET | `/agents/{id}/memory/{key}` | admin | Get a memory entry |
+| PUT | `/agents/{id}/memory/{key}` | admin | Set a memory entry (optional TTL) |
+| DELETE | `/agents/{id}/memory/{key}` | admin | Delete a memory entry |
+| GET | `/admin/memory/export` | admin | Export all memory as JSON |
+| POST | `/admin/memory/import` | admin | Import memory (merge or replace) |
+
+### Scheduler
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/schedule` | admin | List scheduled tasks |
+| POST | `/admin/schedule` | admin | Create a task |
+| GET | `/admin/schedule/{id}` | admin | Get task detail |
+| PATCH | `/admin/schedule/{id}` | admin | Update task (enable/disable) |
+| DELETE | `/admin/schedule/{id}` | admin | Delete a task |
+| POST | `/admin/schedule/{id}/trigger` | admin | Trigger task immediately |
+| GET | `/admin/schedule/{id}/history` | admin | Run history |
+
+### Approval webhooks
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/webhooks` | admin | List registered webhooks |
+| POST | `/admin/webhooks` | admin | Register a webhook |
+| DELETE | `/admin/webhooks/{id}` | admin | Remove a webhook |
+
+### Alerts
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/alerts/config` | admin | Get alert configuration |
+| PUT | `/admin/alerts/config` | admin | Update alert thresholds |
+
+### Status & metrics
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/status` | admin | Gateway operational snapshot |
+| GET | `/admin/metrics/tools` | admin | Per-tool call counts and latency |
 
 ---
 
@@ -272,6 +358,9 @@ Authorization: Bearer <admin-token>
 | `AGENT_GATEWAY_CONSENT_PATH` | `consent_timeline.jsonl` | Path for consent event log |
 | `AGENT_GATEWAY_KEY_DEFAULT_TTL_DAYS` | `90` | Default TTL for stored provider keys |
 | `AGENT_GATEWAY_SSE_POLL_INTERVAL` | `2.0` | Seconds between SSE approval queue polls |
+| `AGENT_GATEWAY_CONTENT_FILTER_PATH` | *(none)* | Path to JSON file with extra deny rules |
+| `AGENT_GATEWAY_MEMORY_PATH` | `agent_memory.json` | Path for persistent agent memory store |
+| `AGENT_GATEWAY_AUDIT_PATH` | `audit.log` | Path for the append-only audit JSONL log |
 | `SANDBOX_WORKER_PATH` | *(auto-detect)* | Explicit path to sandbox worker script |
 
 ---
@@ -282,10 +371,12 @@ Authorization: Bearer <admin-token>
 |------|-------------|
 | `users.json` | User accounts, roles, and tool allow-lists |
 | `revoked_tokens.json` | Revoked token SHA-256 hashes with expiry |
-| `audit.log` | JSONL audit trail of all admin actions |
+| `audit.log` | Append-only JSONL audit trail — all admin actions and tool events |
 | `redaction_rules.json` | Per-origin field redaction rules |
 | `key_metadata.json` | Provider key TTL / rotation metadata |
 | `consent_timeline.jsonl` | Context-sharing consent events |
+| `agent_memory.json` | Persistent agent key-value memory store |
+| `schedule_state.json` | Scheduled task definitions and run-count state |
 
 ---
 
@@ -309,7 +400,7 @@ Authorization: Bearer <admin-token>
 # Run with auto-reload
 uvicorn app:app --reload --host 127.0.0.1 --port 8080
 
-# Tests (179 pass, 2 skip)
+# Tests (~1087 pass, 2 skip)
 pytest -q
 
 # Tests with coverage
@@ -319,3 +410,49 @@ pytest --cov=. --cov-report=term-missing -q
 The sandbox worker runs as a subprocess isolated from the main process.
 The full sandbox (namespaces, seccomp, cgroups) is intended for production deployment
 inside a dedicated container or VM — the current implementation is a scaffold.
+
+---
+
+## CLI reference (`gateway_ctl.py`)
+
+The bundled CLI wraps every admin API endpoint:
+
+```powershell
+# Authenticate (caches token to .gateway_token)
+python gateway_ctl.py login
+
+# — Kill-switch —
+python gateway_ctl.py kill-switch status
+python gateway_ctl.py kill-switch on --reason "CVE-2025-XXXX"
+python gateway_ctl.py kill-switch off
+
+# — Audit —
+python gateway_ctl.py audit tail --n 50 --actor alice
+python gateway_ctl.py audit export-csv --output report.csv
+python gateway_ctl.py audit follow --interval 5 --actor alice
+
+# — Users —
+python gateway_ctl.py users list
+python gateway_ctl.py users create alice hunter2 --role user
+python gateway_ctl.py users permissions set alice file.read,noop
+python gateway_ctl.py users permissions clear alice
+
+# — Scheduler —
+python gateway_ctl.py schedule list --next
+python gateway_ctl.py schedule create "Daily" echo --interval 86400
+python gateway_ctl.py schedule history <task-id> --n 20
+
+# — Metrics —
+python gateway_ctl.py metrics tools
+python gateway_ctl.py metrics top --n 5
+
+# — Content filter —
+python gateway_ctl.py content-filter list
+python gateway_ctl.py content-filter add "bad-word" --mode literal --label profanity
+python gateway_ctl.py content-filter delete 0
+
+# — Provider keys —
+python gateway_ctl.py key set openai sk-... --ttl-days 90
+python gateway_ctl.py key rotate openai sk-new-...
+python gateway_ctl.py key status openai
+```

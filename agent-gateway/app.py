@@ -27,6 +27,8 @@ import content_filter as _content_filter
 import rate_limit as _rate_limit
 import webhooks as _webhooks
 import scheduler as _scheduler
+import tab_snapshot as _tab_snapshot
+import addons as _addons
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
 
@@ -562,6 +564,34 @@ def admin_login(payload: dict, _rl=Depends(rate_limiter)):
         raise HTTPException(status_code=401, detail='invalid credentials')
     # t contains access_token and refresh_token
     return {'token': t['access_token'], 'refresh_token': t['refresh_token']}
+
+
+class BootstrapTokenBody(BaseModel):
+    secret: str
+
+
+@app.post('/admin/bootstrap-token')
+def admin_bootstrap_token(body: BootstrapTokenBody):
+    """Mint an admin bearer token using the Electron bootstrap secret.
+
+    The Electron shell generates a random ``INTELLI_BOOTSTRAP_SECRET`` at
+    startup, passes it to the gateway via env, then calls this endpoint once
+    to obtain a long-lived admin token.  The token is injected automatically
+    into all admin UI pages so the user never has to paste it manually.
+
+    Only reachable from 127.0.0.1 (uvicorn is bound to localhost only).
+    No auth header required \u2014 the bootstrap secret acts as the credential.
+    """
+    expected = os.environ.get('INTELLI_BOOTSTRAP_SECRET', '')
+    if not expected or body.secret != expected:
+        raise HTTPException(status_code=403, detail='invalid bootstrap secret')
+    import secrets as _sec
+    at = _sec.token_urlsafe(32)
+    auth._TOKENS[at] = {
+        'username': 'admin',
+        'expires':  int(time.time()) + auth.REFRESH_EXPIRE,  # 7-day lifetime
+    }
+    return {'access_token': at}
 
 
 
@@ -1587,3 +1617,160 @@ def schedule_history(task_id: str, request: Request,
         raise HTTPException(status_code=404, detail='task not found')
     sliced = history[:limit]
     return {'task_id': task_id, 'count': len(sliced), 'total': len(history), 'history': sliced}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tab snapshot  (browser → gateway → agents)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TabSnapshotBody(BaseModel):
+    url:   str
+    title: str = ''
+    html:  str = ''
+
+
+@app.put('/tab/snapshot', status_code=204)
+def tab_snapshot_put(body: TabSnapshotBody):
+    """Receive a snapshot of the active tab from the Electron browser chrome.
+
+    The browser shell calls this endpoint automatically after each page load so
+    agents can retrieve the current page content without needing DOM access.
+    No auth required — endpoint is only reachable from localhost.
+    """
+    _tab_snapshot.set_snapshot(body.url, body.title, body.html)
+
+
+@app.get('/tab/snapshot')
+def tab_snapshot_get(request: Request):
+    """Return the most recent active-tab snapshot.
+
+    Agents call this to read the HTML of the page currently open in the browser.
+    Returns 204 with an empty body when no snapshot has been captured yet.
+    No auth required — only accessible from localhost.
+    """
+    snap = _tab_snapshot.get_snapshot()
+    if not snap:
+        return PlainTextResponse('', status_code=204)
+    # Omit full HTML for the summary field to keep the response lightweight
+    return {
+        'url':       snap.get('url', ''),
+        'title':     snap.get('title', ''),
+        'timestamp': snap.get('timestamp', ''),
+        'length':    snap.get('length', 0),
+        'html':      snap.get('html', ''),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Addon injection queue  (gateway → browser chrome)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get('/tab/inject-queue')
+def inject_queue_poll():
+    """Return and drain pending addon injection requests.
+
+    The Electron browser chrome polls this endpoint every few seconds.
+    Each item in the returned list contains ``name`` and ``code_js``.
+    The queue is cleared after this call so each script runs exactly once.
+    No auth required — only reachable from localhost.
+    """
+    return _addons.pop_inject_queue()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Addon management  (agents / admin UI)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AddonCreate(BaseModel):
+    name:        str
+    description: str = ''
+    code_js:     str
+
+
+class AddonUpdate(BaseModel):
+    description: str | None = None
+    code_js:     str | None = None
+
+
+@app.get('/admin/addons')
+def addons_list(request: Request):
+    """List all registered addons.  Admin auth required."""
+    _require_admin_token(request)
+    return {'addons': _addons.list_addons()}
+
+
+@app.post('/admin/addons', status_code=201)
+def addons_create(body: AddonCreate, request: Request):
+    """Create a new addon.  Admin auth required.
+
+    ``code_js`` is a JavaScript snippet executed inside the active browser tab
+    when the addon is activated.  Agents can write addons on the fly and
+    activate them to extend tab behaviour without requiring a full extension.
+    """
+    _require_admin_token(request)
+    try:
+        addon = _addons.create_addon(body.name, body.description, body.code_js)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return addon
+
+
+@app.get('/admin/addons/{name}')
+def addons_get(name: str, request: Request):
+    """Return a single addon by name.  Admin auth required."""
+    _require_admin_token(request)
+    addon = _addons.get_addon(name)
+    if addon is None:
+        raise HTTPException(status_code=404, detail='addon not found')
+    return addon
+
+
+@app.put('/admin/addons/{name}')
+def addons_update(name: str, body: AddonUpdate, request: Request):
+    """Update an addon's description and/or code.  Admin auth required."""
+    _require_admin_token(request)
+    try:
+        addon = _addons.update_addon(name, body.description, body.code_js)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='addon not found')
+    return addon
+
+
+@app.delete('/admin/addons/{name}', status_code=204)
+def addons_delete(name: str, request: Request):
+    """Delete an addon permanently.  Admin auth required."""
+    _require_admin_token(request)
+    try:
+        _addons.delete_addon(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='addon not found')
+
+
+@app.post('/admin/addons/{name}/activate')
+def addons_activate(name: str, request: Request):
+    """Activate an addon — marks it active and queues its JS for injection.
+
+    The browser chrome picks up the injection within its next poll cycle
+    (≤ 3 seconds) and executes the code inside the currently active tab.
+    Admin auth required.
+    """
+    _require_admin_token(request)
+    try:
+        addon = _addons.activate_addon(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='addon not found')
+    return {'activated': True, 'addon': addon}
+
+
+@app.post('/admin/addons/{name}/deactivate')
+def addons_deactivate(name: str, request: Request):
+    """Deactivate an addon.  Does not undo any already-injected JS.
+
+    Admin auth required.
+    """
+    _require_admin_token(request)
+    try:
+        addon = _addons.deactivate_addon(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail='addon not found')
+    return {'deactivated': True, 'addon': addon}

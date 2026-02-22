@@ -277,7 +277,51 @@ The prototype implementation lives under `agent-gateway/` and includes tests and
 
 ## Remaining steps — recommended priority
 
-1. Wire the Tab Snapshot Preview into the browser renderer and expose a per-tab permission prompt (high priority).
+> Items 2–22 are fully implemented (see progress log above). Items below are the
+> current backlog ordered by value / effort.
+
+### Immediate (ready to implement)
+
+1. **`openapi.yaml` — `memory` tag for agent-memory endpoints**: Add `- name: memory` to the top-level `tags:` block; update all 7 `/agents/*/memory/*` endpoints from `tags: [admin]` to `tags: [admin, memory]`. Keeps OpenAPI tag discipline consistent with the `test_openapi_tags.py` guard.
+
+2. ~~**`ui/status.html` — approval queue depth colour indicator**~~: `_alertThreshold` module variable shared between `loadAlertConfig()` and `render()`; Pending Approvals card colour proportional to threshold — amber at ≥ 80%, red at ≥ 100%; legacy amber-if-any behaviour when threshold=0. **Done.**
+
+3. **Per-origin DOM redaction UI** (`ui/tab_permission.html`): Extend the existing permission request page to also let the admin configure per-field redaction rules inline (currently only manageable via API).
+
+### Near-term (Electron browser-shell extensions)
+
+4. ~~**Browser sidebar panel**~~: Ctrl+Shift+A (or ☰ button added to address bar) toggles a lazily-created 340 px `BrowserView` showing `/ui/`; `tabBounds()` shrinks active tab, `sidebarBounds()` positions the panel; `syncBounds()` keeps both views in sync on all resize events. **Done.**
+
+5. **Tab snapshot IPC bridge** — expose `tab.snapshot()` from `browser.js` (calls `webContents.capturePage()` + serialised `accessibilitySnapshot()`) as `electronAPI.captureTab()` via `preload.js`; wire to `POST /tab/preview` in the gateway so AI agents can request a snapshot of the active tab without leaving the Electron shell.
+
+6. **Electron auto-updater** — integrate `electron-updater` (part of electron-builder) with the GitHub Releases feed; show a toast when a new version is available; download + install on idle.
+
+### Medium-term (hardening)
+
+7. **seccomp profile for subprocess worker (Linux)** — generate a minimal seccomp allowlist for `tool_proxy.py`'s subprocess; mount it via `--security-opt seccomp=...` in the Docker runner.
+
+8. **CORS restriction** — lock `CORSMiddleware` `allow_origins` to `["http://127.0.0.1:8080"]` in production; expose `AGENT_GATEWAY_CORS_ORIGINS` env var for overrides.
+
+9. **Pinned dependency hashes** — convert `requirements.txt` to `requirements.lock` with `pip-compile --generate-hashes`; update CI to install from the lock file.
+
+10. **Log shipping** — add an optional log-tail sidecar script (`scripts/log_shipper.py`) that watches `audit.log` and POSTs batches to a configurable SIEM endpoint; document in `docs/runbook.md §17`.
+
+### Long-term / research
+
+11. **Browser integration — full sidebar AI chat**: Replace the `<iframe>`-based panel with a native renderer panel that streams completions from `POST /chat/complete` directly in the sidebar with streaming `text/event-stream` support.
+
+12. **OAuth2 / OIDC federation** — add FastAPI OIDC middleware so enterprise users can log in with their IdP instead of a local password.
+
+13. **Encrypted audit log at rest** — wrap the append-only JSONL writer in optional AES-256-GCM encryption; key stored in Vault / keyring.
+
+14. **Accessibility & i18n** — screen-reader ARIA roles on all 15 admin UI pages; extract string literals to a single `i18n.js` map for future translation.
+
+---
+
+> **Session progress continues above this line.**
+> Items struck through (~~like this~~) are fully implemented.
+
+1. ~~Wire the Tab Snapshot Preview into the browser renderer and expose a per-tab permission prompt.~~ → **partial**: gateway endpoint exists (`/consent`), Electron bridge pending (item 5 above).
 2. ~~Implement provider adapters and move API keys into an OS keyring or vault~~ — done (OpenAI, Anthropic, OpenRouter, Ollama adapters + admin key management API + `/chat/complete` proxy). ~~Remaining: key rotation, scoped permissions per-user, TTL-based expiry~~ — **key rotation + TTL done** (`providers/key_rotation.py`, rotate/expiry API). ~~Remaining: scoped permissions per-user~~ — **done** (`GET/PUT /admin/users/{username}/permissions`, enforced in `/tools/call`).
 3. ~~Harden the Tool Proxy: create a sandboxed helper process with capability restrictions~~ — Docker runner now applies `--cap-drop ALL`, `no-new-privileges`, PID/FD limits, and optional seccomp profile. ~~Remaining: sign tool contracts and enforce a formal capability model~~ — **capability model done** (`tools/capability.py`, 13 manifests, CapabilityVerifier, `AGENT_GATEWAY_ALLOWED_CAPS`).
 4. ~~Replace dev `X-API-Key` with an auth system (local RBAC, operator accounts)~~ — done. ~~Audit review UI~~ — done (`ui/audit.html`). ~~Consent timeline and per-tab permission UI~~ — **done** (`consent_log.py`, `ui/consent.html`, `/consent/timeline` endpoints).
@@ -333,6 +377,18 @@ The prototype implementation lives under `agent-gateway/` and includes tests and
 - [x] **`gateway_ctl.py` — `schedule list --next` countdown flag**: `--next` store-true flag added to the `schedule list` subparser; when set, tasks are sorted ascending by `next_run_at` and each row is annotated with a human-readable countdown: `in Xs`, `in Ym`, `in Z.zh`, or `(overdue)` for tasks whose `next_run_at` is in the past; tasks without a `next_run_at` value sort last.
 - [x] **`ui/status.html` — Scheduler Tasks card enrichment**: `<div class="card-sub" id="c-tasks-sub">` added inside the Scheduler Tasks stat card; new `loadSchedule()` async function (called on every poll cycle) fetches `GET /admin/schedule`, computes enabled/total count and the minimum `next_run_at` across enabled tasks, then sets `c-tasks-sub` to e.g. `"3/5 enabled · next in 47s"`; gracefully no-ops when unauthenticated or on network error.
 - [x] **Tests: 1068 passing, 2 skipped** (up from 1067; +1 net from openapi guard test now enforcing stricter tag discipline — all YAML, CLI, and UI changes are covered by the existing guard and integration suites; dedicated `audit follow` and `schedule list --next` parser tests are a logged remaining step).
+- [x] **`_fmt_audit_entry()` helper — consistent audit output formatting**: New module-level helper `_fmt_audit_entry(entry)` used by both `audit tail` and `audit follow`; actor left-padded to 16 chars, event left-padded to 28 chars, details JSON truncated to 120 chars with `…`; footer now uses grammatically correct `entry` / `entries` plural. Both subcommands now produce identical, terminal-width-friendly columns.
+- [x] **`tests/test_gateway_ctl_audit.py` — `TestAuditFollow` (6 new tests) + parser tests (4 new)**: `test_calls_audit_endpoint`, `test_prints_new_entries`, `test_prints_stopped_on_interrupt`, `test_uses_interval_argument`, `test_actor_filter_forwarded_to_url`, `test_deduplicates_repeated_entries`; parser: `test_follow_parsed`, `test_follow_interval_flag`, `test_follow_actor_flag`, `test_follow_action_flag`.
+- [x] **`tests/test_gateway_ctl_schedule.py` — `TestScheduleListNext` (7 new tests) + parser tests (2 new)**: `test_overdue_annotation`, `test_seconds_annotation`, `test_minutes_annotation`, `test_hours_annotation`, `test_no_next_run_at_does_not_crash`, `test_without_next_flag_no_annotation`, `test_sorts_ascending_by_next_run`; parser: `test_list_next_not_set_by_default`, `test_list_next_flag_parsed`.
+- [x] **`ui/audit.html` — group-by toggle**: "Group by event" button in toolbar; `_groupByEvent` boolean state; `groupEntries(arr)` collapses entries by event name preserving occurrence count; when active, `renderTable` renders one summary row per event type (badge + `×N` count chip, muted `(grouped)` details cell) sorted by frequency descending; button style changes to `.active` and text toggles to "Ungroup"; `.grp-count` CSS for the count chip.
+- [x] **`ui/users.html` — last-seen activity chip**: `_lastSeen` state dict populated by non-blocking `loadLastSeen()` (fetches `GET /admin/audit?tail=200`, maps `actor → latest ts`); `_relTime(ts)` formats elapsed time as `just now` / `Xm ago` / `Xh ago` / `Xd ago`; each user-item row gets a muted `.seen-chip` showing the actor's last audit timestamp; fetch runs in background after `loadUsers()` and triggers a second `renderUserList()` render once data arrives.
+- [x] **`README.md` (root) rewritten**: Full feature table, 15-row UI pages table, CLI cheat-sheet, repository layout table, quickstart with correct test count (~1087).
+- [x] **`agent-gateway/README.md` updated**: Feature list expanded (content-filter, rate-limits, memory, scheduler, webhooks, audit CSV, metrics); UI pages table (15 pages); endpoint reference completed (users, content-filter, rate-limits, memory, scheduler, webhooks, alerts, status/metrics sections added); environment variables table extended (content-filter, memory, audit path); persistent files table extended; development section updated with CLI reference cheat-sheet.
+- [x] **Tests: 1087 passing, 2 skipped** (up from 1068; +19 new: 10 `TestAuditFollow`+parser, 9 `TestScheduleListNext`+parser).
+- [x] **`browser-shell/` — Electron desktop browser with embedded gateway**: Full Chromium-based browser (address bar, tabs, back/forward/reload/stop, home) wrapping the agent gateway as a hidden subprocess. Architecture: Electron 29 main process (`main.js`) discovers `agent-gateway/` (dev: `../agent-gateway/`; packaged: `resources/agent-gateway/`), finds the Python interpreter (checks `.venv/Scripts/python.exe` then `PATH`), spawns `uvicorn app:app --host 127.0.0.1 --port 8080 --windowsHide` and polls `GET /health` every 400 ms for up to 15 s; `taskkill /f /t` terminates the process tree on close. One `BrowserWindow` hosts the 88 px chrome UI (`src/browser.html` — tab bar 36 px + address bar 52 px) plus one `BrowserView` per tab positioned below the chrome strip. `preload.js` exposes a `contextBridge` API (`window.electronAPI`) covering tabs (new/close/switch/list), navigation (navigate/back/forward/reload/stop/home), gateway status query, and external-URL delegation. `src/browser.js` renders the tab bar and address bar, wires keyboard shortcuts (Ctrl+T, Ctrl+W, Ctrl+L, Ctrl+R, Ctrl+1–9, Alt+←/→), and polls gateway status every 5 s (coloured dot: orange=starting, green=ready, red=error). Splash screen (`src/splash.html`) displayed while gateway boots. Address bar queries DuckDuckGo for non-URL input. Gateway menu shortcuts link to Admin Hub, Audit log, Users, and Status pages. Packaged with `electron-builder` 24.9 → Windows NSIS `.exe` (artifact: `Intelli-Setup-0.1.0.exe`) and Linux `.deb` + AppImage. Placeholder 16×16 purple `assets/icon.ico` generated by `generate-icon.js` (pure Node.js, no extra deps). `browser-shell/README.md` covers prerequisites, dev quickstart, build commands, architecture diagram, and keyboard shortcut reference.
+- [x] **Documentation refresh — all `.md` files**: `docs/deployment.md` (225 lines), `docs/developer-guide.md` (~270 lines), `docs/runbook.md` (257 lines), `ARCHITECTURE.md` (full Mermaid diagram with Electron shell + all 20 gateway subsystems + component table), `SECURITY.md` (4 items marked done: persistent token revocation, rate limiting on /admin/login, GDPR/CCPA API, secret rotation), `THREAT_MODEL.md` (38-row implementation status table appended), `README.md` (browser-shell row + `npm start` quickstart + correct venv startup command), `ROADMAP.md` (remaining-steps section replaced with clean prioritised backlog of 14 items).
+- [x] **`ui/status.html` — approval queue depth threshold colouring**: `_alertThreshold` module variable (default 0) shared between `loadAlertConfig()` and `render()`; Pending Approvals card colour is now proportional to the configured alert threshold — amber (`v-yellow`) when pending ≥ 80 % of threshold or > 0 when threshold is disabled, red (`v-red`) when pending ≥ threshold; zero pending always renders without colour class.
+- [x] **`browser-shell/` — admin-hub sidebar panel**: Lazily-created `BrowserView` (`sidebarView`) loaded with `${GATEWAY_ORIGIN}/ui/`; toggled via `ipcMain.handle('toggle-sidebar')`; `SIDEBAR_WIDTH = 340 px` constant added; `tabBounds()` subtracts sidebar width when open; new `sidebarBounds()` positions sidebar at `x: w - SIDEBAR_WIDTH, y: CHROME_HEIGHT`; `syncBounds()` replaces three duplicate resize handlers and also repositions the sidebar on window resize/fullscreen; `preload.js` exposes `electronAPI.toggleSidebar()`; `browser.html` adds `#btn-sidebar` (☰) button right of URL bar; `browser.js` wires button click + `Ctrl+Shift+A` shortcut and applies accent colour to button when sidebar is open.
 23. Browser integration: embed Chromium + sidebar UI + renderer-to-gateway bridge (long-term, high complexity).
 
 Refined Hybrid Supervisor Pipeline (implementation details)

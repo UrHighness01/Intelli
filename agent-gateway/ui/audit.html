@@ -137,6 +137,8 @@
       text-align: center; padding: 60px 20px;
       color: var(--muted); display: none;
     }
+    .grp-count { font-size: 11px; color: var(--muted); margin-left: 6px; vertical-align: middle; }
+    #grp-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
     #empty-state svg { opacity: .3; margin-bottom: 12px; }
 
     /* Logout */
@@ -206,6 +208,7 @@
     <input type="datetime-local" id="filter-until" title="Until (local time)" onchange="fetchAudit()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;outline:none;" />
     <button onclick="fetchAudit()">&#8635; Refresh</button>
     <button class="secondary" onclick="downloadCSV()" title="Download filtered entries as CSV">↓ CSV</button>
+    <button class="secondary" id="grp-btn" onclick="toggleGroupBy()" title="Collapse repeated events into grouped rows">Group by event</button>
     <span id="entry-count"></span>
   </div>
 
@@ -236,6 +239,7 @@
   let _allEntries = [];
   let _sortCol = 'ts';
   let _sortDir = -1; // -1 = descending (newest first)
+  let _groupByEvent = false;
 
   // ── Auth ──────────────────────────────────────────────────────────────
   async function login() {
@@ -372,6 +376,32 @@
     });
   }
 
+  // ── Group-by ─────────────────────────────────────────────────────────
+  function toggleGroupBy() {
+    _groupByEvent = !_groupByEvent;
+    const btn = document.getElementById('grp-btn');
+    if (btn) {
+      btn.classList.toggle('active', _groupByEvent);
+      btn.textContent = _groupByEvent ? 'Ungroup' : 'Group by event';
+    }
+    applyFilters();
+  }
+
+  function groupEntries(arr) {
+    // Collapse entries by event name; keep first example actor; accumulate count.
+    const order = [];
+    const map = {};
+    for (const e of arr) {
+      const key = e.event || '(unknown)';
+      if (!map[key]) {
+        map[key] = { ...e, _count: 0 };
+        order.push(key);
+      }
+      map[key]._count++;
+    }
+    return order.map(k => map[k]).sort((a, b) => b._count - a._count);
+  }
+
   function applyFilters() {
     const fEvent  = document.getElementById('filter-event').value.toLowerCase();
     const fActor  = document.getElementById('filter-actor').value.toLowerCase();
@@ -418,6 +448,19 @@
       return;
     }
     empty.style.display = 'none';
+
+    if (_groupByEvent) {
+      const groups = groupEntries(entries);
+      tbody.innerHTML = groups.map(g => `
+        <tr>
+          <td class="ts" style="color:var(--muted);font-style:italic">${g._count} event${g._count === 1 ? '' : 's'}</td>
+          <td class="event">${eventBadge(g.event)}<span class="grp-count">×${g._count}</span></td>
+          <td class="actor">${esc(g.actor ?? '—')}</td>
+          <td class="details" style="color:var(--muted);font-style:italic">(grouped)</td>
+        </tr>
+      `).join('');
+      return;
+    }
 
     tbody.innerHTML = entries.map(e => `
       <tr>

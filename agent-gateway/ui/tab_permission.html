@@ -1,47 +1,131 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Tab Snapshot Preview</title>
-  <style>body{font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:24px} textarea{width:100%;height:160px}</style>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e4f0;
+      padding: 32px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h2 { font-size: 1.35rem; font-weight: 700; color: #6c63ff; margin-bottom: 6px; }
+    h3 { font-size: 1rem; font-weight: 600; color: #a9adc9; margin: 24px 0 8px; }
+    p  { color: #7b7f9e; font-size: 0.88rem; margin-bottom: 20px; }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #7b7f9e;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 14px 0 4px;
+    }
+    input, textarea {
+      width: 100%;
+      background: #1a1d2e;
+      color: #e2e4f0;
+      border: 1px solid #2e3150;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus { border-color: #6c63ff; }
+    textarea { height: 160px; resize: vertical; }
+    button {
+      margin-top: 12px;
+      padding: 8px 20px;
+      background: #6c63ff;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #574fd6; }
+    button + button { margin-left: 8px; }
+    pre {
+      background: #1a1d2e;
+      color: #c9d1d9;
+      border: 1px solid #2e3150;
+      border-radius: 6px;
+      padding: 14px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 400px;
+      overflow: auto;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+    .row { display: flex; gap: 8px; align-items: flex-start; }
+    .row button { margin-top: 0; }
+  </style>
 </head>
 <body>
   <h2>Tab Snapshot Preview</h2>
-  <p>Paste page HTML and URL, preview sanitized snapshot and set redaction fields for this origin.</p>
+  <p>Paste page HTML and URL to preview the sanitized snapshot, and set redaction fields for this origin.</p>
+
   <label>Page URL</label>
-  <input id="url" style="width:100%" placeholder="https://example.com" />
-  <label>Selected text (optional)</label>
-  <input id="selected" style="width:100%" />
+  <input id="url" placeholder="https://example.com" />
+
+  <label>Selected text <span style="font-weight:400;text-transform:none">(optional)</span></label>
+  <input id="selected" placeholder="Highlighted text from the page" />
+
   <label>Page HTML</label>
   <textarea id="html" placeholder="&lt;html&gt;...&lt;/html&gt;"></textarea>
+
   <button id="preview">Preview Snapshot</button>
 
   <h3>Sanitized Snapshot</h3>
-  <pre id="out" style="background:#f5f5f5;padding:12px;border-radius:6px;white-space:pre-wrap;max-height:360px;overflow:auto"></pre>
+  <pre id="out">— output will appear here —</pre>
 
-  <h3>Redaction Fields (for this origin)</h3>
-  <input id="fields" placeholder="comma separated input names" style="width:100%" />
-  <button id="set">Set Redaction Rules</button>
+  <h3>Redaction Fields <span style="font-weight:400;font-size:0.82rem;color:#7b7f9e">(comma-separated input names for this origin)</span></h3>
+  <div class="row">
+    <input id="fields" placeholder="e.g. password, ssn, card_number" />
+    <button id="set">Save Rules</button>
+  </div>
 
   <script>
-  async function postJSON(url, body){
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     return res.json();
   }
 
-  document.getElementById('preview').addEventListener('click', async ()=>{
-    const html = document.getElementById('html').value;
-    const url = document.getElementById('url').value;
+  document.getElementById('preview').addEventListener('click', async () => {
+    const html     = document.getElementById('html').value;
+    const url      = document.getElementById('url').value;
     const selected = document.getElementById('selected').value;
-    const snap = await postJSON('/tab/preview', {html, url, selected_text: selected});
-    document.getElementById('out').textContent = JSON.stringify(snap, null, 2);
+    try {
+      const snap = await postJSON('/tab/preview', { html, url, selected_text: selected });
+      document.getElementById('out').textContent = JSON.stringify(snap, null, 2);
+    } catch (e) {
+      document.getElementById('out').textContent = 'Error: ' + e.message;
+    }
   });
 
-  document.getElementById('set').addEventListener('click', async ()=>{
+  document.getElementById('set').addEventListener('click', async () => {
     const origin = document.getElementById('url').value;
-    const fields = document.getElementById('fields').value.split(',').map(s=>s.trim()).filter(Boolean);
-    const res = await postJSON('/tab/redaction-rules', {origin, fields});
-    alert('Saved: '+JSON.stringify(res));
+    const fields = document.getElementById('fields').value
+      .split(',').map(s => s.trim()).filter(Boolean);
+    try {
+      const res = await postJSON('/tab/redaction-rules', { origin, fields });
+      alert('Saved: ' + JSON.stringify(res));
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
   });
   </script>
 </body>

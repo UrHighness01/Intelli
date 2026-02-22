@@ -126,6 +126,10 @@
       width: 6px; height: 6px; border-radius: 50%;
       background: var(--yellow); flex-shrink: 0;
     }
+    .seen-chip {
+      font-size: .66rem; color: var(--muted); margin-left: auto;
+      white-space: nowrap; opacity: .8;
+    }
 
     #user-empty { padding: 32px 16px; text-align: center; color: var(--muted); font-size: .85rem; }
     #refresh-users { width: 100%; border-radius: 0 0 10px 10px; background: var(--surface2); color: var(--muted); border-top: 1px solid var(--border); }
@@ -245,6 +249,7 @@ let _token = '';
 let _users  = [];    // array of user objects
 let _selUser = null; // selected username
 let _tools   = [];   // allowed_tools for selected user
+let _lastSeen = {};  // actor → latest audit ts
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function tok() {
@@ -267,6 +272,31 @@ function toast(msg, kind = 'ok') {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function _relTime(ts) {
+  const secs = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (secs < 60)    return 'just now';
+  if (secs < 3600)  return Math.round(secs / 60)  + 'm ago';
+  if (secs < 86400) return Math.round(secs / 3600) + 'h ago';
+  return Math.round(secs / 86400) + 'd ago';
+}
+
+// ── Load last-seen from audit log ──────────────────────────────────────────
+function loadLastSeen() {
+  // Non-blocking background fetch — populates _lastSeen then re-renders.
+  if (!tok()) return;
+  fetch('/admin/audit?tail=200', { headers: authHeaders() })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data) return;
+      _lastSeen = {};
+      for (const e of data.entries || []) {
+        const a = e.actor || '';
+        if (a && !_lastSeen[a]) _lastSeen[a] = e.ts;
+      }
+      renderUserList();
+    })
+    .catch(() => {});
+}
 
 // ── Load users ────────────────────────────────────────────────────────────────
 async function loadUsers() {
@@ -278,6 +308,7 @@ async function loadUsers() {
     const data = await r.json();
     _users = data.users || [];
     renderUserList();
+    loadLastSeen();  // non-blocking; re-renders once audit data arrives
     if (_selUser) {
       const still = _users.find(u => u.username === _selUser);
       if (still) loadDetail(_selUser);
@@ -301,6 +332,7 @@ function renderUserList() {
       <span class="user-name">${escHtml(u.username)}</span>
       ${(u.roles||[]).map(r => `<span class="role-chip${r==='admin'?' admin':''}">${escHtml(r)}</span>`).join('')}
       ${u.has_tool_restrictions ? '<span class="restriction-dot" title="tool restrictions"></span>' : ''}
+      ${_lastSeen[u.username] ? `<span class="seen-chip" title="Last audit event">${_relTime(_lastSeen[u.username])}</span>` : ''}
     </div>
   `).join('');
 }

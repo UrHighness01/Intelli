@@ -230,6 +230,7 @@
 
 let _token = '';
 let _pollTimer = null;
+let _alertThreshold = 0;  // 0 = disabled; updated by loadAlertConfig()
 
 function connect() {
   const t = document.getElementById('token-input').value.trim();
@@ -284,7 +285,16 @@ function render(d) {
   const pending = d.pending_approvals ?? 0;
   const pel = document.getElementById('c-pending');
   pel.textContent = pending;
-  pel.className = 'card-value ' + (pending > 0 ? 'v-yellow' : '');
+  // Colour the card based on proximity to the alert threshold.
+  // threshold=0 means disabled → keep legacy behaviour (amber when any pending).
+  let pendingClass = '';
+  if (_alertThreshold > 0) {
+    if (pending >= _alertThreshold) pendingClass = 'v-red';
+    else if (pending >= Math.ceil(_alertThreshold * 0.8)) pendingClass = 'v-yellow';
+  } else if (pending > 0) {
+    pendingClass = 'v-yellow';
+  }
+  pel.className = 'card-value ' + pendingClass;
 
   document.getElementById('c-tasks').textContent  = d.scheduler_tasks ?? 0;
   document.getElementById('c-agents').textContent = d.memory_agents ?? 0;
@@ -381,6 +391,7 @@ async function loadAlertConfig() {
     if (!r.ok) return;
     const d = await r.json();
     const t = d.approval_queue_threshold ?? 0;
+    _alertThreshold = t;  // share with renderStatus for card colouring
     const dot  = document.getElementById('alert-dot');
     const text = document.getElementById('alert-text');
     const help = document.getElementById('alert-help');

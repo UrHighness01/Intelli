@@ -33,16 +33,16 @@ You will receive an acknowledgement within 72 hours.
 - [x] PBKDF2-SHA256 password hashing with per-user salt
 - [x] Short-lived access tokens (default 1 h) + long-lived refresh tokens (7 d)
 - [x] In-memory token revocation
-- [ ] Persistent token revocation (survive restart)
+- [x] Persistent token revocation (survive restart) — `revoked_tokens.json`
 - [ ] OAuth2 / OIDC federation for enterprise SSO
-- [ ] Rate limiting on `/admin/login` (brute-force protection)
+- [x] Rate limiting on `/admin/login` (brute-force protection) — `rate_limit.py`
 
 ### Secrets Management
 - [x] OS keyring integration for user credentials
 - [x] Environment variable fallback for CI/dev
 - [x] HashiCorp Vault adapter scaffold
 - [ ] Vault AppRole / Kubernetes auth for production
-- [ ] Secret rotation workflow and TTL enforcement
+- [x] Secret rotation workflow and TTL enforcement — `key_rotation.py`
 
 ### Sandboxing
 - [x] Subprocess worker with action whitelist
@@ -74,7 +74,7 @@ You will receive an acknowledgement within 72 hours.
 ### Data Privacy
 - [x] Per-origin field redaction (persisted rules)
 - [x] `[REDACTED]` substitution for sensitive input values
-- [ ] GDPR/CCPA data-deletion API
+- [x] GDPR/CCPA data-deletion API — `consent_log.py` export/erase endpoints
 - [ ] Encrypted audit log at rest
 
 ---
