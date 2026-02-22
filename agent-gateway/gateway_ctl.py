@@ -877,10 +877,11 @@ def cmd_status(args: argparse.Namespace) -> None:
     token = _get_token(args)
     result = _request('GET', _url(args, '/admin/status'), token=token)
     ks = result.get('kill_switch_active', False)
-    ks_icon = '\U0001f534' if ks else '\U0001f7e2'
+    ks_icon  = '\U0001f534' if ks else '\U0001f7e2'
+    ks_label = ('ACTIVE \u2014 ' + str(result.get('kill_switch_reason'))) if ks else 'off'
     print(f"{ks_icon}  Intelli Gateway  v{result.get('version', '?')}")
     print(f"   Uptime            : {result.get('uptime_seconds', '?')} s")
-    print(f"   Kill-switch       : {'ACTIVE \u2014 ' + str(result.get('kill_switch_reason')) if ks else 'off'}")
+    print(f"   Kill-switch       : {ks_label}")
     print(f"   Tool calls total  : {result.get('tool_calls_total', 0)}")
     print(f"   Pending approvals : {result.get('pending_approvals', 0)}")
     print(f"   Scheduler tasks   : {result.get('scheduler_tasks', 0)}")
