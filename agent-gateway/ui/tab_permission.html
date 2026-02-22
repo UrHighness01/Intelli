@@ -146,7 +146,8 @@
   <!-- auth -->
   <div class="auth-bar">
     <div class="status-dot" id="dot"></div>
-    <input id="token" type="password" placeholder="Admin Bearer token" style="max-width:360px" />
+    <input id="token" type="password" placeholder="Admin Bearer token" autocomplete="off" style="max-width:360px" />
+    <button onclick="pasteToken()" title="Paste token from clipboard">📋 Paste</button>
     <button onclick="loadAllRules()">Connect</button>
   </div>
 
@@ -370,13 +371,25 @@
   }
 
   // ─── init ──────────────────────────────────────────────────────────────────
+  function pasteToken() {
+    navigator.clipboard.readText().then(text => {
+      const t = text.trim();
+      if (t) {
+        document.getElementById('token').value = t;
+        sessionStorage.setItem('gw_token', t);
+        loadAllRules();
+      }
+    }).catch(() => toast('⚠ Clipboard access denied — paste manually'));
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     const cached = sessionStorage.getItem('gw_token');
     if (cached) {
       document.getElementById('token').value = cached;
       loadAllRules();
     }
-    document.getElementById('token').addEventListener('change', () => {
+    // use 'input' (not 'change') so paste events immediately save + propagate
+    document.getElementById('token').addEventListener('input', () => {
       sessionStorage.setItem('gw_token', document.getElementById('token').value.trim());
     });
   });
