@@ -321,7 +321,7 @@
     const GW = 'http://127.0.0.1:8080';
 
     /* ── State ─────────────────────────────────────────────────── */
-    let _token    = sessionStorage.getItem('gw_token') || '';
+    let _token    = localStorage.getItem('gw_token') || '';
     let _msgs     = [];   // [{role, content}]
     let _busy     = false;
     let _totalIn  = 0;
@@ -348,7 +348,7 @@
     function applyToken(tok) {
       _token = tok.trim();
       if (_token) {
-        sessionStorage.setItem('gw_token', _token);
+        localStorage.setItem('gw_token', _token);
         $loginBar.classList.add('hidden');
       } else {
         $loginBar.classList.remove('hidden');

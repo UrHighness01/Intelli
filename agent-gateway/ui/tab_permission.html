@@ -376,21 +376,21 @@
       const t = text.trim();
       if (t) {
         document.getElementById('token').value = t;
-        sessionStorage.setItem('gw_token', t);
+        localStorage.setItem('gw_token', t);
         loadAllRules();
       }
     }).catch(() => toast('⚠ Clipboard access denied — paste manually'));
   }
 
   window.addEventListener('DOMContentLoaded', () => {
-    const cached = sessionStorage.getItem('gw_token');
+    const cached = localStorage.getItem('gw_token');
     if (cached) {
       document.getElementById('token').value = cached;
       loadAllRules();
     }
     // use 'input' (not 'change') so paste events immediately save + propagate
     document.getElementById('token').addEventListener('input', () => {
-      sessionStorage.setItem('gw_token', document.getElementById('token').value.trim());
+      localStorage.setItem('gw_token', document.getElementById('token').value.trim());
     });
   });
   </script>

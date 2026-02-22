@@ -381,7 +381,7 @@ function connect() {
   const t = document.getElementById('token-input').value.trim();
   if (!t) { toast('Paste a token first', 'err'); return; }
   _token = t;
-  sessionStorage.setItem('gw_token', t);
+  localStorage.setItem('gw_token', t);
   loadTasks();
 }
 
@@ -758,7 +758,7 @@ function toast(msg, type='ok') {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
-  const cached = sessionStorage.getItem('gw_token');
+  const cached = localStorage.getItem('gw_token');
   if (cached) {
     _token = cached;
     document.getElementById('token-input').value = cached;

@@ -237,7 +237,7 @@ function connect() {
   const t = document.getElementById('token-input').value.trim();
   if (!t) { toast('Paste a token first', 'err'); return; }
   _token = t;
-  sessionStorage.setItem('gw_token', t);
+  localStorage.setItem('gw_token', t);
   load();
 }
 
@@ -375,7 +375,7 @@ function toast(msg, type) {
 
 // ── Auto-connect ──────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  const stored = sessionStorage.getItem('gw_token');
+  const stored = localStorage.getItem('gw_token');
   if (stored) {
     _token = stored;
     document.getElementById('token-input').value = stored;
