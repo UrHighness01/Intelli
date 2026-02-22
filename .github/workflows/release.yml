@@ -26,6 +26,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r agent-gateway/requirements.lock
+          # uvloop has no Windows wheel so it cannot be hashed in the lock
+          # file compiled on Windows; install separately as a perf extra.
+          pip install uvloop
           pip install pytest build pip-licenses pip-audit
 
       - name: Add repo root to PYTHONPATH

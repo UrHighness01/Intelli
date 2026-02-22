@@ -29,6 +29,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r agent-gateway/requirements.lock
+          # uvloop has no Windows wheel so it cannot be hashed in the lock
+          # file compiled on Windows.  Install it separately here; it is a
+          # pure performance optimisation for uvicorn (faster event loop).
+          pip install uvloop
           pip install pip-licenses pip-audit
       - name: Start gateway for integration tests
         run: |

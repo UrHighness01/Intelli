@@ -24,3 +24,11 @@ jeepney>=0.4.2
 # importlib_metadata: required by keyring on Python<3.12; omitted when
 # pip-tools compiles on 3.12 but needed in CI on 3.11.
 importlib_metadata>=4.11.4
+# uvicorn[standard] optional extras that pip-tools CAN resolve on Windows.
+# uvloop is intentionally excluded: it has no Windows wheel so pip-tools
+# cannot hash it during local compilation. It is installed separately in CI
+# (see .github/workflows/ci.yml) as a pure performance optimisation.
+httptools>=0.5.0
+websockets>=10.4
+python-dotenv>=0.13
+watchfiles>=0.13
