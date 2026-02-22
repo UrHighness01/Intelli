@@ -111,6 +111,10 @@
       font-size: 11px;
       white-space: nowrap;
     }
+    thead th.sortable { cursor: pointer; user-select: none; }
+    thead th.sortable:hover { color: var(--text); }
+    thead th.sort-asc::after  { content: ' ▲'; font-size: 9px; }
+    thead th.sort-desc::after { content: ' ▼'; font-size: 9px; }
     tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
     tbody tr:hover { background: var(--surface); }
     tbody td { padding: 9px 14px; vertical-align: top; }
@@ -164,11 +168,31 @@
   <div class="toolbar">
     <select id="filter-event" onchange="applyFilters()">
       <option value="">All events</option>
-      <option value="approve">approve</option>
-      <option value="reject">reject</option>
-      <option value="set_redaction_rules">set_redaction_rules</option>
-      <option value="set_provider_key">set_provider_key</option>
-      <option value="delete_provider_key">delete_provider_key</option>
+      <optgroup label="Approvals">
+        <option value="approve">approve</option>
+        <option value="reject">reject</option>
+      </optgroup>
+      <optgroup label="Alerts">
+        <option value="alert_fired">alert_fired</option>
+        <option value="update_alerts_config">update_alerts_config</option>
+        <option value="update_approvals_config">update_approvals_config</option>
+      </optgroup>
+      <optgroup label="Webhooks">
+        <option value="register_webhook">register_webhook</option>
+        <option value="delete_webhook">delete_webhook</option>
+      </optgroup>
+      <optgroup label="Keys &amp; Providers">
+        <option value="set_provider_key">set_provider_key</option>
+        <option value="delete_provider_key">delete_provider_key</option>
+        <option value="rotate_key">rotate_key</option>
+      </optgroup>
+      <optgroup label="Other">
+        <option value="login">login</option>
+        <option value="set_redaction_rules">set_redaction_rules</option>
+        <option value="update_rate_limits">update_rate_limits</option>
+        <option value="trigger_kill_switch">trigger_kill_switch</option>
+        <option value="clear_kill_switch">clear_kill_switch</option>
+      </optgroup>
     </select>
     <input type="text" id="filter-actor" placeholder="Filter actor…" oninput="applyFilters()" style="width:160px" />
     <input type="text" id="filter-search" placeholder="Search details…" oninput="applyFilters()" style="width:200px" />
@@ -189,9 +213,9 @@
     <table>
       <thead>
         <tr>
-          <th>Timestamp</th>
-          <th>Event</th>
-          <th>Actor</th>
+          <th id="th-ts"    class="sortable" onclick="sortBy('ts')"    title="Sort by timestamp">Timestamp</th>
+          <th id="th-event" class="sortable" onclick="sortBy('event')" title="Sort by event">Event</th>
+          <th id="th-actor" class="sortable" onclick="sortBy('actor')" title="Sort by actor">Actor</th>
           <th>Details</th>
         </tr>
       </thead>
@@ -210,6 +234,8 @@
   const BASE = '';   // same origin
   let _token = sessionStorage.getItem('audit_token') || '';
   let _allEntries = [];
+  let _sortCol = 'ts';
+  let _sortDir = -1; // -1 = descending (newest first)
 
   // ── Auth ──────────────────────────────────────────────────────────────
   async function login() {
@@ -250,6 +276,7 @@
     document.getElementById('login-panel').style.display = 'none';
     document.getElementById('main-panel').style.display = 'block';
     document.getElementById('logout-btn').style.display = 'inline-block';
+    _updateSortIndicators();
     fetchAudit();
   }
 
@@ -307,6 +334,44 @@
     }
   }
 
+  // ── Sorting ───────────────────────────────────────────────────────────
+  function _updateSortIndicators() {
+    ['ts', 'event', 'actor'].forEach(col => {
+      const th = document.getElementById('th-' + col);
+      if (!th) return;
+      if (col === _sortCol) {
+        th.className = 'sortable ' + (_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+      } else {
+        th.className = 'sortable';
+      }
+    });
+  }
+
+  function sortBy(col) {
+    if (_sortCol === col) {
+      _sortDir *= -1;
+    } else {
+      _sortCol = col;
+      _sortDir = (col === 'ts') ? -1 : 1; // timestamps default newest-first
+    }
+    _updateSortIndicators();
+    applyFilters();
+  }
+
+  function sortEntries(arr) {
+    return arr.slice().sort((a, b) => {
+      let av, bv;
+      if (_sortCol === 'ts') {
+        av = a.ts || ''; bv = b.ts || '';
+      } else if (_sortCol === 'event') {
+        av = (a.event  || '').toLowerCase(); bv = (b.event  || '').toLowerCase();
+      } else if (_sortCol === 'actor') {
+        av = (a.actor  || '').toLowerCase(); bv = (b.actor  || '').toLowerCase();
+      } else { return 0; }
+      return av < bv ? -_sortDir : av > bv ? _sortDir : 0;
+    });
+  }
+
   function applyFilters() {
     const fEvent  = document.getElementById('filter-event').value.toLowerCase();
     const fActor  = document.getElementById('filter-actor').value.toLowerCase();
@@ -322,7 +387,7 @@
       return true;
     });
 
-    renderTable(filtered);
+    renderTable(sortEntries(filtered));
   }
 
   // ── Rendering ─────────────────────────────────────────────────────────

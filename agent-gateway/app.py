@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
@@ -77,6 +77,44 @@ _load_rules()
 # ---------------------------------------------------------------------------
 _kill_switch = threading.Event()
 _kill_switch_reason: str = ''
+
+# ---------------------------------------------------------------------------
+# Approval-queue depth alert
+# ---------------------------------------------------------------------------
+_APPROVAL_ALERT_THRESHOLD: int = int(
+    os.environ.get('AGENT_GATEWAY_APPROVAL_ALERT_THRESHOLD', '0')
+)
+# Runtime-mutable config (PUT /admin/alerts/config can override the env var)
+_alert_config: dict = {'approval_queue_threshold': _APPROVAL_ALERT_THRESHOLD}
+
+# ---------------------------------------------------------------------------
+# Approval timeout config (auto-reject pending after N seconds; 0 = disabled)
+# ---------------------------------------------------------------------------
+_APPROVAL_TIMEOUT: float = float(os.environ.get('AGENT_GATEWAY_APPROVAL_TIMEOUT', '0'))
+_approvals_config: dict = {'timeout_seconds': _APPROVAL_TIMEOUT}
+
+
+def _approval_timeout_reaper() -> None:
+    """Daemon: scan pending approvals every 5 s; auto-reject stale ones."""
+    while True:
+        try:
+            time.sleep(5)
+            timeout = _approvals_config.get('timeout_seconds', 0)
+            if timeout > 0:
+                expired = supervisor.queue.expire_pending(timeout)
+                for req_id in expired:
+                    _audit('reject', {'id': req_id, 'reason': 'timeout'}, actor='system')
+                    _webhooks.fire_webhooks('approval.rejected',
+                                           {'approval_id': req_id, 'reason': 'timeout'})
+                    _webhooks.fire_webhooks('gateway.alert',
+                                           {'alert': 'approval_timeout', 'approval_id': req_id})
+        except Exception:
+            pass
+
+
+_reaper_thread = threading.Thread(
+    target=_approval_timeout_reaper, daemon=True, name='approval-reaper')
+_reaper_thread.start()
 
 # startup time for basic metrics
 _start_time = datetime.now(timezone.utc)
@@ -157,6 +195,43 @@ def metrics_endpoint():
     _metrics.gauge('worker_pool_size', float(pool_h['size']))
     text = _metrics.export_prometheus()
     return PlainTextResponse(content=text, media_type='text/plain; version=0.0.4')
+
+
+@app.get('/admin/metrics/tools')
+def metrics_tools_endpoint(request: Request):
+    """Per-tool invocation count and latency summary.  Admin auth required.
+
+    Returns a sorted list of ``{tool, calls, p50_seconds?, mean_seconds?}``
+    objects (highest call count first) plus a ``total`` across all tools.
+    Latency fields are only present when at least one duration observation
+    exists for that tool.
+    """
+    _require_admin_token(request)
+    rows = _metrics.get_labels_for_counter('tool_calls_total')
+
+    # Build latency map from tool_call_duration_seconds histogram
+    hist_map: dict = {}
+    for labels, s, c, vals in _metrics.get_labels_for_histogram('tool_call_duration_seconds'):
+        tool_name = labels.get('tool', '')
+        if tool_name and vals:
+            sorted_vals = sorted(vals)
+            p50_idx = max(0, int(len(sorted_vals) * 0.5) - 1)
+            hist_map[tool_name] = {
+                'p50_seconds': round(sorted_vals[p50_idx], 6),
+                'mean_seconds': round(s / c, 6) if c else None,
+            }
+
+    tools: list = []
+    for labels, value in rows:
+        tool_name = labels.get('tool', '')
+        if not tool_name:
+            continue
+        entry: dict = {'tool': tool_name, 'calls': int(value)}
+        if tool_name in hist_map:
+            entry.update(hist_map[tool_name])
+        tools.append(entry)
+    tools.sort(key=lambda x: x['calls'], reverse=True)
+    return {'tools': tools, 'total': sum(t['calls'] for t in tools)}
 
 
 @app.get('/admin/audit')
@@ -359,6 +434,21 @@ def tool_call(call: ToolCall, request: Request, _rl=Depends(rate_limiter)):
     if result.get("status") == "pending_approval":
         _metrics.inc('approvals_queued_total')
         _webhooks.fire_webhooks('approval.created', {'approval_id': result.get('id'), 'tool': call.tool})
+        # Fire gateway.alert if approval queue depth reaches or exceeds the configured threshold
+        _threshold = _alert_config.get('approval_queue_threshold', 0)
+        if _threshold > 0:
+            _pending_count = len(supervisor.queue.list_pending())
+            if _pending_count >= _threshold:
+                _webhooks.fire_webhooks('gateway.alert', {
+                    'alert': 'approval_queue_depth',
+                    'pending_approvals': _pending_count,
+                    'threshold': _threshold,
+                })
+                _audit('alert_fired', {
+                    'alert': 'approval_queue_depth',
+                    'pending': _pending_count,
+                    'threshold': _threshold,
+                })
         # HTTP 202 Accepted
         return {"status": "pending_approval", "id": result.get("id")}
 
@@ -383,6 +473,7 @@ def list_tool_capabilities():
                 'optional_capabilities': sorted(m.optional),
                 'risk_level': m.risk_level,
                 'requires_approval': m.requires_approval,
+                'allowed_arg_keys': sorted(m.allowed_arg_keys) if m.allowed_arg_keys is not None else None,
             })
         except Exception:
             continue
@@ -689,6 +780,16 @@ class RateLimitUpdate(BaseModel):
     user_window_seconds: float | None = None
 
 
+class AlertsConfigUpdate(BaseModel):
+    """Body for PUT /admin/alerts/config."""
+    approval_queue_threshold: int  # ≥ 0; 0 = disable
+
+
+class ApprovalsConfigUpdate(BaseModel):
+    """Body for PUT /admin/approvals/config."""
+    timeout_seconds: float  # >= 0; 0 = disable auto-reject
+
+
 @app.put('/admin/rate-limits')
 def update_rate_limits(body: RateLimitUpdate, request: Request):
     """Update rate-limit settings at runtime (no restart required).
@@ -801,6 +902,72 @@ def get_webhook_deliveries(hook_id: str, request: Request, limit: int = 50):
         raise HTTPException(status_code=404, detail='webhook not found')
     deliveries = _webhooks.get_deliveries(hook_id, limit=limit)
     return {'hook_id': hook_id, 'deliveries': deliveries, 'count': len(deliveries)}
+
+
+# ---------------------------------------------------------------------------
+# Alert configuration
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/alerts/config')
+def get_alerts_config(request: Request):
+    """Return the current approval-queue depth alert configuration.
+
+    Admin auth required.
+    Returns {"approval_queue_threshold": int} where 0 means disabled.
+    """
+    _require_admin_token(request)
+    return dict(_alert_config)
+
+
+@app.put('/admin/alerts/config')
+def put_alerts_config(body: AlertsConfigUpdate, request: Request):
+    """Update the approval-queue depth alert configuration at runtime.
+
+    Admin auth required.  Sets the queue depth at which a ``gateway.alert``
+    webhook event is fired every time a new approval is enqueued and the
+    pending count reaches or exceeds the threshold.  Set to 0 to disable.
+    """
+    global _alert_config
+    token = _require_admin_token(request)
+    if body.approval_queue_threshold < 0:
+        raise HTTPException(status_code=422, detail='approval_queue_threshold must be >= 0')
+    _alert_config = {'approval_queue_threshold': body.approval_queue_threshold}
+    _audit('update_alerts_config', {'approval_queue_threshold': body.approval_queue_threshold},
+           actor=_actor(token))
+    return dict(_alert_config)
+
+
+# ---------------------------------------------------------------------------
+# Approval timeout configuration
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/approvals/config')
+def get_approvals_config(request: Request):
+    """Return the current approval auto-reject timeout configuration.
+
+    Admin auth required.
+    Returns {"timeout_seconds": float} where 0 means disabled.
+    """
+    _require_admin_token(request)
+    return dict(_approvals_config)
+
+
+@app.put('/admin/approvals/config')
+def put_approvals_config(body: ApprovalsConfigUpdate, request: Request):
+    """Update the approval auto-reject timeout at runtime.
+
+    Admin auth required.  Pending approvals older than *timeout_seconds* are
+    automatically rejected by the background reaper; fires ``approval.rejected``
+    and ``gateway.alert`` webhooks for each expired item.  Set to 0 to disable.
+    """
+    global _approvals_config
+    token = _require_admin_token(request)
+    if body.timeout_seconds < 0:
+        raise HTTPException(status_code=422, detail='timeout_seconds must be >= 0')
+    _approvals_config = {'timeout_seconds': body.timeout_seconds}
+    _audit('update_approvals_config', {'timeout_seconds': body.timeout_seconds},
+           actor=_actor(token))
+    return dict(_approvals_config)
 
 
 
@@ -937,7 +1104,7 @@ def gateway_status(request: Request):
         'uptime_seconds': round(uptime, 1),
         'kill_switch_active': _kill_switch.is_set(),
         'kill_switch_reason': _kill_switch_reason if _kill_switch.is_set() else None,
-        'tool_calls_total': int(_metrics.get_counter('tool_calls_total')),
+        'tool_calls_total': int(sum(v for _, v in _metrics.get_labels_for_counter('tool_calls_total'))),
         'pending_approvals': len(pending),
         'scheduler_tasks': len(tasks),
         'memory_agents': len(agents),
@@ -1406,13 +1573,17 @@ def schedule_trigger(task_id: str, request: Request):
 
 
 @app.get('/admin/schedule/{task_id}/history')
-def schedule_history(task_id: str, request: Request):
-    """Return recent run history for a scheduled task (newest first, max 50).
+def schedule_history(task_id: str, request: Request,
+                     limit: int = Query(50, ge=1, le=500,
+                                        description='Max records to return (1-500, newest first)')):
+    """Return recent run history for a scheduled task (newest first).
 
     Admin Bearer required.  Returns 404 if the task does not exist.
+    Use ``?limit=N`` to cap the number of returned records (default 50, max 500).
     """
     _require_admin_token(request)
     history = _scheduler.get_history(task_id)
     if history is None:
         raise HTTPException(status_code=404, detail='task not found')
-    return {'task_id': task_id, 'count': len(history), 'history': history}
+    sliced = history[:limit]
+    return {'task_id': task_id, 'count': len(sliced), 'total': len(history), 'history': sliced}

@@ -64,6 +64,20 @@
     button.secondary { background: var(--border); color: var(--text); }
     button.sm { padding: 4px 10px; font-size: .78rem; }
 
+    /* -- Timeout config --------------------------------------------------- */
+    #timeout-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    #timeout-panel h3 { font-size: .88rem; font-weight: 600; white-space: nowrap; }
+    #timeout-panel label { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+    #timeout-secs {
+      width: 100px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 10px; color: var(--text); font-size: .82rem; outline: none;
+    }
+    #timeout-secs:focus { border-color: var(--accent); }
+    #timeout-state { font-size: .78rem; color: var(--muted); margin-left: auto; }
+
     /* -- Toolbar ------------------------------------------------------------ */
     #toolbar {
       display: flex; align-items: center; gap: 10px;
@@ -87,6 +101,7 @@
     .appr-card-header {
       padding: 12px 18px; display: flex; align-items: center; gap: 12px;
       border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
     }
     .appr-id    { font-family: monospace; font-size: .78rem; color: var(--muted); }
     .appr-tool  { font-weight: 600; color: var(--accent); flex: 1; }
@@ -95,6 +110,10 @@
     .risk-medium { background: rgba(255,209,102,.15); color: var(--yellow); }
     .risk-high   { background: rgba(255,107,107,.15); color: var(--red); }
     .appr-ts    { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+    .appr-age   { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+    .appr-chevron { font-size: .75rem; color: var(--muted); transition: transform .2s; flex-shrink: 0; }
+    .appr-card.collapsed .appr-chevron { transform: rotate(-90deg); }
+    .appr-card.collapsed .appr-body    { display: none; }
 
     .appr-body { padding: 12px 18px; }
     .appr-args {
@@ -102,6 +121,28 @@
       padding: 10px 14px; font-family: monospace; font-size: .8rem;
       white-space: pre; overflow-x: auto; max-height: 200px; overflow-y: auto;
       color: var(--text); line-height: 1.5;
+    }
+    .manifest-info {
+      margin-top: 8px; font-size: .75rem; color: var(--muted);
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    }
+    .manifest-label { font-weight: 600; color: var(--text); margin-right: 2px; }
+    .cap-tag {
+      background: rgba(108,99,255,.15); color: #a78bfa;
+      border-radius: 4px; padding: 1px 6px; font-family: monospace; font-size: .72rem;
+    }
+    .cap-tag.unexpected {
+      background: rgba(255,107,107,.18); color: var(--red);
+    }
+    .manifest-warn {
+      width: 100%; margin-top: 4px;
+      background: rgba(255,107,107,.08); border: 1px solid rgba(255,107,107,.3);
+      border-radius: 5px; padding: 4px 8px;
+      color: var(--red); font-size: .73rem;
+    }
+    .manifest-warn code {
+      font-family: monospace; background: rgba(255,107,107,.12);
+      border-radius: 3px; padding: 0 4px;
     }
 
     .appr-actions {
@@ -168,6 +209,15 @@
     <button onclick="connect()">Connect</button>
   </div>
 
+  <!-- Timeout config -->
+  <div id="timeout-panel">
+    <h3>⏱ Auto-Reject Timeout</h3>
+    <label for="timeout-secs">Seconds (0 = off):</label>
+    <input type="number" id="timeout-secs" min="0" step="1" placeholder="0" />
+    <button class="sm" onclick="saveTimeout()">Save</button>
+    <span id="timeout-state">—</span>
+  </div>
+
   <!-- Toolbar -->
   <div id="toolbar">
     <h2>Pending requests</h2>
@@ -201,10 +251,11 @@
 <script>
 'use strict';
 
-let _token   = '';
-let _sse     = null;
-let _pending = {};   // id → item
-let _history = [];   // {id, tool, action, ts}
+let _token     = '';
+let _sse       = null;
+let _pending   = {};   // id → item
+let _history   = [];   // {id, tool, action, ts}
+let _manifests = {};   // tool → capability manifest object (from /tools/capabilities)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function tok() {
@@ -227,17 +278,18 @@ function toast(msg, kind = 'ok') {
 }
 
 function riskClass(r) {
-  if (!r && r !== 0) return '';
-  if (r >= 0.7) return 'risk-high';
-  if (r >= 0.4) return 'risk-medium';
-  return 'risk-low';
+  // handles both string ('low'/'medium'/'high') and legacy float (0-1)
+  if (r === 'high'   || r >= 0.7) return 'risk-high';
+  if (r === 'medium' || r >= 0.4) return 'risk-medium';
+  if (r === 'low'    || r >= 0)   return 'risk-low';
+  return '';
 }
 
 function riskLabel(r) {
-  if (r === undefined || r === null) return '';
-  if (r >= 0.7) return 'HIGH';
-  if (r >= 0.4) return 'MED';
-  return 'LOW';
+  if (r === 'high'   || r >= 0.7) return 'HIGH';
+  if (r === 'medium' || r >= 0.4) return 'MED';
+  if (r === 'low'    || r >= 0)   return 'LOW';
+  return '';
 }
 
 function fmtTs(ts) {
@@ -292,21 +344,56 @@ function render() {
 }
 
 function buildCard(item) {
-  const risk   = item.risk ?? item.risk_score ?? null;
-  const args   = item.args ?? item.payload ?? {};
-  const div    = document.createElement('div');
-  div.className = 'appr-card';
-  div.id        = 'card-' + item.id;
-  div.dataset.id = item.id;
+  const risk = item.risk ?? item.risk_score ?? null;
+  // Support both flat items and nested {payload: {tool, args}} shape
+  const payload  = (item.payload && typeof item.payload === 'object') ? item.payload : item;
+  const toolName = item.tool || payload.tool || '—';
+  const args     = payload.args ?? (item.args) ?? {};
+  // Age since enqueue
+  let age = '';
+  if (item.enqueued_at) {
+    const secs = Math.round(Date.now() / 1000 - item.enqueued_at);
+    age = secs < 60 ? `${secs}s ago` : `${Math.round(secs/60)}m ago`;
+  }
+  const ts = item.enqueued_at
+    ? new Date(item.enqueued_at * 1000).toLocaleTimeString()
+    : (item.created_at || item.ts || '');
+
+  // Build manifest info block if we have a capability manifest for this tool
+  const manifest = _manifests[toolName] || null;
+  let manifestHtml = '';
+  if (manifest && Array.isArray(manifest.allowed_arg_keys)) {
+    const allowedSet = new Set(manifest.allowed_arg_keys);
+    const argKeys = Object.keys(args);
+    const unexpected = argKeys.filter(k => !allowedSet.has(k));
+    const keyTags = manifest.allowed_arg_keys.length
+      ? manifest.allowed_arg_keys.map(k => {
+          const cls = argKeys.includes(k) ? 'cap-tag' : 'cap-tag';
+          return `<span class="${cls}">${escHtml(k)}</span>`;
+        }).join(' ')
+      : '<em style="color:var(--muted)">none</em>';
+    const warnHtml = unexpected.length
+      ? `<div class="manifest-warn">⚠ Unexpected arg key${unexpected.length > 1 ? 's' : ''}: ${unexpected.map(k => `<code><span class="cap-tag unexpected">${escHtml(k)}</span></code>`).join(' ')}</div>`
+      : '';
+    manifestHtml = `<div class="manifest-info"><span class="manifest-label">Declared args:</span> ${keyTags}${warnHtml}</div>`;
+  }
+
+  const div = document.createElement('div');
+  div.className  = 'appr-card';
+  div.id         = 'card-' + item.id;
+  div.dataset.id  = item.id;
   div.innerHTML = `
-    <div class="appr-card-header">
+    <div class="appr-card-header" onclick="toggleCard(this.closest('.appr-card'))">
       <span class="appr-id">#${item.id}</span>
-      <span class="appr-tool">${escHtml(item.tool || '—')}</span>
-      ${risk !== null ? `<span class="appr-risk ${riskClass(risk)}">${riskLabel(risk)} ${(risk*100).toFixed(0)}%</span>` : ''}
-      <span class="appr-ts">${fmtTs(item.created_at || item.ts)}</span>
+      <span class="appr-tool">${escHtml(toolName)}</span>
+      ${risk !== null ? `<span class="appr-risk ${riskClass(risk)}">${riskLabel(risk)}</span>` : ''}
+      ${age ? `<span class="appr-age">${age}</span>` : ''}
+      <span class="appr-ts">${escHtml(ts)}</span>
+      <span class="appr-chevron">&#9662;</span>
     </div>
     <div class="appr-body">
       <div class="appr-args">${escHtml(JSON.stringify(args, null, 2))}</div>
+      ${manifestHtml}
     </div>
     <div class="appr-actions">
       <button class="reject sm" onclick="doReject(${item.id})">✗ Reject</button>
@@ -314,6 +401,10 @@ function buildCard(item) {
     </div>
   `;
   return div;
+}
+
+function toggleCard(card) {
+  card.classList.toggle('collapsed');
 }
 
 function escHtml(s) {
@@ -331,7 +422,8 @@ async function doApprove(id) {
     });
     if (!r.ok) throw new Error(await r.text());
     const item = _pending[id];
-    if (item) _history.push({ id, tool: item.tool, action: 'approved', ts: new Date().toISOString() });
+    const toolName = (item && item.tool) || (item && item.payload && item.payload.tool) || '?';
+    if (item) _history.push({ id, tool: toolName, action: 'approved', ts: new Date().toISOString() });
     delete _pending[id];
     render();
     toast(`#${id} approved ✓`);
@@ -346,7 +438,8 @@ async function doReject(id) {
     });
     if (!r.ok) throw new Error(await r.text());
     const item = _pending[id];
-    if (item) _history.push({ id, tool: item.tool, action: 'rejected', ts: new Date().toISOString() });
+    const toolName = (item && item.tool) || (item && item.payload && item.payload.tool) || '?';
+    if (item) _history.push({ id, tool: toolName, action: 'rejected', ts: new Date().toISOString() });
     delete _pending[id];
     render();
     toast(`#${id} rejected`, 'err');
@@ -370,13 +463,59 @@ async function fetchOnce() {
   } catch (e) { toast(`Fetch error: ${e.message}`, 'err'); }
 }
 
+// ── Timeout config ─────────────────────────────────────────────────────────
+async function fetchTimeout() {
+  const t = tok(); if (!t) return;
+  try {
+    const r = await fetch('/admin/approvals/config', { headers: { Authorization: 'Bearer ' + t } });
+    if (!r.ok) return;
+    const d = await r.json();
+    const secs = d.timeout_seconds ?? 0;
+    document.getElementById('timeout-secs').value = secs;
+    document.getElementById('timeout-state').textContent =
+      secs === 0 ? 'disabled' : `auto-reject after ${secs}s`;
+  } catch (_) {}
+}
+
+async function saveTimeout() {
+  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  const val = parseFloat(document.getElementById('timeout-secs').value);
+  if (isNaN(val) || val < 0) { toast('Enter a number >= 0', 'err'); return; }
+  try {
+    const r = await fetch('/admin/approvals/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+      body: JSON.stringify({ timeout_seconds: val }),
+    });
+    if (!r.ok) { toast('Error saving timeout', 'err'); return; }
+    const d = await r.json();
+    const secs = d.timeout_seconds ?? 0;
+    document.getElementById('timeout-secs').value = secs;
+    document.getElementById('timeout-state').textContent =
+      secs === 0 ? 'disabled' : `auto-reject after ${secs}s`;
+    toast('Timeout saved ✓');
+  } catch (_) { toast('Network error', 'err'); }
+}
+
 // ── SSE ───────────────────────────────────────────────────────────────────────
 function connect() {
   const t = getToken();
   if (!t) { toast('Paste a token first', 'err'); return; }
   disconnectSSE();
+  fetchManifests();      // load tool capability manifests (public, no auth)
   fetchOnce();           // immediate snapshot
+  fetchTimeout();        // load timeout config
   openSSE();
+}
+
+async function fetchManifests() {
+  try {
+    const r = await fetch('/tools/capabilities');
+    if (!r.ok) return;
+    const d = await r.json();
+    _manifests = {};
+    (d.tools || []).forEach(t => { _manifests[t.tool] = t; });
+  } catch (_) {}
 }
 
 function openSSE() {

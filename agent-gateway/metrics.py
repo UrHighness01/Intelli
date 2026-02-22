@@ -67,6 +67,30 @@ def get_gauge(name: str, labels: Optional[Dict[str, str]] = None) -> float:
         return _gauges[name][_labels_to_tuple(labels)]
 
 
+def get_labels_for_counter(name: str) -> list:
+    """Return all (labels_dict, value) pairs for a named counter, sorted by value desc."""
+    with _lock:
+        result = []
+        for label_tuple, value in _counters.get(name, {}).items():
+            result.append((dict(label_tuple), value))
+        result.sort(key=lambda x: x[1], reverse=True)
+        return result
+
+
+def get_labels_for_histogram(name: str) -> list:
+    """Return all (labels_dict, sum, count, values) tuples for a named histogram.
+
+    Each element is ``(labels_dict, sum_float, count_int, values_list)``.
+    Sorted by count descending.
+    """
+    with _lock:
+        result = []
+        for label_tuple, (s, c, vals) in _histograms.get(name, {}).items():
+            result.append((dict(label_tuple), s, c, list(vals)))
+        result.sort(key=lambda x: x[2], reverse=True)
+        return result
+
+
 def _fmt_labels(label_tuple: Tuple) -> str:
     if not label_tuple:
         return ''

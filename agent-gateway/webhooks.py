@@ -12,6 +12,9 @@ AGENT_GATEWAY_WEBHOOKS_FILE
     Default: webhooks.json in the same directory as this module.
 AGENT_GATEWAY_WEBHOOK_TIMEOUT
     HTTP timeout in seconds for outbound webhook calls.  Default: 5.
+AGENT_GATEWAY_WEBHOOK_MAX_RETRIES
+    Total delivery attempts (initial + retries) per event.  Between attempts
+    the thread sleeps for 2**attempt seconds (1 s, 2 s, 4 s …).  Default: 3.
 
 Webhook delivery
 ----------------
@@ -52,7 +55,12 @@ VALID_EVENTS = frozenset({
     'approval.created',
     'approval.approved',
     'approval.rejected',
+    'gateway.alert',
 })
+
+# Maximum delivery attempts before giving up (initial try + retries).
+# Set AGENT_GATEWAY_WEBHOOK_MAX_RETRIES=0 for fire-and-forget with no retry.
+_MAX_RETRIES: int = int(os.environ.get('AGENT_GATEWAY_WEBHOOK_MAX_RETRIES', '3'))
 
 # ---------------------------------------------------------------------------
 # Internal state
@@ -93,6 +101,21 @@ def _save() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _public_hook(hook: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a safe public view of a hook record.
+
+    Strips the raw secret and replaces it with a boolean ``signed`` field so
+    that the REST API never leaks HMAC secrets to callers.
+    """
+    return {
+        'id': hook['id'],
+        'url': hook['url'],
+        'events': hook['events'],
+        'signed': bool(hook.get('secret')),
+        'created_at': hook['created_at'],
+    }
+
+
 def register_webhook(url: str, events: Optional[List[str]] = None, secret: str = '') -> Dict[str, Any]:
     """Register a new webhook.
 
@@ -132,21 +155,22 @@ def register_webhook(url: str, events: Optional[List[str]] = None, secret: str =
         _load()
         _hooks[hook_id] = hook
         _save()
-    return hook
+    return _public_hook(hook)
 
 
 def list_webhooks() -> List[Dict[str, Any]]:
-    """Return all registered webhooks."""
+    """Return all registered webhooks (public view — secrets masked)."""
     with _lock:
         _load()
-        return list(_hooks.values())
+        return [_public_hook(h) for h in _hooks.values()]
 
 
 def get_webhook(hook_id: str) -> Optional[Dict[str, Any]]:
-    """Return a single webhook record or None if not found."""
+    """Return a single webhook record (public view) or None if not found."""
     with _lock:
         _load()
-        return _hooks.get(hook_id)
+        hook = _hooks.get(hook_id)
+        return _public_hook(hook) if hook else None
 
 
 def delete_webhook(hook_id: str) -> bool:
@@ -197,34 +221,55 @@ def get_deliveries(hook_id: str, limit: int = 50) -> List[Dict[str, Any]]:
 
 
 def _deliver(hook_id: str, url: str, event: str, body: bytes, secret: str = '') -> None:
-    """Attempt a single webhook delivery (runs in thread pool)."""
+    """Attempt webhook delivery with exponential back-off retry.
+
+    Up to ``_MAX_RETRIES`` total attempts are made.  Between attempts the
+    thread sleeps for ``2 ** attempt`` seconds (1 s, 2 s, 4 s, …).  On a
+    2xx response delivery stops immediately — no further retries needed.
+    All non-retriable and retriable failures are silently swallowed so that
+    external endpoints can never block or slow the gateway.
+    """
+    import urllib.request
+
     ts = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     status_code: Optional[int] = None
     error: Optional[str] = None
     ok = False
+    attempts = 0
 
-    try:
-        # Use urllib so there is no extra dependency beyond stdlib
-        import urllib.request
-        headers: Dict[str, str] = {
-            'Content-Type': 'application/json',
-            'X-Gateway-Event': event,
-            'X-Gateway-Hook-ID': hook_id,
-        }
-        if secret:
-            sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-            headers['X-Intelli-Signature-256'] = f'sha256={sig}'
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers=headers,
-            method='POST',
-        )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            status_code = int(resp.status or 0)
-            ok = 200 <= status_code < 300
-    except Exception as exc:
-        error = type(exc).__name__ + ': ' + str(exc)
+    headers: Dict[str, str] = {
+        'Content-Type': 'application/json',
+        'X-Gateway-Event': event,
+        'X-Gateway-Hook-ID': hook_id,
+    }
+    if secret:
+        sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        headers['X-Intelli-Signature-256'] = f'sha256={sig}'
+
+    max_attempts = max(1, _MAX_RETRIES)
+    for attempt in range(max_attempts):
+        attempts += 1
+        try:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers=headers,
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                status_code = int(resp.status or 0)
+                ok = 200 <= status_code < 300
+            if ok:
+                error = None
+                break   # success — stop retrying
+            # non-2xx: record as error and maybe retry
+            error = f'HTTP {status_code}'
+        except Exception as exc:
+            error = type(exc).__name__ + ': ' + str(exc)
+
+        # Back-off before next attempt (skip sleeping after the last one)
+        if attempt < max_attempts - 1:
+            time.sleep(2 ** attempt)   # 1 s, 2 s, 4 s, …
 
     # Record outcome in per-hook deque (creates it on first delivery if needed)
     record: Dict[str, Any] = {
@@ -233,6 +278,7 @@ def _deliver(hook_id: str, url: str, event: str, body: bytes, secret: str = '') 
         'status': 'ok' if ok else 'error',
         'status_code': status_code,
         'error': error,
+        'attempts': attempts,
     }
     with _lock:
         if hook_id not in _delivery_log:

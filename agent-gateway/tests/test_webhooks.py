@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time as _time
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
@@ -35,6 +36,8 @@ def _reset_webhooks(tmp_path, monkeypatch):
     monkeypatch.setattr(webhooks, '_hooks', {})
     monkeypatch.setattr(webhooks, '_loaded', True)   # skip file-load in tests
     monkeypatch.setattr(webhooks, '_delivery_log', {})  # clear delivery log
+    # Default to 1 attempt so unreachable-URL tests don't sleep between retries
+    monkeypatch.setattr(webhooks, '_MAX_RETRIES', 1)
     yield
     monkeypatch.setattr(webhooks, '_hooks', {})
     monkeypatch.setattr(webhooks, '_loaded', True)
@@ -520,16 +523,23 @@ class TestHMACSigning:
         assert not any(k.lower() == 'x-intelli-signature-256' for k in captured)
 
     def test_secret_stored_in_hook_dict(self):
+        """Secret is persisted internally but NOT exposed via public API."""
         hook = webhooks.register_webhook('https://stored.test/', secret='abc123')
-        stored = webhooks.get_webhook(hook['id'])
-        assert stored is not None
-        assert stored.get('secret') == 'abc123'
+        # Public view has 'signed': True, no 'secret' key
+        assert hook.get('signed') is True
+        assert 'secret' not in hook
+        # Internal store still holds the raw secret for delivery
+        internal = webhooks._hooks.get(hook['id'])
+        assert internal is not None
+        assert internal.get('secret') == 'abc123'
 
     def test_no_secret_field_empty_string(self):
         hook = webhooks.register_webhook('https://nosecret.test/')
         stored = webhooks.get_webhook(hook['id'])
         assert stored is not None
-        assert stored.get('secret', '') == ''
+        # Public view: signed == False, no 'secret' key exposed
+        assert stored.get('signed') is False
+        assert 'secret' not in stored
 
     def test_fire_webhooks_passes_secret_to_deliver(self, monkeypatch):
         """fire_webhooks should forward the stored secret when calling _deliver."""
@@ -556,6 +566,140 @@ class TestHMACSigning:
         )
         assert r.status_code == 201
         hook_id = r.json()['id']
-        stored = webhooks.get_webhook(hook_id)
-        assert stored is not None
-        assert stored.get('secret') == 'topsecret'
+        # Public view has signed=True but does not expose the raw secret
+        public = webhooks.get_webhook(hook_id)
+        assert public is not None
+        assert public.get('signed') is True
+        # Internal record still holds the secret for delivery
+        internal = webhooks._hooks.get(hook_id)
+        assert internal is not None
+        assert internal.get('secret') == 'topsecret'
+
+# ===========================================================================
+# Delivery retry and back-off tests
+# ===========================================================================
+
+
+class TestDeliveryRetry:
+    """Verify that _deliver retries on failure and records attempt count."""
+
+    def _make_hook(self) -> dict:
+        return webhooks.register_webhook('https://retry.test/')
+
+    def test_attempts_recorded_on_success(self, monkeypatch):
+        """Successful delivery on first try → attempts == 1."""
+        class _OK:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr('urllib.request.urlopen', lambda *a, **kw: _OK())
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 3)
+        monkeypatch.setattr(_time, 'sleep', lambda s: None)
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.created', b'{}')
+        recs = webhooks.get_deliveries(hook['id'])
+        assert recs, 'No delivery record'
+        assert recs[0]['status'] == 'ok'
+        assert recs[0]['attempts'] == 1
+
+    def test_retries_on_non_2xx_then_succeeds(self, monkeypatch):
+        """First delivery returns 500, second returns 200 → status ok, attempts == 2."""
+        call_count = {'n': 0}
+
+        class _Resp:
+            def __init__(self, code):
+                self.status = code
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        def _fake_urlopen(req, timeout=None):
+            call_count['n'] += 1
+            if call_count['n'] < 2:
+                return _Resp(500)
+            return _Resp(200)
+
+        monkeypatch.setattr('urllib.request.urlopen', _fake_urlopen)
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 3)
+        monkeypatch.setattr(_time, 'sleep', lambda s: None)
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.approved', b'{}')
+        recs = webhooks.get_deliveries(hook['id'])
+        assert recs[0]['status'] == 'ok'
+        assert recs[0]['attempts'] == 2
+
+    def test_retries_on_exception_then_succeeds(self, monkeypatch):
+        """First delivery raises, second returns 200 → status ok, attempts == 2."""
+        call_count = {'n': 0}
+
+        class _OK:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        def _fake_urlopen(req, timeout=None):
+            call_count['n'] += 1
+            if call_count['n'] < 2:
+                raise ConnectionError('refused')
+            return _OK()
+
+        monkeypatch.setattr('urllib.request.urlopen', _fake_urlopen)
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 3)
+        monkeypatch.setattr(_time, 'sleep', lambda s: None)
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.rejected', b'{}')
+        recs = webhooks.get_deliveries(hook['id'])
+        assert recs[0]['status'] == 'ok'
+        assert recs[0]['attempts'] == 2
+
+    def test_all_retries_exhausted_records_error(self, monkeypatch):
+        """Delivery always fails → status error, attempts == MAX_RETRIES."""
+        def _always_fail(*a, **kw):
+            raise ConnectionError('connection refused')
+
+        monkeypatch.setattr('urllib.request.urlopen', _always_fail)
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 3)
+        monkeypatch.setattr(_time, 'sleep', lambda s: None)
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.created', b'{}')
+        recs = webhooks.get_deliveries(hook['id'])
+        assert recs[0]['status'] == 'error'
+        assert recs[0]['attempts'] == 3
+        assert recs[0]['error'] is not None
+
+    def test_no_sleep_on_single_attempt(self, monkeypatch):
+        """With MAX_RETRIES == 1, time.sleep must never be called."""
+        slept: list = []
+
+        class _OK:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr('urllib.request.urlopen', lambda *a, **kw: _OK())
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 1)
+        monkeypatch.setattr(_time, 'sleep', lambda s: slept.append(s))
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.created', b'{}')
+        assert slept == [], f'sleep() was called unexpectedly: {slept}'
+
+    def test_attempts_field_absent_in_old_deliveries_is_int(self, monkeypatch):
+        """Delivery log records always have an int 'attempts' field."""
+        class _OK:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr('urllib.request.urlopen', lambda *a, **kw: _OK())
+        monkeypatch.setattr(webhooks, '_MAX_RETRIES', 3)
+        monkeypatch.setattr(_time, 'sleep', lambda s: None)
+
+        hook = self._make_hook()
+        webhooks._deliver(hook['id'], hook['url'], 'approval.created', b'{}')
+        rec = webhooks.get_deliveries(hook['id'])[0]
+        assert isinstance(rec['attempts'], int) and rec['attempts'] >= 1

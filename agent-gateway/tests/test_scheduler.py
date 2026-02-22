@@ -688,3 +688,50 @@ class TestScheduleHistory:
         r = client.get(f"/admin/schedule/{t['id']}/history", headers=_auth(token))
         body = r.json()
         assert set(body.keys()) >= {'task_id', 'count', 'history'}
+
+    def test_response_includes_total_field(self, setup):
+        client, token = setup
+        t = self._create(client, token)
+        r = client.get(f"/admin/schedule/{t['id']}/history", headers=_auth(token))
+        body = r.json()
+        assert 'total' in body
+        assert body['total'] == body['count']  # no records: both are 0
+
+    def test_limit_param_caps_returned_records(self, setup, monkeypatch):
+        """?limit=N returns at most N records even when more exist."""
+        import scheduler as _sched
+        client, token = setup
+        t = self._create(client, token)
+        # Simulate 5 runs
+        _sched.set_executor(lambda p: {'ok': True})
+        raw = _sched._tasks[t['id']]
+        for _ in range(5):
+            _sched._run_task(raw)
+        # Request only 2
+        r = client.get(f"/admin/schedule/{t['id']}/history?limit=2", headers=_auth(token))
+        assert r.status_code == 200
+        body = r.json()
+        assert body['count'] == 2
+        assert body['total'] == 5
+        assert len(body['history']) == 2
+
+    def test_limit_param_defaults_to_50(self, setup):
+        """No explicit ?limit means all records up to 50 are returned."""
+        client, token = setup
+        t = self._create(client, token)
+        r = client.get(f"/admin/schedule/{t['id']}/history", headers=_auth(token))
+        assert r.status_code == 200
+
+    def test_limit_param_rejects_zero(self, setup):
+        """?limit=0 is invalid (ge=1)."""
+        client, token = setup
+        t = self._create(client, token)
+        r = client.get(f"/admin/schedule/{t['id']}/history?limit=0", headers=_auth(token))
+        assert r.status_code == 422
+
+    def test_limit_param_rejects_above_500(self, setup):
+        """?limit=501 is invalid (le=500)."""
+        client, token = setup
+        t = self._create(client, token)
+        r = client.get(f"/admin/schedule/{t['id']}/history?limit=501", headers=_auth(token))
+        assert r.status_code == 422

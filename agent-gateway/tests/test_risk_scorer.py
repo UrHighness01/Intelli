@@ -69,7 +69,11 @@ class TestSupervisorRisk:
         assert 'id' in result
 
     def test_path_traversal_queued(self, sup):
-        result = sup.process_call({'tool': 'echo', 'args': {'path': '../../etc/passwd'}})
+        # Use a tool with no capability manifest so the heuristic applies.
+        # 'echo' now has a manifest with requires_approval=false which would
+        # override the high heuristic score and accept the call instead.
+        # 'custom.nomanifest' has no manifest, so arg-pattern scoring decides.
+        result = sup.process_call({'tool': 'custom.nomanifest', 'args': {'path': '../../etc/passwd'}})
         assert result['status'] == 'pending_approval'
 
     def test_approval_queue_item_has_risk_field(self, sup):

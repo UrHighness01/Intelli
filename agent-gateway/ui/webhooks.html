@@ -147,6 +147,8 @@
     .badge { display: inline-block; border-radius: 12px; padding: 2px 8px; font-size: .75rem; font-weight: 700; }
     .badge-ok    { background: rgba(61,220,132,.15); color: var(--green); }
     .badge-error { background: rgba(255,107,107,.15); color: var(--red); }
+    tr.row-retried { border-left: 3px solid var(--yellow); }
+    tr.row-retried td:first-child { padding-left: 5px; }
 
     .empty-state { padding: 48px 24px; text-align: center; color: var(--muted); font-size: .88rem; }
 
@@ -188,6 +190,13 @@
           <label><input type="checkbox" value="approval.created"  checked /><span>approval.created</span></label>
           <label><input type="checkbox" value="approval.approved" checked /><span>approval.approved</span></label>
           <label><input type="checkbox" value="approval.rejected" checked /><span>approval.rejected</span></label>
+          <label><input type="checkbox" value="gateway.alert" /><span>gateway.alert</span></label>
+        </div>
+        <div style="margin-top:8px">
+          <input type="password" id="add-secret" placeholder="HMAC signing secret (optional)"
+                 style="width:340px"
+                 title="Leave blank for unsigned deliveries" />
+          <small style="color:#888;display:block;margin-top:2px">Leave blank for unsigned deliveries.</small>
         </div>
         <button onclick="addHook()">+ Register</button>
       </div>
@@ -217,6 +226,7 @@
               <th>Event</th>
               <th>Status</th>
               <th>HTTP</th>
+              <th>Attempts</th>
               <th>Error</th>
             </tr>
           </thead>
@@ -304,6 +314,7 @@ function renderHooks() {
       <div class="hook-url">${escHtml(h.url)}</div>
       <div class="hook-meta">
         ${(h.events || []).map(e => `<span class="chip">${escHtml(e)}</span>`).join('')}
+        ${h.signed ? `<span class="chip" title="HMAC signing secret configured">🔑 signed</span>` : ''}
         <span class="hook-ts">${fmtTs(h.created_at)}</span>
         <button class="danger sm hook-del" onclick="event.stopPropagation();deleteHook('${escHtml(h.id)}')">✕</button>
       </div>
@@ -318,16 +329,20 @@ async function addHook() {
   if (!url) { toast('Enter a URL', 'err'); return; }
   const checked = [...document.querySelectorAll('.events-grid input[type=checkbox]:checked')];
   const events  = checked.length ? checked.map(c => c.value) : null;
+  const secret  = document.getElementById('add-secret').value;
+  const body    = { url, events };
+  if (secret) body.secret = secret;
   try {
     const r = await fetch('/admin/webhooks', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ url, events })
+      body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error(await r.text());
     const hook = await r.json();
     toast('Webhook registered ✓');
     document.getElementById('add-url').value = '';
+    document.getElementById('add-secret').value = '';
     await loadHooks();
     selectHook(hook.id);
   } catch (e) { toast('Error: ' + e.message, 'err'); }
@@ -399,11 +414,12 @@ function renderDeliveries(deliveries) {
   empty.style.display = 'none';
   table.style.display = 'table';
   body.innerHTML = deliveries.map(d => `
-    <tr>
+    <tr class="${d.attempts > 1 ? 'row-retried' : ''}">
       <td class="ts">${fmtTs(d.ts || d.timestamp)}</td>
       <td class="mono">${escHtml(d.event || '—')}</td>
       <td><span class="badge badge-${d.status === 'ok' ? 'ok' : 'error'}">${escHtml(d.status || '—')}</span></td>
       <td style="color:var(--muted);font-size:.78rem">${d.status_code ?? '—'}</td>
+      <td style="color:var(--muted);font-size:.78rem;text-align:center">${d.attempts ?? '—'}${d.attempts > 1 ? ' ⚠️' : ''}</td>
       <td class="err-msg">${d.error ? escHtml(String(d.error).slice(0, 120)) : ''}</td>
     </tr>
   `).join('');

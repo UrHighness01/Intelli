@@ -84,6 +84,22 @@
     }
     .ks-controls input:focus { outline: none; border-color: var(--accent); }
 
+    /* Alert panel */
+    #alert-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px 20px; margin-bottom: 22px;
+    }
+    #alert-panel h2 { font-size: .9rem; font-weight: 700; margin-bottom: 10px; }
+    .alert-status { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: .88rem; }
+    #alert-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    #alert-dot.active { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+    .alert-controls { display: flex; gap: 8px; align-items: center; }
+    .alert-controls input[type=number] {
+      width: 90px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 6px 10px; font-size: .82rem;
+    }
+    .alert-controls input[type=number]:focus { outline: none; border-color: var(--accent); }
+
     button {
       background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
       color: var(--text); padding: 7px 14px; font-size: .82rem; cursor: pointer; transition: border-color .2s;
@@ -154,6 +170,7 @@
     <div class="stat-card">
       <div class="card-label">Tool Calls</div>
       <div class="card-value" id="c-calls">—</div>
+      <div class="card-sub" id="c-calls-sub" style="font-size:.68rem;line-height:1.4;"></div>
     </div>
     <div class="stat-card">
       <div class="card-label">Pending Approvals</div>
@@ -162,6 +179,7 @@
     <div class="stat-card">
       <div class="card-label">Scheduler Tasks</div>
       <div class="card-value v-accent" id="c-tasks">—</div>
+      <div class="card-sub" id="c-tasks-sub"></div>
     </div>
     <div class="stat-card">
       <div class="card-label">Memory Agents</div>
@@ -181,6 +199,21 @@
       <input type="text" id="ks-reason-input" placeholder="Reason (optional)…" />
       <button class="danger" onclick="ksActivate()">Arm</button>
       <button onclick="ksDeactivate()">Disarm</button>
+    </div>
+  </div>
+
+  <!-- Alert threshold panel -->
+  <div id="alert-panel">
+    <h2>🔔 Approval-Queue Depth Alert</h2>
+    <div class="alert-status">
+      <div id="alert-dot"></div>
+      <div id="alert-text">Loading…</div>
+    </div>
+    <div class="alert-controls">
+      <label style="font-size:.8rem;color:var(--muted)">Threshold:</label>
+      <input type="number" id="alert-threshold-input" min="0" step="1" placeholder="0 = off" />
+      <button onclick="alertSave()">Save</button>
+      <span style="font-size:.75rem;color:var(--muted)" id="alert-help">0 = disabled</span>
     </div>
   </div>
 
@@ -227,6 +260,10 @@ async function poll() {
     document.getElementById('refresh-dot').className = 'stale';
     toast(e.message, 'err');
   }
+  // Fetch alert config in parallel (best-effort, don't block status display)
+  loadAlertConfig();
+  loadTopTool();
+  loadSchedule();
 }
 
 function fmt_uptime(s) {
@@ -282,6 +319,99 @@ async function ksDeactivate() {
     if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
     toast('Kill-switch disarmed', 'ok');
     await poll();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Alert config ──────────────────────────────────────────────────────────────
+async function loadSchedule() {
+  if (!_token) return;
+  try {
+    const r = await fetch('/admin/schedule', { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const sub = document.getElementById('c-tasks-sub');
+    if (!sub) return;
+    const tasks = d.tasks || [];
+    const enabledCount = tasks.filter(t => t.enabled).length;
+    const total = tasks.length;
+    // Find nearest next_run_at among enabled tasks
+    let nextIn = '';
+    const now = Date.now();
+    let minMs = Infinity;
+    tasks.forEach(t => {
+      if (!t.enabled || !t.next_run_at) return;
+      const ms = new Date(t.next_run_at).getTime() - now;
+      if (ms < minMs) minMs = ms;
+    });
+    if (isFinite(minMs)) {
+      const s = Math.max(0, Math.round(minMs / 1000));
+      nextIn = s < 60 ? ` · next in ${s}s`
+              : s < 3600 ? ` · next in ${Math.round(s / 60)}m`
+              : ` · next in ${(s / 3600).toFixed(1)}h`;
+    }
+    sub.textContent = `${enabledCount}/${total} enabled${nextIn}`;
+  } catch (_) { /* not critical */ }
+}
+
+async function loadTopTool() {
+  if (!_token) return;
+  try {
+    const r = await fetch('/admin/metrics/tools', { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const sub = document.getElementById('c-calls-sub');
+    if (!sub) return;
+    const tools = d.tools || [];
+    if (!tools.length) { sub.innerHTML = ''; return; }
+    const top = tools[0];
+    const p50 = top.p50_seconds != null
+      ? ` · p50 ${(top.p50_seconds * 1000).toFixed(1)} ms` : '';
+    const escaped = String(top.tool).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    sub.innerHTML = `<span style="color:var(--accent)">${escaped}</span>`
+      + ` <span style="color:var(--muted)">${top.calls.toLocaleString()} calls${p50}</span>`
+      + ` <a href="metrics.html" style="color:var(--muted);text-decoration:none;font-size:.7rem"
+          title="View full breakdown">→ metrics</a>`;
+  } catch (_) { /* not critical */ }
+}
+
+async function loadAlertConfig() {
+  if (!_token) return;
+  try {
+    const r = await fetch('/admin/alerts/config', { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const t = d.approval_queue_threshold ?? 0;
+    const dot  = document.getElementById('alert-dot');
+    const text = document.getElementById('alert-text');
+    const help = document.getElementById('alert-help');
+    document.getElementById('alert-threshold-input').value = t;
+    if (t === 0) {
+      dot.className = '';
+      text.textContent = '⚪ Disabled — no alert will fire';
+      text.style.color = 'var(--muted)';
+      help.textContent = '0 = disabled';
+    } else {
+      dot.className = 'active';
+      text.textContent = `🔔 Active — fires when pending approvals ≥ ${t}`;
+      text.style.color = 'var(--yellow)';
+      help.textContent = `Current: ${t}`;
+    }
+  } catch (_) { /* not critical */ }
+}
+
+async function alertSave() {
+  if (!_token) { toast('Connect first', 'err'); return; }
+  const val = parseInt(document.getElementById('alert-threshold-input').value, 10);
+  if (isNaN(val) || val < 0) { toast('Threshold must be a non-negative integer', 'err'); return; }
+  try {
+    const r = await fetch('/admin/alerts/config', {
+      method: 'PUT',
+      headers: _headers(),
+      body: JSON.stringify({ approval_queue_threshold: val }),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error', 'err'); return; }
+    toast(val === 0 ? 'Alert disabled' : `Alert threshold set to ${val}`);
+    await loadAlertConfig();
   } catch (e) { toast(e.message, 'err'); }
 }
 

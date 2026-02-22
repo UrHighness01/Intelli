@@ -1,14 +1,16 @@
 import json
 import re
+import time
 from jsonschema import validate, ValidationError
 from pathlib import Path
 from typing import Any, Dict, Literal
 
 try:
-    from tools.capability import CapabilityVerifier
+    from tools.capability import CapabilityVerifier, ToolManifest
     _has_cap = True
 except Exception:
     CapabilityVerifier = None  # type: ignore
+    ToolManifest = None        # type: ignore
     _has_cap = False
 
 
@@ -95,9 +97,31 @@ class ApprovalQueue:
 
     def submit(self, payload: Dict[str, Any], risk: RiskLevel = 'high') -> int:
         id_ = self._next
-        self._store[id_] = {"payload": payload, "status": "pending", "risk": risk}
+        self._store[id_] = {
+            "payload": payload,
+            "status": "pending",
+            "risk": risk,
+            "enqueued_at": time.time(),
+        }
         self._next += 1
         return id_
+
+    def expire_pending(self, timeout_secs: float) -> list:
+        """Auto-reject pending items older than *timeout_secs*; return their ids.
+
+        Returns an empty list if *timeout_secs* is 0 or negative (disabled).
+        """
+        if timeout_secs <= 0:
+            return []
+        now = time.time()
+        expired = []
+        for id_, item in list(self._store.items()):
+            if item["status"] == "pending":
+                age = now - item.get("enqueued_at", now)
+                if age >= timeout_secs:
+                    item["status"] = "rejected"
+                    expired.append(id_)
+        return expired
 
     def approve(self, id_: int):
         if id_ in self._store:
@@ -184,7 +208,19 @@ class Supervisor:
         return None
 
     def approval_required(self, payload: Dict[str, Any]) -> bool:
-        """Return True when the tool call must be held for human approval."""
+        """Return True when the tool call must be held for human approval.
+
+        Decision order:
+        1. If a capability manifest exists for the tool, its ``requires_approval``
+           field is authoritative (True → always approve, False → always skip).
+        2. If no manifest exists, fall back to the heuristic risk score: only
+           ``'high'`` risk triggers the approval queue.
+        """
+        tool = payload.get('tool', '')
+        if ToolManifest is not None and tool:
+            manifest = ToolManifest.load(tool)
+            if manifest is not None:
+                return manifest.requires_approval
         return compute_risk(payload) == 'high'
 
     def process_call(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,9 +257,27 @@ class Supervisor:
         # Sanitize sensitive values
         sanitized = {"tool": payload.get("tool"), "args": self._sanitize(payload.get("args", {}))}
 
-        # Risk assessment
+        # Risk assessment (used for labelling and fallback routing)
         risk: RiskLevel = compute_risk(payload)
 
+        # Manifest-driven approval routing (overrides heuristic risk score)
+        manifest = ToolManifest.load(tool) if (ToolManifest is not None and tool) else None
+        if manifest is not None:
+            if manifest.requires_approval:
+                # Manifest explicitly requires human sign-off
+                req_id = self.queue.submit(sanitized, risk=risk)
+                return {"status": "pending_approval", "id": req_id, "risk": risk}
+            else:
+                # Manifest explicitly opts out of the approval queue
+                return {
+                    "tool": sanitized["tool"],
+                    "args": sanitized["args"],
+                    "status": "accepted",
+                    "risk": risk,
+                    "message": "validated and sanitized (supervisor; manifest auto-approved)",
+                }
+
+        # No manifest — fall back to heuristic risk score
         if risk == 'high':
             req_id = self.queue.submit(sanitized, risk=risk)
             return {"status": "pending_approval", "id": req_id, "risk": risk}

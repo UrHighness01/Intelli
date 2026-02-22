@@ -38,6 +38,18 @@ tags:
     description: Approval event webhook subscriptions
   - name: rate-limits
     description: Runtime rate-limit configuration and usage
+  - name: users
+    description: User account management (create, delete, password, tool permissions)
+  - name: kill-switch
+    description: Emergency kill-switch to block all tool-call processing
+  - name: status
+    description: Gateway operational status snapshot
+  - name: audit
+    description: Append-only immutable audit log (tail, filter, CSV export)
+  - name: alerts
+    description: Approval-queue depth alert configuration
+  - name: schedule
+    description: Recurring scheduled tool-call tasks
 
 paths:
   # ---------------------------------------------------------------------------
@@ -388,7 +400,7 @@ paths:
   /admin/kill-switch:
     get:
       summary: Get kill-switch state
-      tags: [admin]
+      tags: [admin, kill-switch]
       security:
         - BearerToken: []
       responses:
@@ -405,7 +417,7 @@ paths:
 
     post:
       summary: Activate the kill-switch (blocks all tool calls)
-      tags: [admin]
+      tags: [admin, kill-switch]
       security:
         - BearerToken: []
       requestBody:
@@ -432,7 +444,7 @@ paths:
 
     delete:
       summary: Deactivate the kill-switch and resume normal processing
-      tags: [admin]
+      tags: [admin, kill-switch]
       security:
         - BearerToken: []
       responses:
@@ -457,7 +469,7 @@ paths:
         Returns a high-level snapshot of gateway health: version, uptime,
         kill-switch state, cumulative tool-call count, pending approvals,
         scheduler task count, and number of agent memory namespaces.
-      tags: [admin]
+      tags: [admin, status]
       security:
         - BearerToken: []
       responses:
@@ -466,27 +478,58 @@ paths:
           content:
             application/json:
               schema:
+                $ref: '#/components/schemas/GatewayStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/metrics/tools:
+    get:
+      summary: Per-tool invocation counts
+      description: |
+        Returns the cumulative invocation count for every tool that has been
+        called since the gateway started, derived from the `tool_calls_total`
+        Prometheus counter.  Results are sorted by call count descending.
+        Admin Bearer token required.
+      tags: [admin, metrics]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Per-tool call counts
+          content:
+            application/json:
+              schema:
                 type: object
                 properties:
-                  version:
-                    type: string
-                    example: '0.1.0'
-                  uptime_seconds:
-                    type: number
-                    format: float
-                  kill_switch_active:
-                    type: boolean
-                  kill_switch_reason:
-                    type: string
-                    nullable: true
-                  tool_calls_total:
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tool:
+                          type: string
+                          description: Tool name (matches the `tool` field in ToolCall).
+                        calls:
+                          type: integer
+                          description: Cumulative invocation count since process start.
+                        p50_seconds:
+                          type: number
+                          nullable: true
+                          description: >
+                            p50 (median) call duration in seconds, derived from
+                            `tool_call_duration_seconds` histogram observations.
+                            Absent when no duration data is available for this tool.
+                        mean_seconds:
+                          type: number
+                          nullable: true
+                          description: >
+                            Mean call duration in seconds.  Absent when no duration
+                            data is available for this tool.
+                  total:
                     type: integer
-                  pending_approvals:
-                    type: integer
-                  scheduler_tasks:
-                    type: integer
-                  memory_agents:
-                    type: integer
+                    description: Sum of all per-tool call counts.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -498,7 +541,7 @@ paths:
   /admin/audit:
     get:
       summary: Export audit log entries with optional server-side filtering
-      tags: [admin]
+      tags: [admin, audit]
       security:
         - BearerToken: []
       parameters:
@@ -562,7 +605,7 @@ paths:
       description: |
         Returns the filtered audit log as a downloadable CSV file (columns: ts, event, actor, details).
         Accepts the same filter parameters as `GET /admin/audit`.
-      tags: [admin]
+      tags: [admin, audit]
       security:
         - BearerToken: []
       parameters:
@@ -618,7 +661,7 @@ paths:
     get:
       summary: List all users
       description: Returns all registered users (no passwords). Admin Bearer required.
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       responses:
@@ -640,7 +683,7 @@ paths:
 
     post:
       summary: Create a new user
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       requestBody:
@@ -682,7 +725,7 @@ paths:
       description: |
         Permanently removes the user. Returns 403 when attempting to delete the
         built-in **admin** account. Returns 404 when the user is not found.
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       parameters:
@@ -707,7 +750,7 @@ paths:
   /admin/users/{username}/password:
     post:
       summary: Change password for a user
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       parameters:
@@ -748,7 +791,7 @@ paths:
   /admin/users/{username}/permissions:
     get:
       summary: Get tool allow-list for a user
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       parameters:
@@ -767,7 +810,7 @@ paths:
 
     put:
       summary: Set (or clear) the tool allow-list for a user
-      tags: [admin]
+      tags: [admin, users]
       security:
         - BearerToken: []
       parameters:
@@ -1954,6 +1997,10 @@ paths:
                         error:
                           type: string
                           nullable: true
+                        attempts:
+                          type: integer
+                          minimum: 1
+                          description: Total delivery attempts made (1 = succeeded or failed on first try; >1 = retried).
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1961,12 +2008,63 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ── Alert config ──────────────────────────────────────────────────────────
+  /admin/alerts/config:
+    get:
+      summary: Get approval-queue alert configuration
+      description: >
+        Returns the current threshold for the approval-queue depth alert webhook.
+        When `approval_queue_threshold` is > 0, a `gateway.alert` webhook event
+        is fired every time a new approval is enqueued and the queue depth
+        reaches or exceeds the threshold.  Set to 0 to disable.
+      tags: [admin, alerts]
+      security:
+        - BearerToken: []
+      responses:
+        '200':
+          description: Alert configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: Update approval-queue alert configuration
+      description: >
+        Set `approval_queue_threshold` to the number of pending approvals at which
+        the gateway fires a `gateway.alert` webhook event.  0 disables the alert.
+      tags: [admin, alerts]
+      security:
+        - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertConfig'
+      responses:
+        '200':
+          description: Updated alert configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   # ── Scheduler ─────────────────────────────────────────────────────────────
   /admin/schedule:
     get:
       summary: List scheduled tasks
       description: Return all recurring tool-call tasks.  Admin Bearer required.
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       responses:
@@ -1988,7 +2086,7 @@ paths:
     post:
       summary: Create a scheduled task
       description: Register a new recurring tool-call task.  Admin Bearer required.
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       requestBody:
@@ -2040,7 +2138,7 @@ paths:
         description: Hex task identifier returned by POST /admin/schedule.
     get:
       summary: Get a scheduled task
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       responses:
@@ -2058,7 +2156,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       summary: Update a scheduled task (partial)
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       requestBody:
@@ -2094,7 +2192,7 @@ paths:
           description: Validation error
     delete:
       summary: Delete a scheduled task
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       responses:
@@ -2127,7 +2225,7 @@ paths:
       description: |
         Sets the task's `next_run_at` to the past so the background scheduler
         picks it up on its next tick (≤ 1 s).  Admin Bearer required.
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       responses:
@@ -2155,13 +2253,24 @@ paths:
         required: true
         schema:
           type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+        description: Maximum number of history records to return (newest first). Defaults to 50.
     get:
       summary: Get run history for a scheduled task
       description: |
-        Returns the most-recent execution records for a task (newest first,
-        maximum 50 entries).  History is held in memory and is cleared when
+        Returns the most-recent execution records for a task (newest first).
+        Use the ``limit`` query parameter to cap results (1–500, default 50).
+        The response always includes ``total`` (all-time run count) and ``count``
+        (records actually returned).  History is held in memory and cleared when
         the task is deleted.  Admin Bearer required.
-      tags: [Admin – Scheduler]
+      tags: [admin, schedule]
       security:
         - bearerAuth: []
       responses:
@@ -2174,8 +2283,12 @@ paths:
                 properties:
                   task_id:
                     type: string
+                  total:
+                    type: integer
+                    description: Total number of runs recorded (before applying limit).
                   count:
                     type: integer
+                    description: Number of records returned in this response.
                   history:
                     type: array
                     items:
@@ -2203,6 +2316,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Validation error – limit out of range (must be 1–500).
 
 # ---------------------------------------------------------------------------
 # Components
@@ -2232,6 +2347,37 @@ components:
         type: string
 
   schemas:
+    GatewayStatus:
+      type: object
+      description: High-level operational snapshot of the gateway.
+      properties:
+        version:
+          type: string
+          example: '0.1.0'
+        uptime_seconds:
+          type: number
+          format: float
+          description: Seconds since the gateway process started.
+        kill_switch_active:
+          type: boolean
+          description: Whether the emergency kill-switch is currently armed.
+        kill_switch_reason:
+          type: string
+          nullable: true
+          description: Human-readable reason supplied when the kill-switch was activated.
+        tool_calls_total:
+          type: integer
+          description: Cumulative tool-call count (sum across all tools) since process start.
+        pending_approvals:
+          type: integer
+          description: Number of tool-call requests currently awaiting operator approval.
+        scheduler_tasks:
+          type: integer
+          description: Number of active scheduled tasks.
+        memory_agents:
+          type: integer
+          description: Number of agent namespaces with at least one stored memory key.
+
     ScheduledTask:
       type: object
       properties:
@@ -2281,6 +2427,28 @@ components:
           type: string
           description: Human-readable name for the rule
 
+    AlertConfig:
+      type: object
+      properties:
+        approval_queue_threshold:
+          type: integer
+          minimum: 0
+          description: >
+            Fire a `gateway.alert` webhook event when pending approvals reach this
+            count.  0 = disabled.  Configurable at runtime without restart.
+
+    ApprovalsConfig:
+      type: object
+      required: [timeout_seconds]
+      properties:
+        timeout_seconds:
+          type: number
+          minimum: 0
+          description: >
+            Auto-reject pending approvals older than this many seconds.  The
+            reaper fires `approval.rejected` and `gateway.alert` webhooks for
+            each expired item.  0 = disabled.
+
     Webhook:
       type: object
       properties:
@@ -2294,7 +2462,10 @@ components:
           type: array
           items:
             type: string
-            enum: [approval.created, approval.approved, approval.rejected]
+            enum: [approval.created, approval.approved, approval.rejected, gateway.alert]
+        signed:
+          type: boolean
+          description: True when a non-empty HMAC signing secret is configured for this hook.
         created_at:
           type: string
           format: date-time
@@ -2367,6 +2538,15 @@ components:
           type: string
         requires_approval:
           type: boolean
+        allowed_arg_keys:
+          type: array
+          nullable: true
+          description: >-
+            Exhaustive list of argument keys this tool declares. null means no
+            restriction is declared. Any key present in a call but absent from
+            this list should be treated as unexpected by the operator.
+          items:
+            type: string
 
     ApprovalRequest:
       type: object
@@ -2375,7 +2555,16 @@ components:
           type: object
         status:
           type: string
+          enum: [pending, approved, rejected]
           example: pending
+        risk:
+          type: string
+          enum: [low, medium, high]
+          description: Risk level assigned by the supervisor.
+        enqueued_at:
+          type: number
+          format: float
+          description: Unix timestamp (seconds) when the request was enqueued.
 
     TokenPair:
       type: object

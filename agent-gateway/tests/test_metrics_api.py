@@ -267,3 +267,199 @@ def test_gateway_status_reflects_kill_switch_on():
     assert body['kill_switch_reason'] == 'status_test'
     # Restore
     client.delete('/admin/kill-switch', headers={'Authorization': f'Bearer {token}'})
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/metrics/tools
+# ---------------------------------------------------------------------------
+
+def test_metrics_tools_requires_auth():
+    r = client.get('/admin/metrics/tools')
+    assert r.status_code == 401
+
+
+def test_metrics_tools_returns_expected_shape():
+    token = _admin_token()
+    _metrics.reset()
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    body = r.json()
+    assert 'tools' in body
+    assert 'total' in body
+    assert isinstance(body['tools'], list)
+    assert isinstance(body['total'], int)
+
+
+def test_metrics_tools_records_tool_call():
+    token = _admin_token()
+    _metrics.reset()
+    # Make a tool call so that tool_calls_total{tool="echo"} gets incremented
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'hi'}})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    body = r.json()
+    tool_names = [t['tool'] for t in body['tools']]
+    assert 'echo' in tool_names
+
+
+def test_metrics_tools_counts_are_positive():
+    token = _admin_token()
+    _metrics.reset()
+    client.post('/tools/call', json={'tool': 'noop', 'args': {}})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    for entry in r.json()['tools']:
+        assert entry['calls'] >= 0
+
+
+def test_metrics_tools_total_matches_sum():
+    token = _admin_token()
+    _metrics.reset()
+    client.post('/tools/call', json={'tool': 'noop', 'args': {}})
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'x'}})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['total'] == sum(t['calls'] for t in body['tools'])
+
+
+def test_metrics_tools_sorted_descending():
+    token = _admin_token()
+    _metrics.reset()
+    # Call 'echo' twice, 'noop' once → echo should rank first
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'a'}})
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'b'}})
+    client.post('/tools/call', json={'tool': 'noop', 'args': {}})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    tools = r.json()['tools']
+    counts = [t['calls'] for t in tools]
+    assert counts == sorted(counts, reverse=True)
+
+
+def test_metrics_tools_empty_when_no_calls():
+    token = _admin_token()
+    _metrics.reset()
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['tools'] == []
+    assert body['total'] == 0
+
+
+def test_gateway_status_tool_calls_total_sum():
+    """GET /admin/status tool_calls_total must sum across all tools, not read unlabelled bucket."""
+    token = _admin_token()
+    _metrics.reset()
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'x'}})
+    client.post('/tools/call', json={'tool': 'noop', 'args': {}})
+
+    r = client.get('/admin/status', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    body = r.json()
+    # Should be at least 2 (one echo + one noop), not 0
+    assert body['tool_calls_total'] >= 2
+
+
+# ---------------------------------------------------------------------------
+# get_labels_for_histogram (metrics.py unit tests)
+# ---------------------------------------------------------------------------
+
+def test_get_labels_for_histogram_empty_when_no_observations():
+    _metrics.reset()
+    result = _metrics.get_labels_for_histogram('tool_call_duration_seconds')
+    assert result == []
+
+
+def test_get_labels_for_histogram_returns_tuples():
+    _metrics.reset()
+    _metrics.observe('tool_call_duration_seconds', 0.05, labels={'tool': 'echo'})
+    result = _metrics.get_labels_for_histogram('tool_call_duration_seconds')
+    assert len(result) == 1
+    labels, s, c, vals = result[0]
+    assert labels == {'tool': 'echo'}
+    assert s == pytest.approx(0.05)
+    assert c == 1
+    assert vals == pytest.approx([0.05])
+
+
+def test_get_labels_for_histogram_multiple_labels():
+    _metrics.reset()
+    for _ in range(3):
+        _metrics.observe('tool_call_duration_seconds', 0.1, labels={'tool': 'echo'})
+    _metrics.observe('tool_call_duration_seconds', 0.2, labels={'tool': 'noop'})
+    result = _metrics.get_labels_for_histogram('tool_call_duration_seconds')
+    counts = {r[0]['tool']: r[2] for r in result}
+    assert counts['echo'] == 3
+    assert counts['noop'] == 1
+
+
+def test_get_labels_for_histogram_sorted_by_count_desc():
+    _metrics.reset()
+    _metrics.observe('tool_call_duration_seconds', 0.1, labels={'tool': 'a'})
+    for _ in range(5):
+        _metrics.observe('tool_call_duration_seconds', 0.2, labels={'tool': 'b'})
+    result = _metrics.get_labels_for_histogram('tool_call_duration_seconds')
+    counts = [r[2] for r in result]
+    assert counts == sorted(counts, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# /admin/metrics/tools — latency fields
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+def test_metrics_tools_has_latency_fields_after_call():
+    token = _admin_token()
+    _metrics.reset()
+    client.post('/tools/call', json={'tool': 'echo', 'args': {'text': 'hi'}})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    tools = r.json()['tools']
+    echo_entries = [t for t in tools if t['tool'] == 'echo']
+    assert len(echo_entries) == 1
+    entry = echo_entries[0]
+    # p50_seconds and mean_seconds should be present and positive
+    assert 'p50_seconds' in entry
+    assert entry['p50_seconds'] > 0
+    assert 'mean_seconds' in entry
+    assert entry['mean_seconds'] > 0
+
+
+def test_metrics_tools_no_latency_when_no_histogram():
+    """When histogram has no observations for a tool, latency keys are absent."""
+    token = _admin_token()
+    _metrics.reset()
+    # Inject a counter without a corresponding histogram observation
+    _metrics.inc('tool_calls_total', labels={'tool': 'synthetic'})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    tools = r.json()['tools']
+    synth = next((t for t in tools if t['tool'] == 'synthetic'), None)
+    assert synth is not None
+    assert 'p50_seconds' not in synth
+    assert 'mean_seconds' not in synth
+
+
+def test_metrics_tools_p50_is_plausible():
+    """p50 should be between the min and max observation values."""
+    token = _admin_token()
+    _metrics.reset()
+    # Manually observe 10 values: 0.01, 0.02, …, 0.10
+    for i in range(1, 11):
+        _metrics.observe('tool_call_duration_seconds', i * 0.01, labels={'tool': 'echo'})
+    _metrics.inc('tool_calls_total', labels={'tool': 'echo'})
+
+    r = client.get('/admin/metrics/tools', headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200
+    echo = next(t for t in r.json()['tools'] if t['tool'] == 'echo')
+    assert 0.01 <= echo['p50_seconds'] <= 0.10
+

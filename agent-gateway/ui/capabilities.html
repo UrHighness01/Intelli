@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Tool Capabilities</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header a   { margin-left: auto; color: var(--muted); font-size: .82rem; text-decoration: none; }
+    header a:hover { color: var(--accent); }
+
+    main { padding: 24px 28px; max-width: 1080px; margin: 0 auto; display: grid; gap: 16px; }
+
+    /* -- Filter bar ----------------------------------------------------------- */
+    #filter-bar {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    #filter-bar h2 { font-size: 1rem; font-weight: 600; flex: 1; }
+    #search-input {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 12px; color: var(--text); font-size: .85rem; outline: none; width: 220px;
+    }
+    #search-input:focus { border-color: var(--accent); }
+    select.filter-sel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-size: .82rem; outline: none; cursor: pointer;
+    }
+    select.filter-sel:focus { border-color: var(--accent); }
+
+    /* -- Summary pills -------------------------------------------------------- */
+    #summary-bar {
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .s-pill {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 6px 14px; font-size: .78rem;
+    }
+    .s-pill .val { font-weight: 700; margin-left: 4px; }
+    .s-pill .val.high   { color: var(--red); }
+    .s-pill .val.medium { color: var(--yellow); }
+    .s-pill .val.low    { color: var(--green); }
+    .s-pill .val.appr   { color: var(--accent); }
+
+    /* -- Cards ---------------------------------------------------------------- */
+    #tool-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 12px;
+    }
+
+    .cap-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column;
+      transition: border-color .15s;
+    }
+    .cap-card:hover { border-color: var(--accent); }
+
+    .cap-card-head {
+      padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .cap-tool-name { font-weight: 600; color: var(--accent); font-family: monospace; font-size: .9rem; flex: 1; }
+    .cap-display   { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+
+    .risk-badge {
+      padding: 2px 8px; border-radius: 12px; font-size: .72rem; font-weight: 700; white-space: nowrap;
+    }
+    .risk-low    { background: rgba(61,220,132,.15);  color: var(--green); }
+    .risk-medium { background: rgba(255,209,102,.15); color: var(--yellow); }
+    .risk-high   { background: rgba(255,107,107,.15); color: var(--red); }
+
+    .appr-badge {
+      padding: 2px 8px; border-radius: 12px; font-size: .72rem; font-weight: 700; white-space: nowrap;
+    }
+    .appr-yes { background: rgba(108,99,255,.15); color: var(--accent); }
+    .appr-no  { background: rgba(123,127,158,.1);  color: var(--muted); }
+
+    .cap-card-body {
+      padding: 12px 16px; flex: 1; display: grid; gap: 8px;
+    }
+    .cap-desc { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+    .cap-caps { font-size: .8rem; }
+    .cap-caps .label { color: var(--muted); font-size: .73rem; display: block; margin-bottom: 3px; }
+    .cap-tag {
+      display: inline-block; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 2px 8px; font-family: monospace; font-size: .75rem;
+      margin: 2px;
+    }
+    .cap-tag.req  { border-color: rgba(108,99,255,.4); color: var(--accent); }
+    .cap-tag.opt  { color: var(--muted); }
+    .cap-tag.arg  { border-color: rgba(61,220,132,.35); color: var(--green); }
+    .cap-tag.none { color: var(--muted); font-style: italic; }
+
+    /* -- Empty/error ---------------------------------------------------------- */
+    #empty-state {
+      text-align: center; padding: 56px 24px; color: var(--muted); font-size: .9rem;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      display: none;
+    }
+    #empty-state .icon { font-size: 2rem; margin-bottom: 10px; }
+
+    /* -- Toast ---------------------------------------------------------------- */
+    #toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 18px; font-size: .85rem; color: var(--text);
+      transform: translateY(80px); opacity: 0; transition: all .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.err  { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Intelli Gateway</h1>
+  <span style="color:var(--muted);font-size:.85rem">Tool Capabilities</span>
+  <a href="index.html">← Hub</a>
+</header>
+
+<main>
+  <!-- Filter bar -->
+  <div id="filter-bar">
+    <h2>Capability Manifests</h2>
+    <input type="search" id="search-input" placeholder="Filter by tool name…" oninput="applyFilter()" />
+    <select class="filter-sel" id="risk-filter" onchange="applyFilter()">
+      <option value="">All risks</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select>
+    <select class="filter-sel" id="appr-filter" onchange="applyFilter()">
+      <option value="">All approval</option>
+      <option value="yes">Requires approval</option>
+      <option value="no">Auto-approved</option>
+    </select>
+  </div>
+
+  <!-- Summary -->
+  <div id="summary-bar">
+    <div class="s-pill">Total <span class="val" id="sum-total">—</span></div>
+    <div class="s-pill">High risk <span class="val high" id="sum-high">—</span></div>
+    <div class="s-pill">Medium risk <span class="val medium" id="sum-med">—</span></div>
+    <div class="s-pill">Low risk <span class="val low" id="sum-low">—</span></div>
+    <div class="s-pill">Requires approval <span class="val appr" id="sum-appr">—</span></div>
+  </div>
+
+  <!-- Grid -->
+  <div id="tool-grid"></div>
+  <div id="empty-state">
+    <div class="icon">🛠️</div>
+    No manifests match the current filter.
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+let _allTools = [];
+
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const r = await fetch('/tools/capabilities');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    _allTools = (d.tools || []).sort((a, b) => (a.tool || '').localeCompare(b.tool || ''));
+    updateSummary(_allTools);
+    applyFilter();
+  } catch (e) {
+    toast('Failed to load capabilities: ' + e.message, 'err');
+  }
+}
+
+// ── Summary pills ─────────────────────────────────────────────────────────────
+function updateSummary(tools) {
+  document.getElementById('sum-total').textContent = tools.length;
+  document.getElementById('sum-high').textContent  = tools.filter(t => t.risk_level === 'high').length;
+  document.getElementById('sum-med').textContent   = tools.filter(t => t.risk_level === 'medium').length;
+  document.getElementById('sum-low').textContent   = tools.filter(t => t.risk_level === 'low').length;
+  document.getElementById('sum-appr').textContent  = tools.filter(t => t.requires_approval).length;
+}
+
+// ── Filter ────────────────────────────────────────────────────────────────────
+function applyFilter() {
+  const q    = document.getElementById('search-input').value.trim().toLowerCase();
+  const risk = document.getElementById('risk-filter').value;
+  const appr = document.getElementById('appr-filter').value;
+
+  const filtered = _allTools.filter(t => {
+    if (q    && !((t.tool || '').toLowerCase().includes(q) ||
+                  (t.display_name || '').toLowerCase().includes(q) ||
+                  (t.description  || '').toLowerCase().includes(q))) return false;
+    if (risk && t.risk_level !== risk) return false;
+    if (appr === 'yes' && !t.requires_approval) return false;
+    if (appr === 'no'  &&  t.requires_approval) return false;
+    return true;
+  });
+
+  render(filtered);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(tools) {
+  const grid  = document.getElementById('tool-grid');
+  const empty = document.getElementById('empty-state');
+
+  if (tools.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  grid.innerHTML = tools.map(buildCard).join('');
+}
+
+function buildCard(t) {
+  const reqCaps = (t.required_capabilities || []);
+  const optCaps = (t.optional_capabilities || []);
+  const argKeys = Array.isArray(t.allowed_arg_keys) ? t.allowed_arg_keys : null;
+  const riskCls = 'risk-' + (t.risk_level || 'low');
+  const apprCls = t.requires_approval ? 'appr-yes' : 'appr-no';
+  const apprLbl = t.requires_approval ? '⏳ Requires approval' : '✓ Auto-approved';
+
+  const reqHtml = reqCaps.length
+    ? reqCaps.map(c => `<span class="cap-tag req">${escHtml(c)}</span>`).join('')
+    : '<span class="cap-tag none">none</span>';
+
+  const optHtml = optCaps.length
+    ? optCaps.map(c => `<span class="cap-tag opt">${escHtml(c)}</span>`).join('')
+    : '';
+
+  const argHtml = argKeys !== null
+    ? (argKeys.length
+        ? argKeys.map(k => `<span class="cap-tag arg">${escHtml(k)}</span>`).join('')
+        : '<span class="cap-tag none">none declared</span>')
+    : '';
+
+  return `
+    <div class="cap-card">
+      <div class="cap-card-head">
+        <span class="cap-tool-name">${escHtml(t.tool || '—')}</span>
+        <span class="cap-display">${escHtml(t.display_name || '')}</span>
+        <span class="risk-badge ${riskCls}">${(t.risk_level || '?').toUpperCase()}</span>
+        <span class="appr-badge ${apprCls}">${apprLbl}</span>
+      </div>
+      <div class="cap-card-body">
+        ${t.description ? `<div class="cap-desc">${escHtml(t.description)}</div>` : ''}
+        <div class="cap-caps">
+          <span class="label">Required capabilities</span>
+          ${reqHtml}
+          ${optHtml ? `<br><span class="label" style="margin-top:6px;display:block">Optional</span>${optHtml}` : ''}
+        </div>
+        ${argHtml ? `<div class="cap-caps"><span class="label">Accepted arg keys</span>${argHtml}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, kind = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'show ' + kind;
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.className = '', 2600);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+load();
+</script>
+</body>
+</html>

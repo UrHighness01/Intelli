@@ -158,7 +158,12 @@
   <div id="agent-panel">
     <h2>Agents</h2>
     <ul id="agent-list"><li id="agent-empty">No agents loaded.</li></ul>
-    <button id="refresh-agents" onclick="loadAgents()">⟳ Refresh</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button id="refresh-agents" onclick="loadAgents()">⟳ Refresh</button>
+      <button class="secondary" onclick="exportAll()" title="Download all agent memories as JSON">⬇ Export all</button>
+      <button class="secondary" onclick="document.getElementById('import-file').click()" title="Import from a previously exported JSON file">⬆ Import</button>
+    </div>
+    <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importAll(this)" />
   </div>
 
   <!-- Memory detail (right column) -->
@@ -485,6 +490,51 @@
   }
   function truncate(s, n) {
     return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+
+  /* ── Export all ─────────────────────────────────────────────────────────── */
+  async function exportAll() {
+    const t = token();
+    if (!t) { toast('Connect first', 'err'); return; }
+    try {
+      const r = await fetch('/admin/memory/export', {
+        headers: { 'Authorization': `Bearer ${t}` },
+      });
+      if (!r.ok) { toast(`Export failed: ${r.status}`, 'err'); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'memory-export.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Export downloaded', 'ok');
+    } catch (e) { toast('Export failed', 'err'); }
+  }
+
+  /* ── Import ─────────────────────────────────────────────────────────────── */
+  async function importAll(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const t = token();
+    if (!t) { toast('Connect first', 'err'); return; }
+    const replace = confirm('Replace existing memory?\nOK = replace, Cancel = merge');
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      // Export format: {agents:{...}, ...} or bare {agent-id:{...}}
+      const agents = parsed.agents ?? parsed;
+      const r = await fetch('/admin/memory/import', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agents, merge: !replace }),
+      });
+      if (!r.ok) { toast(`Import failed: ${r.status}`, 'err'); return; }
+      const d = await r.json();
+      toast(`Imported ${d.imported_agents ?? '?'} agent(s), ${d.imported_keys ?? '?'} key(s)`, 'ok');
+      await loadAgents();
+    } catch (e) { toast('Import failed: ' + e.message, 'err'); }
+    input.value = '';
   }
 
   /* ── Startup ────────────────────────────────────────────────────────────── */

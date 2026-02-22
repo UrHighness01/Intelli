@@ -29,6 +29,25 @@ Usage
     python gateway_ctl.py consent export alice…
     python gateway_ctl.py consent erase alice…
     python gateway_ctl.py status
+    python gateway_ctl.py webhooks add https://my.server/hook --secret mysecret
+    python gateway_ctl.py memory agents
+    python gateway_ctl.py memory list my-agent
+    python gateway_ctl.py memory set my-agent greeting "hello" --ttl 3600
+    python gateway_ctl.py memory get my-agent greeting
+    python gateway_ctl.py memory delete my-agent greeting
+    python gateway_ctl.py memory prune my-agent
+    python gateway_ctl.py memory export --output backup.json
+    python gateway_ctl.py memory import backup.json
+    python gateway_ctl.py content-filter list
+    python gateway_ctl.py content-filter add badword --mode literal --label profanity
+    python gateway_ctl.py content-filter add '\\bsecret\\b' --mode regex --label secrets
+    python gateway_ctl.py content-filter delete 0
+    python gateway_ctl.py content-filter reload
+    python gateway_ctl.py users list
+    python gateway_ctl.py users create alice s3cret
+    python gateway_ctl.py users create alice s3cret --role admin
+    python gateway_ctl.py users delete alice
+    python gateway_ctl.py users password alice newpass
 
 Configuration
 -------------
@@ -269,6 +288,28 @@ def cmd_audit(args: argparse.Namespace) -> None:
         line_count = content.count('\n') - 1  # subtract header
         print(f'Saved {line_count} entries to {out_path}')
 
+    elif action == 'follow':
+        import time as _time
+        interval = getattr(args, 'interval', 5.0)
+        seen: set = set()
+        print(f'Following audit log — polling every {interval}s. Ctrl-C to stop.')
+        try:
+            while True:
+                qs = _audit_params(tail_default=50)
+                result = _request('GET', _url(args, f'/admin/audit?{qs}'), token=token)
+                entries = result.get('entries', [])
+                new_entries = [e for e in entries if e.get('ts', '') not in seen]
+                for entry in sorted(new_entries, key=lambda e: e.get('ts', '')):
+                    ts      = entry.get('ts', '')
+                    event   = entry.get('event', '')
+                    actor   = entry.get('actor', '')
+                    details = entry.get('details', {})
+                    print(f'{ts}  [{actor}]  {event}  {json.dumps(details)}')
+                    seen.add(ts)
+                _time.sleep(interval)
+        except KeyboardInterrupt:
+            print('\nStopped.')
+
 
 def cmd_key(args: argparse.Namespace) -> None:
     """Manage provider API keys."""
@@ -376,6 +417,8 @@ def cmd_webhooks(args: argparse.Namespace) -> None:
         body: dict = {'url': args.url}
         if args.events:
             body['events'] = [e.strip() for e in args.events.split(',')]
+        if getattr(args, 'secret', None):
+            body['secret'] = args.secret
         result = _request('POST', _url(args, '/admin/webhooks'), token=token, body=body)
         _pretty(result)
 
@@ -395,12 +438,41 @@ def cmd_schedule(args: argparse.Namespace) -> None:
         if not tasks:
             print('No scheduled tasks.')
             return
+        show_next = getattr(args, 'next', False)
+        if show_next:
+            from datetime import datetime, timezone
+
+            def _parse_nxt(t: dict) -> datetime:
+                nxt = t.get('next_run_at', '')
+                try:
+                    return datetime.fromisoformat(nxt.replace('Z', '+00:00'))
+                except Exception:
+                    return datetime.max.replace(tzinfo=timezone.utc)
+
+            tasks = sorted(tasks, key=_parse_nxt)
         for t in tasks:
             enabled  = '\u25cf' if t.get('enabled') else '\u25cb'
             interval = t.get('interval_seconds', '?')
             runs     = t.get('run_count', 0)
+            extra    = ''
+            if show_next:
+                from datetime import datetime, timezone
+                nxt = t.get('next_run_at', '')
+                try:
+                    dt   = datetime.fromisoformat(nxt.replace('Z', '+00:00'))
+                    secs = (dt - datetime.now(tz=timezone.utc)).total_seconds()
+                    if secs < 0:
+                        extra = '  (overdue)'
+                    elif secs < 60:
+                        extra = f'  in {secs:.0f}s'
+                    elif secs < 3600:
+                        extra = f'  in {secs/60:.0f}m'
+                    else:
+                        extra = f'  in {secs/3600:.1f}h'
+                except Exception:
+                    pass
             print(f"  {enabled} {t['id'][:8]}  {t['name']:24s}  "
-                  f"tool={t.get('tool'):16s}  every={interval}s  runs={runs}")
+                  f"tool={t.get('tool'):16s}  every={interval}s  runs={runs}{extra}")
 
     elif action == 'get':
         result = _request('GET', _url(args, f"/admin/schedule/{args.task_id}"), token=token)
@@ -444,8 +516,10 @@ def cmd_schedule(args: argparse.Namespace) -> None:
         _pretty(result)
 
     elif action == 'history':
-        result = _request('GET', _url(args, f"/admin/schedule/{args.task_id}/history"),
-                          token=token)
+        hist_url = _url(args, f"/admin/schedule/{args.task_id}/history")
+        if getattr(args, 'n', None):
+            hist_url += f"?limit={args.n}"
+        result = _request('GET', hist_url, token=token)
         records = result.get('history', [])
         if not records:
             print('No history yet.')
@@ -456,6 +530,128 @@ def cmd_schedule(args: argparse.Namespace) -> None:
             ts  = rec.get('timestamp', '')
             err = rec.get('error') or ''
             print(f"  {ok}  #{rec.get('run', '?'):4}  {ts}  {dur:.3f}s  {err}")
+
+
+def cmd_approvals(args: argparse.Namespace) -> None:
+    """Manage the approval queue and auto-reject timeout."""
+    token = _get_token(args)
+    action = args.appr_action
+
+    if action == 'list':
+        result = _request('GET', _url(args, '/approvals'), token=token)
+        pending = result.get('pending', {})
+        if not pending:
+            print('Queue is empty \u2014 no pending approvals.')
+            return
+        print(f'Pending approvals ({len(pending)}):')
+        for id_, item in (pending.items() if hasattr(pending, 'items') else enumerate(pending)):
+            item_dict = item if isinstance(item, dict) else {}
+            payload = item_dict.get('payload', {})
+            tool = (payload.get('tool') if isinstance(payload, dict) else None) or '?'
+            risk = item_dict.get('risk', '?')
+            enqueued = item_dict.get('enqueued_at', '')
+            age = ''
+            if enqueued:
+                import time as _t
+                secs = int(_t.time() - enqueued)
+                age = f'  age={secs}s'
+            print(f'  #{id_}  tool={tool}  risk={risk}{age}')
+
+    elif action == 'approve':
+        result = _request('POST', _url(args, f'/approvals/{args.id}/approve'), token=token)
+        print(f"Approved \u2713 #{args.id}: status={result.get('status')}")
+
+    elif action == 'reject':
+        result = _request('POST', _url(args, f'/approvals/{args.id}/reject'), token=token)
+        print(f"Rejected \u2717 #{args.id}: status={result.get('status')}")
+
+    elif action == 'timeout':
+        sub_action = args.timeout_action
+        if sub_action == 'get':
+            result = _request('GET', _url(args, '/admin/approvals/config'), token=token)
+            secs = result.get('timeout_seconds', 0)
+            state = 'disabled' if secs == 0 else f'auto-reject after {secs}s'
+            print(f'Approval timeout: {state}')
+            print(f'  timeout_seconds: {secs}')
+        elif sub_action == 'set':
+            if args.seconds < 0:
+                print('Error: seconds must be >= 0 (0 = disabled)',
+                      file=__import__('sys').stderr)
+                raise SystemExit(1)
+            result = _request('PUT', _url(args, '/admin/approvals/config'), token=token,
+                              body={'timeout_seconds': args.seconds})
+            s = result.get('timeout_seconds', 0)
+            print(f'Updated: timeout_seconds = {s}  '
+                  f'({"disabled" if s == 0 else f"auto-reject after {s}s"})')
+
+
+def cmd_capabilities(args: argparse.Namespace) -> None:
+    """Browse tool capability manifests."""
+    token = _get_token(args)
+    action = args.cap_action
+
+    if action == 'list':
+        result = _request('GET', _url(args, '/tools/capabilities'), token=token)
+        tools = result.get('tools', [])
+        if not tools:
+            print('No capability manifests found.')
+            return
+        # Column widths
+        w_tool  = max(len(t.get('tool', '')) for t in tools)
+        w_risk  = 6
+        header = f"{'Tool':<{w_tool}}  {'Risk':<{w_risk}}  Approval  Capabilities"
+        print(header)
+        print('-' * len(header))
+        for t in sorted(tools, key=lambda x: x.get('tool', '')):
+            tool = t.get('tool', '?')
+            risk = t.get('risk_level', '?')
+            appr = 'yes' if t.get('requires_approval') else 'no '
+            req  = ', '.join(t.get('required_capabilities', [])) or '—'
+            opt  = t.get('optional_capabilities', [])
+            caps = req + (f'  (+opt: {", ".join(opt)})' if opt else '')
+            print(f"{tool:<{w_tool}}  {risk:<{w_risk}}  {appr}       {caps}")
+        print(f'\n{len(tools)} manifest(s) shown.')
+
+    elif action == 'show':
+        result = _request('GET', _url(args, '/tools/capabilities'), token=token)
+        tools  = result.get('tools', [])
+        target = args.tool.lower()
+        match  = next((t for t in tools if t.get('tool', '').lower() == target), None)
+        if match is None:
+            print(f'No manifest found for tool: {args.tool}', file=__import__('sys').stderr)
+            raise SystemExit(1)
+        print(f"Tool:           {match.get('tool')}")
+        print(f"Display name:   {match.get('display_name', '—')}")
+        print(f"Description:    {match.get('description', '—')}")
+        print(f"Risk level:     {match.get('risk_level', '?')}")
+        print(f"Requires appr.: {'yes' if match.get('requires_approval') else 'no'}")
+        req  = match.get('required_capabilities', [])
+        opt  = match.get('optional_capabilities', [])
+        print(f"Required caps:  {', '.join(req) if req else '—'}")
+        print(f"Optional caps:  {', '.join(opt) if opt else '—'}")
+
+
+def cmd_alerts(args: argparse.Namespace) -> None:
+    """Manage the approval-queue depth alert configuration."""
+    token = _get_token(args)
+    action = args.alert_action
+
+    if action == 'status':
+        result = _request('GET', _url(args, '/admin/alerts/config'), token=token)
+        threshold = result.get('approval_queue_threshold', 0)
+        state = 'disabled' if threshold == 0 else f'fires when pending ≥ {threshold}'
+        print(f'Approval-queue alert: {state}')
+        print(f'  approval_queue_threshold: {threshold}')
+
+    elif action == 'set':
+        if args.threshold < 0:
+            print('Error: threshold must be >= 0 (0 = disabled)', file=__import__('sys').stderr)
+            raise SystemExit(1)
+        result = _request('PUT', _url(args, '/admin/alerts/config'), token=token,
+                          body={'approval_queue_threshold': args.threshold})
+        t = result.get('approval_queue_threshold', 0)
+        print(f'Updated: approval_queue_threshold = {t}  '
+              f'({"disabled" if t == 0 else f"fires when pending ≥ {t}"})')
 
 
 def cmd_rate_limits(args: argparse.Namespace) -> None:
@@ -533,19 +729,246 @@ def cmd_provider_health(args: argparse.Namespace) -> None:
                 print(f"  {row.get('provider')}  expires {row.get('expires_at')}")
 
 
+def cmd_users(args: argparse.Namespace) -> None:
+    """Manage gateway user accounts."""
+    token = _get_token(args)
+    action = args.user_action
+
+    if action == 'list':
+        result = _request('GET', _url(args, '/admin/users'), token=token)
+        users = result.get('users', [])
+        if not users:
+            print('No users found.')
+            return
+        print(f"  {'Username':<24}  {'Roles':<16}  Restrictions")
+        print(f"  {'─'*24}  {'─'*16}  {'─'*12}")
+        for u in users:
+            roles = ', '.join(u.get('roles', []))
+            restr = 'yes' if u.get('has_tool_restrictions') else 'no'
+            print(f"  {u.get('username', ''):<24}  {roles:<16}  {restr}")
+        print(f'\n{len(users)} user(s).')
+
+    elif action == 'create':
+        body: dict = {
+            'username': args.username,
+            'password': args.password,
+            'roles': [args.role],
+        }
+        result = _request('POST', _url(args, '/admin/users'), token=token, body=body)
+        _pretty(result)
+
+    elif action == 'delete':
+        result = _request('DELETE',
+                          _url(args, f'/admin/users/{args.username}'),
+                          token=token)
+        _pretty(result)
+
+    elif action == 'password':
+        body = {'new_password': args.new_password}
+        result = _request('POST',
+                          _url(args, f'/admin/users/{args.username}/password'),
+                          token=token, body=body)
+        _pretty(result)
+
+    elif action == 'permissions':
+        perm_action = args.user_perm_action
+        username    = args.username
+        if perm_action == 'get':
+            result  = _request('GET',
+                               _url(args, f'/admin/users/{username}/permissions'),
+                               token=token)
+            allowed = result.get('allowed_tools')
+            if allowed is None:
+                print(f'{username}: unrestricted (all tools allowed)')
+            elif not allowed:
+                print(f'{username}: restricted — no tools allowed')
+            else:
+                print(f'{username}: allowed tools ({len(allowed)}):')
+                for t in sorted(allowed):
+                    print(f'  \u2022 {t}')
+        elif perm_action == 'set':
+            tools  = [t.strip() for t in args.tools.split(',') if t.strip()]
+            result = _request('PUT',
+                              _url(args, f'/admin/users/{username}/permissions'),
+                              token=token, body={'allowed_tools': tools})
+            _pretty(result)
+        elif perm_action == 'clear':
+            result = _request('PUT',
+                              _url(args, f'/admin/users/{username}/permissions'),
+                              token=token, body={'allowed_tools': None})
+            _pretty(result)
+
+
+def cmd_content_filter(args: argparse.Namespace) -> None:
+    """Manage runtime content-filter deny rules."""
+    token = _get_token(args)
+    action = args.cf_action
+
+    if action == 'list':
+        result = _request('GET', _url(args, '/admin/content-filter/rules'), token=token)
+        rules = result.get('rules', [])
+        if not rules:
+            print('No content-filter rules defined.')
+            return
+        w = max((len(r.get('pattern', '')) for r in rules), default=10)
+        print(f"  {'#':>3}  {'Mode':<8}  {'Label':<20}  Pattern")
+        print(f"  {'─'*3}  {'─'*8}  {'─'*20}  {'─'*w}")
+        for i, r in enumerate(rules):
+            label   = r.get('label', '') or ''
+            mode    = r.get('mode', 'literal')
+            pattern = r.get('pattern', '')
+            print(f"  {i:>3}  {mode:<8}  {label:<20}  {pattern}")
+        print(f'\n{len(rules)} rule(s).')
+
+    elif action == 'add':
+        body: dict = {'pattern': args.pattern, 'mode': args.mode}
+        if args.label:
+            body['label'] = args.label
+        result = _request('POST', _url(args, '/admin/content-filter/rules'),
+                          token=token, body=body)
+        _pretty(result)
+
+    elif action == 'delete':
+        result = _request('DELETE',
+                          _url(args, f'/admin/content-filter/rules/{args.index}'),
+                          token=token)
+        _pretty(result)
+
+    elif action == 'reload':
+        result = _request('POST', _url(args, '/admin/content-filter/reload'), token=token)
+        count = result.get('rules_loaded', result.get('count', '?'))
+        print(f'Reloaded {count} rule(s) from disk and environment.')
+
+
+def cmd_metrics(args: argparse.Namespace) -> None:
+    """Print per-tool invocation counts and latency from /admin/metrics/tools."""
+    token = _get_token(args)
+    action = args.met_action
+    result = _request('GET', _url(args, '/admin/metrics/tools'), token=token)
+    tools = result.get('tools', [])
+
+    if action == 'top':
+        n = getattr(args, 'n', 5)
+        tools = tools[:n]
+
+    if not tools:
+        print('No tool calls recorded yet.')
+        return
+
+    HDR = f"{'Tool':<35} {'Calls':>8} {'p50 ms':>10} {'Mean ms':>10}"
+    SEP = '\u2500' * len(HDR)
+    print(HDR)
+    print(SEP)
+    for t in tools:
+        p50  = t.get('p50_seconds')
+        mean = t.get('mean_seconds')
+        p50_s  = f'{p50  * 1000:.1f}' if p50  is not None else '\u2014'
+        mean_s = f'{mean * 1000:.1f}' if mean is not None else '\u2014'
+        print(f"{t.get('tool', ''):<35} {t.get('calls', 0):>8} {p50_s:>10} {mean_s:>10}")
+    print(SEP)
+    print(f"Total: {result.get('total', 0)} calls across {len(result.get('tools', []))} tool(s)")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     """Print a high-level gateway status summary."""
     token = _get_token(args)
     result = _request('GET', _url(args, '/admin/status'), token=token)
     ks = result.get('kill_switch_active', False)
-    ks_icon = '🔴' if ks else '🟢'
+    ks_icon = '\U0001f534' if ks else '\U0001f7e2'
     print(f"{ks_icon}  Intelli Gateway  v{result.get('version', '?')}")
     print(f"   Uptime            : {result.get('uptime_seconds', '?')} s")
-    print(f"   Kill-switch       : {'ACTIVE — ' + str(result.get('kill_switch_reason')) if ks else 'off'}")
+    print(f"   Kill-switch       : {'ACTIVE \u2014 ' + str(result.get('kill_switch_reason')) if ks else 'off'}")
     print(f"   Tool calls total  : {result.get('tool_calls_total', 0)}")
     print(f"   Pending approvals : {result.get('pending_approvals', 0)}")
     print(f"   Scheduler tasks   : {result.get('scheduler_tasks', 0)}")
     print(f"   Memory agents     : {result.get('memory_agents', 0)}")
+
+
+def cmd_memory(args: argparse.Namespace) -> None:
+    """Manage per-agent memory entries."""
+    token = _get_token(args)
+    action = args.mem_action
+
+    if action == 'agents':
+        result = _request('GET', _url(args, '/agents'), token=token)
+        agents = result.get('agents', [])
+        if not agents:
+            print('No agents with stored memory.')
+        for agent_id in agents:
+            print(f'  {agent_id}')
+
+    elif action == 'list':
+        result = _request('GET', _url(args, f'/agents/{args.agent_id}/memory'), token=token)
+        entries = result.get('memory', {})
+        if not entries:
+            print('No memory entries.')
+            return
+        show_meta = getattr(args, 'meta', False)
+        import time as _t
+        now = _t.time()
+        for key, value in entries.items():
+            if show_meta:
+                meta = _request('GET', _url(args, f'/agents/{args.agent_id}/memory/{key}'),
+                                token=token, exit_on_error=False)
+                exp = meta.get('expires_at') if isinstance(meta, dict) else None
+                if exp is None:
+                    exp_str = 'no expiry'
+                else:
+                    secs_left = exp - now
+                    if secs_left <= 0:
+                        exp_str = 'EXPIRED'
+                    elif secs_left < 60:
+                        exp_str = f'expires in {int(secs_left)}s'
+                    elif secs_left < 3600:
+                        exp_str = f'expires in {int(secs_left / 60)}m'
+                    else:
+                        exp_str = f'expires in {int(secs_left / 3600)}h'
+                print(f'  {key} = {json.dumps(value)}  [{exp_str}]')
+            else:
+                print(f'  {key} = {json.dumps(value)}')
+
+    elif action == 'get':
+        result = _request('GET', _url(args, f'/agents/{args.agent_id}/memory/{args.key}'), token=token)
+        _pretty(result)
+
+    elif action == 'set':
+        try:
+            value = json.loads(args.value)
+        except json.JSONDecodeError:
+            value = args.value   # treat as plain string
+        body: dict = {'value': value}
+        if getattr(args, 'ttl', None) is not None:
+            body['ttl_seconds'] = args.ttl
+        result = _request('POST', _url(args, f'/agents/{args.agent_id}/memory'), token=token,
+                          body={'key': args.key, **body})
+        _pretty(result)
+
+    elif action == 'delete':
+        result = _request('DELETE', _url(args, f'/agents/{args.agent_id}/memory/{args.key}'), token=token)
+        _pretty(result)
+
+    elif action == 'prune':
+        result = _request('POST', _url(args, f'/agents/{args.agent_id}/memory/prune'), token=token)
+        print(f"Pruned {result.get('pruned', 0)} expired keys from agent '{args.agent_id}'.")
+
+    elif action == 'clear':
+        result = _request('DELETE', _url(args, f'/agents/{args.agent_id}/memory'), token=token)
+        _pretty(result)
+
+    elif action == 'export':
+        result = _request('GET', _url(args, '/admin/memory/export'), token=token)
+        if getattr(args, 'output', None):
+            Path(args.output).write_text(json.dumps(result, indent=2), encoding='utf-8')
+            print(f"Exported {result.get('agent_count', 0)} agents ({result.get('key_count', 0)} keys) to {args.output}")
+        else:
+            _pretty(result)
+
+    elif action == 'import':
+        data = json.loads(Path(args.file).read_text(encoding='utf-8'))
+        merge = not getattr(args, 'replace', False)
+        result = _request('POST', _url(args, '/admin/memory/import'), token=token,
+                          body={'data': data, 'merge': merge})
+        _pretty(result)
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +1041,15 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_csv.add_argument('--since',  default='', metavar='ISO8601')
     audit_csv.add_argument('--until',  default='', metavar='ISO8601')
 
+    audit_follow = audit_sub.add_parser('follow',
+                                         help='Poll audit log and print new entries (like tail -f)')
+    audit_follow.add_argument('--interval', type=float, default=5.0, metavar='SECS',
+                              help='Poll interval in seconds (default 5)')
+    audit_follow.add_argument('--n', type=int, default=50, dest='n',
+                              help='Max entries per fetch (default 50)')
+    audit_follow.add_argument('--actor',  default='', help='Filter by actor substring')
+    audit_follow.add_argument('--action', default='', help='Filter by event/action substring')
+
     audit.set_defaults(func=cmd_audit)
 
     # ---- key ----
@@ -680,6 +1112,8 @@ def _build_parser() -> argparse.ArgumentParser:
     wh_add.add_argument('--events', default='',
                         help='Comma-separated events (default: all). '
                              'Options: approval.created, approval.approved, approval.rejected')
+    wh_add.add_argument('--secret', default='', metavar='SECRET',
+                        help='HMAC-SHA256 signing secret; sets X-Intelli-Signature-256 on each delivery')
 
     wh_del = wh_sub.add_parser('delete', help='Delete a webhook by ID')
     wh_del.add_argument('id', help='Webhook UUID')
@@ -712,8 +1146,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sched = sub.add_parser('schedule', help='Manage scheduled tasks')
     sched_sub = sched.add_subparsers(dest='sched_action', required=True)
 
-    sched_sub.add_parser('list', help='List all scheduled tasks')
-
+    sched_list = sched_sub.add_parser('list', help='List all scheduled tasks')
+    sched_list.add_argument('--next', action='store_true', dest='next',
+                             help='Sort by next_run_at and show countdown to next execution')
     sched_get = sched_sub.add_parser('get', help='Show details of a task')
     sched_get.add_argument('task_id', help='Task ID')
 
@@ -741,6 +1176,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sched_hist = sched_sub.add_parser('history', help='Show run history for a task')
     sched_hist.add_argument('task_id')
+    sched_hist.add_argument('--n', type=int, default=None, metavar='N',
+                            help='Limit output to the N most-recent records')
     sched.set_defaults(func=cmd_schedule)
 
     # ---- provider health ----
@@ -758,9 +1195,166 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ph.set_defaults(func=cmd_provider_health)
 
+    # ---- metrics ----
+    met = sub.add_parser('metrics', help='View per-tool invocation counts and latency')
+    met_sub = met.add_subparsers(dest='met_action', required=True)
+
+    met_sub.add_parser('tools', help='Print all tools with call counts and latency')
+
+    met_top = met_sub.add_parser('top', help='Print the top N most-called tools')
+    met_top.add_argument('--n', type=int, default=5, metavar='N',
+                         help='Number of tools to show (default: 5)')
+
+    met.set_defaults(func=cmd_metrics)
+
     # ---- status ----
     stat = sub.add_parser('status', help='Print a gateway operational status summary')
     stat.set_defaults(func=cmd_status)
+
+    # ---- memory ----
+    mem = sub.add_parser('memory', help='Manage per-agent key-value memory')
+    mem_sub = mem.add_subparsers(dest='mem_action', required=True)
+
+    mem_sub.add_parser('agents', help='List all agents that have stored memory')
+
+    mem_list = mem_sub.add_parser('list', help='List all keys for an agent')
+    mem_list.add_argument('agent_id')
+    mem_list.add_argument('--meta', action='store_true',
+                         help='Also show per-key expiry information (requires one extra request per key)')
+
+    mem_get = mem_sub.add_parser('get', help='Read a single memory key')
+    mem_get.add_argument('agent_id')
+    mem_get.add_argument('key')
+
+    mem_set = mem_sub.add_parser('set', help='Write a value to a memory key')
+    mem_set.add_argument('agent_id')
+    mem_set.add_argument('key')
+    mem_set.add_argument('value', help='Value (JSON or plain string)')
+    mem_set.add_argument('--ttl', type=int, default=None, metavar='SECONDS',
+                         help='Optional TTL in seconds')
+
+    mem_del = mem_sub.add_parser('delete', help='Delete a single memory key')
+    mem_del.add_argument('agent_id')
+    mem_del.add_argument('key')
+
+    mem_prune = mem_sub.add_parser('prune', help='Remove expired keys for an agent')
+    mem_prune.add_argument('agent_id')
+
+    mem_clear = mem_sub.add_parser('clear', help='Delete ALL memory for an agent')
+    mem_clear.add_argument('agent_id')
+
+    mem_exp = mem_sub.add_parser('export', help='Export all agent memory to JSON')
+    mem_exp.add_argument('--output', metavar='FILE', default='',
+                         help='Write to FILE instead of stdout')
+
+    mem_imp = mem_sub.add_parser('import', help='Import agent memory from a JSON file')
+    mem_imp.add_argument('file', metavar='FILE', help='Path to exported JSON file')
+    mem_imp.add_argument('--replace', action='store_true',
+                         help='Replace existing memory instead of merging')
+
+    mem.set_defaults(func=cmd_memory)
+
+    # ---- users ----
+    usr = sub.add_parser('users', help='Manage gateway user accounts')
+    usr_sub = usr.add_subparsers(dest='user_action', required=True)
+
+    usr_sub.add_parser('list', help='List all user accounts')
+
+    usr_cr = usr_sub.add_parser('create', help='Create a new user account')
+    usr_cr.add_argument('username', help='Username for the new account')
+    usr_cr.add_argument('password', help='Initial password')
+    usr_cr.add_argument('--role', default='user', metavar='ROLE',
+                        help='Role to assign (default: user)')
+
+    usr_del = usr_sub.add_parser('delete', help='Delete a user account')
+    usr_del.add_argument('username', help='Username to delete')
+
+    usr_pw = usr_sub.add_parser('password', help='Change a user\'s password')
+    usr_pw.add_argument('username', help='Target username')
+    usr_pw.add_argument('new_password', help='New password')
+
+    usr_perm = usr_sub.add_parser('permissions',
+                                   help='View or set per-user tool allow-list')
+    usr_perm_sub = usr_perm.add_subparsers(dest='user_perm_action', required=True)
+    usr_perm_get = usr_perm_sub.add_parser('get', help='Show tool allow-list for a user')
+    usr_perm_get.add_argument('username')
+    usr_perm_set = usr_perm_sub.add_parser('set', help='Set tool allow-list (comma-separated)')
+    usr_perm_set.add_argument('username')
+    usr_perm_set.add_argument('tools', help='Comma-separated list of allowed tool names')
+    usr_perm_clr = usr_perm_sub.add_parser('clear',
+                                            help='Remove tool restriction (allow all tools)')
+    usr_perm_clr.add_argument('username')
+
+    usr.set_defaults(func=cmd_users)
+
+    # ---- content-filter ----
+    cf = sub.add_parser('content-filter', help='Manage runtime content-filter deny rules')
+    cf_sub = cf.add_subparsers(dest='cf_action', required=True)
+
+    cf_sub.add_parser('list', help='List all active deny rules with their index and mode')
+
+    cf_add = cf_sub.add_parser('add', help='Add a new deny rule')
+    cf_add.add_argument('pattern', help='Pattern string to deny')
+    cf_add.add_argument('--mode', default='literal', choices=['literal', 'regex'],
+                        help='Match mode: literal (default) or regex')
+    cf_add.add_argument('--label', default='', metavar='LABEL',
+                        help='Human-readable label for this rule (optional)')
+
+    cf_del = cf_sub.add_parser('delete', help='Delete a deny rule by its index')
+    cf_del.add_argument('index', type=int, metavar='INDEX',
+                        help='Zero-based index from `content-filter list`')
+
+    cf_sub.add_parser('reload', help='Reload rules from disk and environment variables')
+
+    cf.set_defaults(func=cmd_content_filter)
+
+    # ---- alerts ----
+    alrt = sub.add_parser('alerts', help='Manage approval-queue depth alert configuration')
+    alrt_sub = alrt.add_subparsers(dest='alert_action', required=True)
+
+    alrt_sub.add_parser('status', help='Show current alert threshold')
+
+    alrt_set = alrt_sub.add_parser('set', help='Set the alert threshold (0 = disable)')
+    alrt_set.add_argument('threshold', type=int, metavar='N',
+                          help='Fire gateway.alert when pending approvals reach this count; 0 disables')
+
+    alrt.set_defaults(func=cmd_alerts)
+
+    # ---- approvals ----
+    appr = sub.add_parser('approvals',
+                          help='Manage the approval queue and auto-reject timeout')
+    appr_sub = appr.add_subparsers(dest='appr_action', required=True)
+
+    appr_sub.add_parser('list', help='List all pending approval requests')
+
+    appr_apv = appr_sub.add_parser('approve', help='Approve a pending request')
+    appr_apv.add_argument('id', type=int, metavar='ID', help='Approval request ID')
+
+    appr_rej = appr_sub.add_parser('reject', help='Reject a pending request')
+    appr_rej.add_argument('id', type=int, metavar='ID', help='Approval request ID')
+
+    appr_to = appr_sub.add_parser('timeout',
+                                  help='Manage the auto-reject timeout configuration')
+    appr_to_sub = appr_to.add_subparsers(dest='timeout_action', required=True)
+    appr_to_sub.add_parser('get', help='Show current auto-reject timeout')
+    appr_to_set = appr_to_sub.add_parser('set',
+                                         help='Set the auto-reject timeout (0 = disable)')
+    appr_to_set.add_argument('seconds', type=float, metavar='SECS',
+                             help='Auto-reject pending approvals after this many seconds; 0 disables')
+
+    appr.set_defaults(func=cmd_approvals)
+
+    # ---- capabilities ----
+    cap = sub.add_parser('capabilities', help='Browse tool capability manifests')
+    cap_sub = cap.add_subparsers(dest='cap_action', required=True)
+
+    cap_sub.add_parser('list', help='List all tools with their capability manifests')
+
+    cap_show = cap_sub.add_parser('show', help='Show full manifest detail for a tool')
+    cap_show.add_argument('tool', metavar='TOOL',
+                          help='Tool id (e.g. file.write, system.exec)')
+
+    cap.set_defaults(func=cmd_capabilities)
 
     return p
 

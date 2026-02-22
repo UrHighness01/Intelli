@@ -253,7 +253,11 @@
     <div id="list-card">
       <div id="list-header">
         <h2>Tasks</h2>
-        <button class="sm secondary" onclick="loadTasks()">↻ Refresh</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="sm secondary" onclick="loadTasks()">↻ Refresh</button>
+          <button class="sm secondary" onclick="bulkSetEnabled(true)" title="Enable all tasks">✓ All on</button>
+          <button class="sm secondary" onclick="bulkSetEnabled(false)" title="Disable all tasks">✗ All off</button>
+        </div>
       </div>
       <ul id="task-list">
         <li id="task-empty">Connect to load tasks</li>
@@ -290,6 +294,14 @@
               <div class="sl">Next run</div>
               <div class="sv" id="d-next-run">—</div>
             </div>
+            <div class="stat-box">
+              <div class="sl">Last duration</div>
+              <div class="sv" id="d-last-dur">—</div>
+            </div>
+            <div class="stat-box">
+              <div class="sl">Duration trend</div>
+              <canvas id="dur-spark" width="120" height="32" style="display:block;margin-top:6px;"></canvas>
+            </div>
           </div>
         </div>
 
@@ -304,8 +316,14 @@
         <div id="history-wrap">
           <div class="section-label" style="display:flex;align-items:center;gap:10px;">
             Run history
-            <button style="font-size:.7rem;padding:2px 8px;" onclick="loadHistory()">↻ Refresh</button>
-          </div>
+            <button style="font-size:.7rem;padding:2px 8px;" onclick="loadHistory()">↻ Refresh</button>            <select id="history-limit" onchange="loadHistory()"
+              style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:2px 6px;font-size:.72rem;">
+              <option value="25" selected>Last 25</option>
+              <option value="50">Last 50</option>
+              <option value="100">Last 100</option>
+              <option value="250">Last 250</option>
+              <option value="500">Last 500</option>
+            </select>          </div>
           <div id="history-empty">No history loaded.</div>
           <table id="history-table" style="display:none">
             <thead><tr>
@@ -425,17 +443,35 @@ async function loadHistory() {
   const emptyEl = document.getElementById('history-empty');
   const tbl     = document.getElementById('history-table');
   const tbody   = document.getElementById('history-body');
+  const limitEl = document.getElementById('history-limit');
+  const limit   = limitEl ? parseInt(limitEl.value, 10) : 25;
   emptyEl.textContent = 'Loading…';
   emptyEl.style.display = 'block';
   tbl.style.display = 'none';
   try {
-    const r = await fetch('/admin/schedule/' + _selectedId + '/history', { headers: _headers() });
+    const r = await fetch('/admin/schedule/' + _selectedId + '/history?limit=' + limit,
+                          { headers: _headers() });
     if (!r.ok) { emptyEl.textContent = 'Failed to load history.'; return; }
     const data = await r.json();
     const rows = data.history || [];
+    const total = data.total ?? rows.length;
     if (!rows.length) { emptyEl.textContent = 'No runs recorded yet.'; return; }
+
+    // Update last-duration stat card from the most-recent history row
+    const lastDurEl = document.getElementById('d-last-dur');
+    if (lastDurEl && rows.length) {
+      const r0 = rows[0];
+      lastDurEl.textContent = typeof r0.duration_seconds === 'number'
+        ? r0.duration_seconds.toFixed(3) + ' s' : '—';
+    }
     emptyEl.style.display = 'none';
     tbl.style.display = 'table';
+    // Show total vs shown when truncated
+    const countNote = total > rows.length
+      ? ` <span style="font-size:.72rem;color:var(--muted)">(showing ${rows.length} of ${total})</span>`
+      : '';
+    const countEl = document.getElementById('history-count-note');
+    if (countEl) countEl.innerHTML = countNote;
     tbody.innerHTML = rows.map((row, i) => {
       const ts = row.timestamp ? new Date(row.timestamp).toLocaleString() : '—';
       const dur = typeof row.duration_seconds === 'number' ? row.duration_seconds.toFixed(3) + ' s' : '—';
@@ -451,9 +487,47 @@ async function loadHistory() {
         <td>${err}</td>
       </tr>`;
     }).join('');
+    drawDurationSparkline(rows);
   } catch (e) {
     emptyEl.textContent = 'Error: ' + e.message;
   }
+}
+
+// ── Duration sparkline ────────────────────────────────────────────────────────
+function drawDurationSparkline(rows) {
+  const canvas = document.getElementById('dur-spark');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  // Extract durations in chronological order (history rows are newest-first)
+  const vals = rows
+    .filter(r => typeof r.duration_seconds === 'number')
+    .map(r => r.duration_seconds)
+    .reverse();
+  if (vals.length < 2) return;
+  const mx = Math.max(...vals);
+  const mn = Math.min(...vals);
+  const rng = mx - mn || mx || 1;
+  const pad = 3;
+  const step = (W - pad * 2) / (vals.length - 1);
+  ctx.beginPath();
+  vals.forEach((v, i) => {
+    const x = pad + i * step;
+    const y = H - pad - ((v - mn) / rng) * (H - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = '#4caf50';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  // Dot at the latest point
+  const lx = pad + (vals.length - 1) * step;
+  const ly = H - pad - ((vals[vals.length - 1] - mn) / rng) * (H - pad * 2);
+  ctx.beginPath();
+  ctx.arc(lx, ly, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#4caf50';
+  ctx.fill();
 }
 
 // ── Detail ───────────────────────────────────────────────────────────────────
@@ -470,6 +544,7 @@ function renderDetail(t) {
   document.getElementById('d-run-count').textContent = t.run_count;
   document.getElementById('d-last-run').textContent = t.last_run_at ? fmtDateShort(t.last_run_at) : '—';
   document.getElementById('d-next-run').textContent = fmtDateShort(t.next_run_at);
+  document.getElementById('d-last-dur').textContent = '—';  // populated after loadHistory()
 
   // Last result / error
   const resBox = document.getElementById('last-result-box');
@@ -511,6 +586,28 @@ async function toggleEnabled() {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+async function bulkSetEnabled(enabled) {
+  if (!_token) { toast('Not connected', 'err'); return; }
+  const ids = Object.keys(_tasks);
+  if (!ids.length) { toast('No tasks loaded', 'err'); return; }
+  let ok = 0, fail = 0;
+  await Promise.all(ids.map(async id => {
+    try {
+      const r = await fetch('/admin/schedule/' + id, {
+        method: 'PATCH', headers: _headers(),
+        body: JSON.stringify({ enabled }),
+      });
+      if (r.ok) ok++; else fail++;
+    } catch { fail++; }
+  }));
+  const label = enabled ? 'Enabled' : 'Disabled';
+  toast(
+    fail ? `${ok} updated, ${fail} failed` : `${label} ${ok} task${ok !== 1 ? 's' : ''}`,
+    fail ? 'err' : 'ok'
+  );
+  await loadTasks();
+}
+
 async function triggerTask() {
   if (!_selectedId) return;
   try {
@@ -518,9 +615,33 @@ async function triggerTask() {
       method: 'POST', headers: _headers(),
     });
     if (!r.ok) { toast('Trigger failed (' + r.status + ')', 'err'); return; }
-    toast('Task queued for next tick (≤ 1 s)', 'ok');
-    // Refresh after a brief delay to pick up run_count change
-    setTimeout(loadTasks, 1200);
+    toast('Triggered — polling for result…', 'ok');
+    // Snapshot the run count before the trigger so we know when a new run lands
+    const prevRunCount = (_tasks[_selectedId] || {}).run_count ?? -1;
+    let polls = 0;
+    const MAX_POLLS = 10;  // poll for up to ~10 s
+    const pollId = setInterval(async () => {
+      polls++;
+      try {
+        const tr = await fetch('/admin/schedule/' + _selectedId, { headers: _headers() });
+        if (!tr.ok) { clearInterval(pollId); return; }
+        const data = await tr.json();
+        // Update in-memory cache and re-render detail panel live
+        _tasks[_selectedId] = data;
+        renderDetail(data);
+        if (data.run_count > prevRunCount || polls >= MAX_POLLS) {
+          clearInterval(pollId);
+          if (data.run_count > prevRunCount) {
+            toast(data.last_error ? '⚠ Run finished with error' : '✓ Run completed', data.last_error ? 'err' : 'ok');
+            loadHistory();
+          } else {
+            // Timed out before a new run appeared — just refresh the list
+            toast('Trigger sent (no run detected within 10 s)', 'warn');
+          }
+          await loadTasks();
+        }
+      } catch { clearInterval(pollId); }
+    }, 1000);
   } catch (e) { toast(e.message, 'err'); }
 }
 

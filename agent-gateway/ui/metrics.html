@@ -132,6 +132,87 @@
       font-weight: 500;
     }
 
+    /* Per-tool table */
+    #tool-table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 24px;
+    }
+    #tool-table-wrap h2 {
+      padding: 14px 20px;
+      font-size: .95rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 500;
+    }
+    #tool-bar-wrap {
+      padding: 10px 20px 16px;
+    }
+    .tool-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 8px;
+      font-size: .85rem;
+    }
+    .tool-bar-label {
+      min-width: 140px;
+      font-family: monospace;
+      color: var(--accent);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tool-bar-track {
+      flex: 1;
+      height: 10px;
+      background: var(--border);
+      border-radius: 5px;
+      overflow: hidden;
+      margin: 0 12px;
+    }
+    .tool-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 5px;
+      transition: width .4s ease;
+    }
+    .tool-bar-count {
+      min-width: 48px;
+      text-align: right;
+      font-weight: 600;
+      color: var(--text);
+      font-size: .82rem;
+    }
+    canvas.tool-spark {
+      margin-left: 10px;
+      width: 60px;
+      height: 20px;
+      flex-shrink: 0;
+      image-rendering: pixelated;
+    }
+    .tool-delta {
+      min-width: 44px;
+      text-align: right;
+      font-size: .72rem;
+      color: var(--muted);
+      margin-left: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tool-delta.positive { color: #4caf7d; }
+    .tool-p50 {
+      min-width: 70px;
+      text-align: right;
+      font-size: .72rem;
+      color: var(--muted);
+      margin-left: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tool-p50.has-data { color: #60a5fa; }
+    #tool-empty { padding: 16px 20px; color: var(--muted); font-size: .85rem; }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -298,6 +379,14 @@
       </tbody>
     </table>
   </div>
+
+  <!-- Per-tool invocation table -->
+  <div id="tool-table-wrap">
+    <h2>Per-tool invocations <span id="tool-total-badge" style="font-size:.78rem;color:var(--muted);margin-left:6px;"></span></h2>
+    <div id="tool-bar-wrap">
+      <div id="tool-empty" style="color:var(--muted);font-size:.85rem;">Connect to see per-tool counts.</div>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -363,8 +452,12 @@
    * History for sparklines: Map<key → number[]>
    * key = name + JSON.stringify(labels) (stable enough)
    * ---------------------------------------------------------------- */
-  const history = new Map();
-  const SPARK_MAX = 20;
+  const history     = new Map();
+  const SPARK_MAX   = 20;
+
+  // Per-tool rate tracking: deltas (calls per 5-second poll) for sparklines
+  const _toolHistory    = new Map();  // tool → number[] (Δ calls/poll)
+  const _prevToolCounts = new Map();  // tool → last cumulative value
 
   function histKey(row) {
     return row.name + JSON.stringify(row.labels);
@@ -445,6 +538,72 @@
     document.getElementById('c-ratelimit' ).textContent = fmt(sumMetric(rows, 'rate_limit_hits_total'));
     document.getElementById('c-sched-runs').textContent = fmt(sumMetric(rows, 'scheduler_runs_total'));
     document.getElementById('c-sched-errs').textContent = fmt(sumMetric(rows, 'scheduler_errors_total'));
+  }
+
+  /* ----------------------------------------------------------------
+   * Per-tool invocation bar chart
+   * ---------------------------------------------------------------- */
+  function updateToolTable(rows, latMap = {}) {
+    const toolRows = rows
+      .filter(r => r.name === 'tool_calls_total' && r.labels.tool)
+      .sort((a, b) => b.value - a.value);
+
+    const wrap  = document.getElementById('tool-bar-wrap');
+    const empty = document.getElementById('tool-empty');
+    const badge = document.getElementById('tool-total-badge');
+
+    // Accumulate per-tool call-rate deltas
+    for (const r of toolRows) {
+      const tool  = r.labels.tool;
+      const prev  = _prevToolCounts.has(tool) ? _prevToolCounts.get(tool) : r.value;
+      const delta = Math.max(0, r.value - prev);
+      _prevToolCounts.set(tool, r.value);
+      const arr = _toolHistory.get(tool) || [];
+      arr.push(delta);
+      if (arr.length > SPARK_MAX) arr.shift();
+      _toolHistory.set(tool, arr);
+    }
+
+    if (!toolRows.length) {
+      if (empty) { empty.style.display = ''; empty.textContent = 'No tool calls recorded yet.'; }
+      badge.textContent = '';
+      wrap.innerHTML = '';
+      if (empty) wrap.appendChild(empty);
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const total  = toolRows.reduce((s, r) => s + r.value, 0);
+    badge.textContent = `(total: ${total.toLocaleString()})`;
+    const maxVal = toolRows[0].value || 1;
+
+    // Build via DOM so canvas elements remain accessible for drawSparkline
+    wrap.innerHTML = '';
+    for (const r of toolRows) {
+      const tool       = r.labels.tool;
+      const pct        = (r.value / maxVal * 100).toFixed(1);
+      const displayPct = (r.value / total * 100).toFixed(1);
+      const hist       = _toolHistory.get(tool) || [];
+      const lastDelta  = hist.length ? hist[hist.length - 1] : 0;
+      const lat        = latMap[tool] || {};
+      const p50ms      = lat.p50  != null ? (lat.p50  * 1000).toFixed(1) + ' ms' : '—';
+      const hasLat     = lat.p50  != null;
+
+      const rowEl = document.createElement('div');
+      rowEl.className = 'tool-bar-row';
+      rowEl.innerHTML = `
+        <span class="tool-bar-label" title="${tool}">${escHtml(tool)}</span>
+        <div class="tool-bar-track"><div class="tool-bar-fill" style="width:${pct}%"></div></div>
+        <span class="tool-bar-count">${r.value.toLocaleString()} <span style="color:var(--muted);font-size:.75rem;">(${displayPct}%)</span></span>
+        <span class="tool-delta${lastDelta > 0 ? ' positive' : ''}" title="calls in last poll">+${lastDelta}</span>
+        <span class="tool-p50${hasLat ? ' has-data' : ''}" title="p50 latency">p50 ${escHtml(p50ms)}</span>
+        <canvas class="tool-spark" width="60" height="20"></canvas>
+      `;
+      wrap.appendChild(rowEl);
+
+      const canvas = rowEl.querySelector('.tool-spark');
+      requestAnimationFrame(() => drawSparkline(canvas, hist));
+    }
   }
 
   /* ----------------------------------------------------------------
@@ -545,8 +704,25 @@
       const text = await res.text();
       const rows = parsePrometheus(text);
 
+      // Fetch per-tool latency from admin endpoint (silently skip if no token or 4xx)
+      let latMap = {};
+      if (token) {
+        try {
+          const lr = await fetch('/admin/metrics/tools', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (lr.ok) {
+            const ld = await lr.json();
+            for (const t of (ld.tools || [])) {
+              latMap[t.tool] = { p50: t.p50_seconds, mean: t.mean_seconds };
+            }
+          }
+        } catch (_) { /* not critical */ }
+      }
+
       pushHistory(rows);
       updateCards(rows);
+      updateToolTable(rows, latMap);
       renderTable(rows);
 
       badge.textContent = 'Live';

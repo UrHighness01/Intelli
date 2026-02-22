@@ -102,6 +102,21 @@
     .badge-api  { background: rgba(108,99,255,.18); color: var(--accent); }
     .badge-new  { background: rgba(255,209,102,.15); color: var(--yellow); }
 
+    /* -- Card search -------------------------------------------------------- */
+    #card-search-wrap {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    }
+    #card-search {
+      flex: 1; max-width: 320px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 7px 12px;
+      font-size: .82rem; outline: none; transition: border-color .15s;
+    }
+    #card-search:focus { border-color: var(--accent); }
+    #card-search::placeholder { color: var(--muted); }
+    #card-search-count { font-size: .75rem; color: var(--muted); }
+    .tool-card.hidden { display: none; }
+
     /* -- Quick links -------------------------------------------------------- */
     .quick-links {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -157,6 +172,10 @@
 
   <!-- Admin tools -->
   <div class="section-title">Admin tools</div>
+  <div id="card-search-wrap">
+    <input id="card-search" type="search" placeholder="Filter panels…" oninput="filterCards(this.value)" autocomplete="off" />
+    <span id="card-search-count"></span>
+  </div>
   <div class="tool-grid">
     <a class="tool-card" href="approvals.html">
       <div class="card-icon">⏳</div>
@@ -236,6 +255,12 @@
       <div class="card-desc">Live gateway operational dashboard: uptime, kill-switch state, tool call counts, pending approvals, and scheduler summary.</div>
       <span class="card-badge badge-api">REST</span>
     </a>
+    <a class="tool-card" href="capabilities.html">
+      <div class="card-icon">🛠️</div>
+      <div class="card-name">Capabilities</div>
+      <div class="card-desc">Browse all tool capability manifests — risk levels, required approval, and declared capability tokens.</div>
+      <span class="card-badge badge-new">New</span>
+    </a>
   </div>
 
   <!-- Quick API links -->
@@ -302,6 +327,28 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
+
+// ── Card filter ───────────────────────────────────────────────────────────
+function filterCards(query) {
+  const q = query.trim().toLowerCase();
+  const cards = document.querySelectorAll('.tool-card');
+  let visible = 0;
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    const show = !q || text.includes(q);
+    card.classList.toggle('hidden', !show);
+    if (show) visible++;
+  });
+  const countEl = document.getElementById('card-search-count');
+  if (countEl) {
+    countEl.textContent = q
+      ? `${visible} of ${cards.length}`
+      : '';
+  }
+}
+
+// Clear search if the user clicks the ✕ button built into <input type="search">
+document.getElementById('card-search').addEventListener('search', e => filterCards(e.target.value));
 </script>
 </body>
 </html>
