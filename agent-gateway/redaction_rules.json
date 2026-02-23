@@ -4,8 +4,8 @@
   ],
   "https://test.corp.local": [],
   "https://app.corp.local": [
-    "card_number",
-    "cvv"
+    "cvv",
+    "card_number"
   ],
   "https://hr.corp.local": [
     "salary",

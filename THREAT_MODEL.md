@@ -109,13 +109,14 @@ The table below tracks the current implementation state of all major threat miti
 | Agent memory (per-agent key-value + TTL) | `agent_memory.py` | ✅ Implemented |
 | Scheduler (recurring tool calls) | `scheduler.py` | ✅ Implemented |
 | seccomp profile for worker (Linux) | `agent-gateway/sandbox/seccomp-worker.json` — deny-all default; allowlist for Python runtime; blocks net/exec/ptrace/bpf/kexec/… | ✅ Done |
-| Read-only filesystem for worker container | — | ❌ Pending |
-| CPU / memory quota in production | — | ❌ Pending |
+| Read-only filesystem for worker container | `docker_runner.py` — `read_only=True` + `tmpfs={'/tmp': 'size=16m,mode=1777'}` | ✅ Implemented |
+| CPU / memory quota in production | `docker_runner.py` — `mem_limit` (default 64 m), `nano_cpus` (default 0.5), `pids_limit` (default 64); env `SANDBOX_DOCKER_MEMORY` / `SANDBOX_DOCKER_CPUS` / `SANDBOX_DOCKER_PIDS` | ✅ Implemented |
 | TLS termination (nginx / Caddy) | deployment docs | ❌ Pending (ops) |
 | CORS restriction to localhost | `CORSMiddleware` + `AGENT_GATEWAY_CORS_ORIGINS` env var | ✅ Implemented |
 | Outbound allowlist for provider adapters | `_check_outbound_url()` in `providers/adapters.py`; `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST` env var; 16 tests | ✅ Done |
 | Log shipping to external SIEM | `scripts/log_shipper.py` — NDJSON batches, Bearer auth, retries | ✅ Done |
 | Pinned dependency hashes | `requirements.lock` (`pip-compile --generate-hashes`); CI uses `--require-hashes` | ✅ Done |
-| Signed release tags + provenance | — | ❌ Pending |
+| Worker health + validation-error-rate alerting | `app.py` — `_alert_monitor` daemon thread fires `gateway.alert` webhooks on `worker_unhealthy`/`worker_recovered` transitions and when validation errors/min exceeds threshold; `PUT /admin/alerts/config` | ✅ Implemented |
+| Signed release tags + provenance | `.github/workflows/release.yml` — `sigstore/gh-action-sigstore-python` keyless signing on every `v*` tag push | ✅ Done |
 | OAuth2 / OIDC federation | — | ❌ Future |
-| Encrypted audit log at rest | — | ❌ Future |
+| Encrypted audit log at rest | `app.py` — AES-256-GCM per-line encryption (`_encrypt_audit_line`/`_decrypt_audit_line`); activated via `INTELLI_AUDIT_ENCRYPT_KEY` env var (64 hex chars = 32-byte key) | ✅ Implemented |

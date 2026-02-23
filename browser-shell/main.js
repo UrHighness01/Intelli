@@ -31,6 +31,7 @@ const PANEL_WIDTH       = 360;  // px — right-side overlay panels (bookmarks, 
 const GATEWAY_READY_MS  = 15000;
 const HEALTH_POLL_MS    = 400;
 const NEW_TAB_URL       = `${GATEWAY_ORIGIN}/ui/`;
+const SETUP_URL         = `${GATEWAY_ORIGIN}/ui/setup.html`;
 
 // ─── Gateway process handle ───────────────────────────────────────────────────
 let gatewayProcess  = null;
@@ -42,7 +43,8 @@ let gatewayReady    = false;
 // which is then automatically injected into all admin UI pages.
 const { randomBytes } = require('crypto');
 const BOOTSTRAP_SECRET = randomBytes(24).toString('hex');
-let adminToken = null;  // populated in app.whenReady after gateway start
+let adminToken  = null;   // populated in app.whenReady after gateway start
+let needsSetup  = false;  // true on first launch when no admin account exists
 
 // ─── Auto-updater (graceful degradation — not available in dev without publish) ─
 let autoUpdater = null;
@@ -347,7 +349,7 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
     if (!url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
     view.webContents.executeJavaScript(`
       (function(tok) {
-        try { sessionStorage.setItem('gw_token', tok); } catch(e) {}
+        try { localStorage.setItem('gw_token', tok); } catch(e) {}
         var inp = document.getElementById('token-input');
         if (inp) inp.value = tok;
         if (typeof connect === 'function') connect();
@@ -926,7 +928,8 @@ function createMainWindow() {
 
   mainWin.once('ready-to-show', () => {
     mainWin.show();
-    createTab(HOME_URL);  // open the Intelli admin hub as the first tab
+    // On first launch (no admin yet) open the setup wizard, otherwise the hub
+    createTab(needsSetup ? SETUP_URL : HOME_URL);
   });
 
   // Keep BrowserView bounds in sync when window is resized
@@ -1013,6 +1016,19 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.warn('[gateway] bootstrap-token failed (admin pages need manual token):', e.message);
   }
+
+  // Check whether first-run setup is needed (no admin account created yet)
+  needsSetup = await new Promise((resolve) => {
+    http.get(`${GATEWAY_ORIGIN}/admin/setup-status`, (res) => {
+      let data = '';
+      res.on('data', d => { data += d; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).needs_setup === true); }
+        catch { resolve(false); }
+      });
+    }).on('error', () => resolve(false));
+  });
+  if (needsSetup) console.log('[gateway] first-run setup required — opening wizard');
 
   // Create the main window BEFORE destroying the splash so there is never a
   // moment with zero open windows on Windows/Linux.  If splash is destroyed

@@ -17,6 +17,7 @@ import metrics as _metrics
 import time
 import asyncio
 import threading
+import collections
 from rate_limit import rate_limiter, check_user_rate_limit
 from providers.adapters import get_adapter, available_providers
 from providers.provider_adapter import ProviderKeyStore
@@ -135,13 +136,31 @@ _kill_switch = threading.Event()
 _kill_switch_reason: str = ''
 
 # ---------------------------------------------------------------------------
-# Approval-queue depth alert
+# Approval-queue depth alert + worker health + validation-error-rate alerts
 # ---------------------------------------------------------------------------
 _APPROVAL_ALERT_THRESHOLD: int = int(
     os.environ.get('AGENT_GATEWAY_APPROVAL_ALERT_THRESHOLD', '0')
 )
-# Runtime-mutable config (PUT /admin/alerts/config can override the env var)
-_alert_config: dict = {'approval_queue_threshold': _APPROVAL_ALERT_THRESHOLD}
+_WORKER_CHECK_INTERVAL: float = float(
+    os.environ.get('AGENT_GATEWAY_WORKER_CHECK_INTERVAL', '60')
+)
+_VALIDATION_ERR_WINDOW: float = float(
+    os.environ.get('AGENT_GATEWAY_VALIDATION_ERR_WINDOW', '60')
+)
+_VALIDATION_ERR_THRESHOLD: int = int(
+    os.environ.get('AGENT_GATEWAY_VALIDATION_ERR_THRESHOLD', '0')
+)
+# Runtime-mutable config (PUT /admin/alerts/config can override the env vars)
+_alert_config: dict = {
+    'approval_queue_threshold':    _APPROVAL_ALERT_THRESHOLD,
+    'worker_check_interval_seconds': _WORKER_CHECK_INTERVAL,
+    'validation_error_window_seconds': _VALIDATION_ERR_WINDOW,
+    'validation_error_threshold':  _VALIDATION_ERR_THRESHOLD,
+}
+# Sliding window of recent tool-validation-error timestamps (thread-safe append/popleft)
+_validation_error_times: collections.deque = collections.deque()
+# Last known worker health state — used to detect health transitions
+_worker_was_healthy: bool | None = None
 
 # ---------------------------------------------------------------------------
 # Approval timeout config (auto-reject pending after N seconds; 0 = disabled)
@@ -171,6 +190,68 @@ def _approval_timeout_reaper() -> None:
 _reaper_thread = threading.Thread(
     target=_approval_timeout_reaper, daemon=True, name='approval-reaper')
 _reaper_thread.start()
+
+
+def _alert_monitor() -> None:
+    """Daemon: periodically check worker health and validation error rate.
+
+    Fires ``gateway.alert`` webhooks on two conditions:
+
+    * **worker_unhealthy** / **worker_recovered** — when the sandbox worker
+      transitions between healthy and unhealthy states.
+    * **validation_error_rate** — when the number of tool schema-validation
+      errors in the last ``validation_error_window_seconds`` reaches or exceeds
+      ``validation_error_threshold`` (0 = disabled).
+    """
+    global _worker_was_healthy
+    while True:
+        try:
+            interval = max(5.0, float(_alert_config.get('worker_check_interval_seconds', 60)))
+            time.sleep(interval)
+
+            # ── Worker health transition alert ───────────────────────────────
+            try:
+                ok = _worker_manager.check_health()
+            except Exception:
+                ok = False
+            _metrics.gauge('worker_healthy', 1.0 if ok else 0.0)
+
+            if _worker_was_healthy is not None:
+                if not ok and _worker_was_healthy:
+                    _webhooks.fire_webhooks('gateway.alert', {'alert': 'worker_unhealthy'})
+                    _audit('alert_fired', {'alert': 'worker_unhealthy'}, actor='system')
+                elif ok and not _worker_was_healthy:
+                    _webhooks.fire_webhooks('gateway.alert', {'alert': 'worker_recovered'})
+                    _audit('alert_fired', {'alert': 'worker_recovered'}, actor='system')
+            _worker_was_healthy = ok
+
+            # ── Validation error rate alert ──────────────────────────────────
+            threshold = int(_alert_config.get('validation_error_threshold', 0))
+            if threshold > 0:
+                window = float(_alert_config.get('validation_error_window_seconds', 60))
+                cutoff = time.time() - window
+                while _validation_error_times and _validation_error_times[0] < cutoff:
+                    _validation_error_times.popleft()
+                count = len(_validation_error_times)
+                if count >= threshold:
+                    _webhooks.fire_webhooks('gateway.alert', {
+                        'alert': 'validation_error_rate',
+                        'count': count,
+                        'window_seconds': window,
+                        'threshold': threshold,
+                    })
+                    _audit('alert_fired', {
+                        'alert': 'validation_error_rate',
+                        'count': count,
+                        'threshold': threshold,
+                    }, actor='system')
+        except Exception:
+            pass
+
+
+_alert_monitor_thread = threading.Thread(
+    target=_alert_monitor, daemon=True, name='alert-monitor')
+_alert_monitor_thread.start()
 
 # startup time for basic metrics
 _start_time = datetime.now(timezone.utc)
@@ -486,6 +567,7 @@ def tool_call(call: ToolCall, request: Request, _rl=Depends(rate_limiter)):
     # If validation error, return structured 400
     if result.get('status') == 'validation_error':
         _metrics.inc('tool_validation_errors_total', labels={'tool': call.tool})
+        _validation_error_times.append(time.time())  # feeds sliding-window rate alert
         raise HTTPException(status_code=400, detail=result)
 
     # If capability was denied, return 403 Forbidden
@@ -623,6 +705,39 @@ def admin_login(payload: dict, _rl=Depends(rate_limiter)):
     if not t:
         raise HTTPException(status_code=401, detail='invalid credentials')
     # t contains access_token and refresh_token
+    return {'token': t['access_token'], 'refresh_token': t['refresh_token']}
+
+
+@app.get('/admin/setup-status')
+def admin_setup_status():
+    """Return whether first-run setup is needed (no admin user created yet).
+
+    No authentication required — safe to call before any account exists.
+    """
+    users = auth._load_users()
+    return {'needs_setup': 'admin' not in users}
+
+
+class SetupBody(BaseModel):
+    password: str
+
+
+@app.post('/admin/setup')
+def admin_setup(body: SetupBody):
+    """First-run only: create the admin account and return a login token.
+
+    Returns 409 if the admin account already exists so the endpoint cannot be
+    used to overwrite an established password.  Minimum password length is 8.
+    """
+    users = auth._load_users()
+    if 'admin' in users:
+        raise HTTPException(status_code=409, detail='Admin account already exists')
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail='Password must be at least 8 characters')
+    auth.create_user('admin', body.password, roles=['admin'])
+    t = auth.authenticate_user('admin', body.password)
+    if not t:
+        raise HTTPException(status_code=500, detail='Setup succeeded but authentication failed')
     return {'token': t['access_token'], 'refresh_token': t['refresh_token']}
 
 
@@ -878,8 +993,15 @@ class RateLimitUpdate(BaseModel):
 
 
 class AlertsConfigUpdate(BaseModel):
-    """Body for PUT /admin/alerts/config."""
-    approval_queue_threshold: int  # ≥ 0; 0 = disable
+    """Body for PUT /admin/alerts/config.
+
+    All fields except ``approval_queue_threshold`` are optional; omit a field
+    to leave the corresponding config value unchanged.
+    """
+    approval_queue_threshold: int                      # ≥ 0; 0 = disable queue-depth alert
+    worker_check_interval_seconds: float | None = None # seconds between worker health polls (≥ 5)
+    validation_error_window_seconds: float | None = None  # rolling window for error rate (> 0)
+    validation_error_threshold: int | None = None      # errors in window to trigger alert; 0 = disable
 
 
 class ApprovalsConfigUpdate(BaseModel):
@@ -1007,10 +1129,13 @@ def get_webhook_deliveries(hook_id: str, request: Request, limit: int = 50):
 
 @app.get('/admin/alerts/config')
 def get_alerts_config(request: Request):
-    """Return the current approval-queue depth alert configuration.
+    """Return the current alert configuration.
 
-    Admin auth required.
-    Returns {"approval_queue_threshold": int} where 0 means disabled.
+    Admin auth required.  Returns a dict with all alert thresholds:
+    * ``approval_queue_threshold`` (int) — 0 = disabled
+    * ``worker_check_interval_seconds`` (float) — health poll interval
+    * ``validation_error_window_seconds`` (float) — sliding window duration
+    * ``validation_error_threshold`` (int) — 0 = disabled
     """
     _require_admin_token(request)
     return dict(_alert_config)
@@ -1018,19 +1143,33 @@ def get_alerts_config(request: Request):
 
 @app.put('/admin/alerts/config')
 def put_alerts_config(body: AlertsConfigUpdate, request: Request):
-    """Update the approval-queue depth alert configuration at runtime.
+    """Update alert configuration at runtime (admin auth required).
 
-    Admin auth required.  Sets the queue depth at which a ``gateway.alert``
-    webhook event is fired every time a new approval is enqueued and the
-    pending count reaches or exceeds the threshold.  Set to 0 to disable.
+    Fields not present in the request body are left unchanged.
+    Setting a threshold to 0 disables that alert.
     """
-    global _alert_config
     token = _require_admin_token(request)
+    updated: dict = {}
     if body.approval_queue_threshold < 0:
         raise HTTPException(status_code=422, detail='approval_queue_threshold must be >= 0')
-    _alert_config = {'approval_queue_threshold': body.approval_queue_threshold}
-    _audit('update_alerts_config', {'approval_queue_threshold': body.approval_queue_threshold},
-           actor=_actor(token))
+    updated['approval_queue_threshold'] = body.approval_queue_threshold
+    if body.worker_check_interval_seconds is not None:
+        if body.worker_check_interval_seconds < 5:
+            raise HTTPException(status_code=422,
+                detail='worker_check_interval_seconds must be >= 5')
+        updated['worker_check_interval_seconds'] = body.worker_check_interval_seconds
+    if body.validation_error_window_seconds is not None:
+        if body.validation_error_window_seconds <= 0:
+            raise HTTPException(status_code=422,
+                detail='validation_error_window_seconds must be > 0')
+        updated['validation_error_window_seconds'] = body.validation_error_window_seconds
+    if body.validation_error_threshold is not None:
+        if body.validation_error_threshold < 0:
+            raise HTTPException(status_code=422,
+                detail='validation_error_threshold must be >= 0')
+        updated['validation_error_threshold'] = body.validation_error_threshold
+    _alert_config.update(updated)
+    _audit('update_alerts_config', updated, actor=_actor(token))
     return dict(_alert_config)
 
 

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli — First-run Setup</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #setup-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 40px 44px;
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #9c6bff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+
+    .logo-text h1 { font-size: 1.3rem; font-weight: 700; }
+    .logo-text p  { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+
+    .section-title {
+      font-size: .95rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .hint {
+      font-size: .82rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: .8rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .field input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 13px;
+      color: var(--text);
+      font-size: .88rem;
+      outline: none;
+      width: 100%;
+    }
+
+    .field input:focus { border-color: var(--accent); }
+
+    #pw-strength {
+      height: 3px;
+      border-radius: 2px;
+      background: var(--border);
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    #pw-strength-bar {
+      height: 100%;
+      width: 0;
+      border-radius: 2px;
+      transition: width .25s, background-color .25s;
+    }
+
+    #error-msg {
+      font-size: .82rem;
+      color: var(--red);
+      display: none;
+      padding: 8px 12px;
+      background: rgba(255,107,107,.08);
+      border: 1px solid rgba(255,107,107,.25);
+      border-radius: 6px;
+    }
+
+    #submit-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 20px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity .15s;
+    }
+
+    #submit-btn:hover:not(:disabled) { opacity: .88; }
+    #submit-btn:disabled { opacity: .5; cursor: default; }
+
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      margin-right: 10px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- Shown while checking setup status -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  Checking setup status…
+</div>
+
+<!-- Hidden until setup-status confirms first-run is needed -->
+<div id="setup-card" style="display:none">
+  <div class="logo-row">
+    <div class="logo-icon">🤖</div>
+    <div class="logo-text">
+      <h1>Intelli</h1>
+      <p>Agent Gateway</p>
+    </div>
+  </div>
+
+  <div>
+    <p class="section-title">Welcome — let's get started</p>
+    <p class="hint" style="margin-top:6px">
+      Set a secure admin password to protect the gateway. You'll use this
+      to log in to all admin pages.
+    </p>
+  </div>
+
+  <div class="field">
+    <label for="pw1">Admin password</label>
+    <input type="password" id="pw1" placeholder="Choose a strong password…"
+           autocomplete="new-password" />
+    <div id="pw-strength"><div id="pw-strength-bar"></div></div>
+  </div>
+
+  <div class="field">
+    <label for="pw2">Confirm password</label>
+    <input type="password" id="pw2" placeholder="Re-enter password…"
+           autocomplete="new-password" />
+  </div>
+
+  <div id="error-msg"></div>
+
+  <button id="submit-btn" onclick="doSetup()">Create admin account →</button>
+</div>
+
+<script>
+'use strict';
+
+// ── Password strength meter ───────────────────────────────────────────────────
+document.getElementById('pw1').addEventListener('input', () => {
+  const pw  = document.getElementById('pw1').value;
+  const bar = document.getElementById('pw-strength-bar');
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (pw.length >= 12) score++;
+  if (/[0-9]/.test(pw))              score++;
+  if (/[^a-zA-Z0-9]/.test(pw))      score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  const colours = ['', '#ff6b6b', '#ffd166', '#ffd166', '#3ddc84', '#3ddc84'];
+  bar.style.width = (score / 5 * 100) + '%';
+  bar.style.backgroundColor = colours[score] || '';
+});
+
+// Allow Enter key on confirm field to submit
+document.getElementById('pw2').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSetup();
+});
+
+// ── Error display ─────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function clearError() {
+  const el = document.getElementById('error-msg');
+  el.textContent = '';
+  el.style.display = 'none';
+}
+
+// ── First-run check on load ───────────────────────────────────────────────────
+async function checkSetupStatus() {
+  try {
+    const r = await fetch('/admin/setup-status');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (!data.needs_setup) {
+      // Admin already exists — redirect to the main hub
+      location.replace('/ui/');
+      return;
+    }
+  } catch (e) {
+    // If we can't reach the gateway, show the form anyway; the submit call
+    // will surface any real errors.
+    console.warn('[setup] setup-status check failed:', e.message);
+  }
+  document.getElementById('loading-overlay').style.display = 'none';
+  document.getElementById('setup-card').style.display  = 'flex';
+  document.getElementById('pw1').focus();
+}
+
+// ── Submit handler ────────────────────────────────────────────────────────────
+async function doSetup() {
+  clearError();
+  const pw1 = document.getElementById('pw1').value;
+  const pw2 = document.getElementById('pw2').value;
+  const btn = document.getElementById('submit-btn');
+
+  if (pw1.length < 8) {
+    showError('Password must be at least 8 characters.');
+    return;
+  }
+  if (pw1 !== pw2) {
+    showError('Passwords do not match.');
+    document.getElementById('pw2').focus();
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = 'Setting up…';
+
+  try {
+    const r = await fetch('/admin/setup', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ password: pw1 }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showError(data.detail || 'Setup failed (HTTP ' + r.status + ')');
+      btn.disabled    = false;
+      btn.textContent = 'Create admin account →';
+      return;
+    }
+    // Store the token so all admin pages are instantly authenticated
+    localStorage.setItem('gw_token', data.token);
+    // Redirect to admin hub
+    location.replace('/ui/');
+  } catch (e) {
+    showError('Request failed: ' + e.message);
+    btn.disabled    = false;
+    btn.textContent = 'Create admin account →';
+  }
+}
+
+// Kick off the status check immediately
+checkSetupStatus();
+</script>
+  <script type="module" src="i18n.js"></script>
+</body>
+</html>

@@ -37,18 +37,29 @@
       display: grid; gap: 16px;
     }
 
-    /* -- Auth ---------------------------------------------------------------- */
-    #auth-panel {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    /* -- Login wall ---------------------------------------------------------- */
+    #login-wall {
+      position: fixed; inset: 0;
+      background: rgba(15,17,23,.92); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 500;
     }
-    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
-    #token-input {
-      flex: 1; min-width: 220px;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      padding: 6px 12px; color: var(--text); font-family: monospace; font-size: .85rem; outline: none;
+    .login-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 36px 40px; width: 100%; max-width: 360px;
+      display: flex; flex-direction: column; gap: 16px;
     }
-    #token-input:focus { border-color: var(--accent); }
+    .login-card h2 { font-size: 1.1rem; font-weight: 700; }
+    .login-card p  { font-size: .82rem; color: var(--muted); }
+    .lfield { display: flex; flex-direction: column; gap: 5px; }
+    .lfield label { font-size: .78rem; color: var(--muted); font-weight: 500; }
+    #login-err {
+      font-size: .82rem; color: var(--red); display: none;
+      padding: 7px 10px;
+      background: rgba(255,107,107,.08); border: 1px solid rgba(255,107,107,.25);
+      border-radius: 6px;
+    }
+    .login-submit { width: 100%; padding: 9px; }
 
     button {
       background: var(--accent); color: #fff; border: none; border-radius: 6px;
@@ -192,17 +203,35 @@
   <h1>Intelli Gateway</h1>
   <span>User Management</span>
   <a href="/">← Admin hub</a>
+  <button class="sm secondary" id="btn-logout" onclick="doLogout()" style="display:none">Sign out</button>
 </header>
 
-<main>
-  <!-- Auth -->
-  <div id="auth-panel">
-    <label for="token-input">Bearer token</label>
-    <input type="password" id="token-input" placeholder="Paste admin token…" />
-    <button onclick="loadUsers()">Connect</button>
-  </div>
+<!-- Login wall overlay — shown when not authenticated -->
+<div id="login-wall" style="display:none">
+  <div class="login-card">
+    <h2>Admin sign-in</h2>
+    <p>User management requires an admin account.</p>
 
-  <div id="workspace">
+    <div class="lfield">
+      <label for="login-username">Username</label>
+      <input type="text" id="login-username" placeholder="admin"
+             autocomplete="username" />
+    </div>
+
+    <div class="lfield">
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" placeholder="Password"
+             autocomplete="current-password" />
+    </div>
+
+    <div id="login-err"></div>
+
+    <button class="login-submit" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+
+<main>
+  <div id="workspace" style="display:none">
     <!-- Left: user list + add form -->
     <div id="user-panel">
       <div id="add-form">
@@ -256,12 +285,68 @@ function tok() {
   if (!_token) _token = localStorage.getItem('gw_token') || '';
   return _token;
 }
-function getToken() {
-  const t = document.getElementById('token-input').value.trim();
-  if (t) { _token = t; localStorage.setItem('gw_token', t); }
-  return _token || tok();
+function clearToken() {
+  _token = '';
+  localStorage.removeItem('gw_token');
 }
 function authHeaders() { return { Authorization: 'Bearer ' + tok(), 'Content-Type': 'application/json' }; }
+
+// ── Login wall ────────────────────────────────────────────────────────────────
+function showLoginWall() {
+  document.getElementById('login-wall').style.display  = 'flex';
+  document.getElementById('workspace').style.display   = 'none';
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) logoutBtn.style.display = 'none';
+  const unameEl = document.getElementById('login-username');
+  if (unameEl) unameEl.focus();
+}
+function hideLoginWall() {
+  document.getElementById('login-wall').style.display  = 'none';
+  document.getElementById('workspace').style.display   = 'grid';
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) logoutBtn.style.display = '';
+}
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-err');
+  errEl.style.display = 'none';
+  if (!username || !password) {
+    errEl.textContent = 'Enter username and password.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const r = await fetch('/admin/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username, password }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      errEl.textContent = data.detail || 'Invalid credentials.';
+      errEl.style.display = 'block';
+      return;
+    }
+    _token = data.token;
+    localStorage.setItem('gw_token', _token);
+    hideLoginWall();
+    await loadUsers();
+  } catch (e) {
+    errEl.textContent = 'Login failed: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+function doLogout() {
+  clearToken();
+  showLoginWall();
+}
+// Allow Enter in password field to submit login
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-wall')?.style.display !== 'none') {
+    doLogin();
+  }
+});
 function toast(msg, kind = 'ok') {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -300,13 +385,15 @@ function loadLastSeen() {
 
 // ── Load users ────────────────────────────────────────────────────────────────
 async function loadUsers() {
-  getToken();
-  const t = tok(); if (!t) { toast('Paste a token first', 'err'); return; }
+  const t = tok();
+  if (!t) { showLoginWall(); return; }
   try {
     const r = await fetch('/admin/users', { headers: authHeaders() });
+    if (r.status === 401) { clearToken(); showLoginWall(); return; }
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     _users = data.users || [];
+    hideLoginWall();
     renderUserList();
     loadLastSeen();  // non-blocking; re-renders once audit data arrives
     if (_selUser) {
@@ -508,12 +595,20 @@ function clearDetail() {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  // Redirect to first-run wizard when no admin account exists yet
+  try {
+    const r = await fetch('/admin/setup-status');
+    const data = await r.json();
+    if (data.needs_setup) { location.replace('/ui/setup.html'); return; }
+  } catch { /* gateway may be unreachable — continue to login wall */ }
+
   const saved = localStorage.getItem('gw_token');
   if (saved) {
-    document.getElementById('token-input').value = saved;
     _token = saved;
-    loadUsers();
+    await loadUsers();  // shows login wall automatically on 401
+  } else {
+    showLoginWall();
   }
 });
 </script>

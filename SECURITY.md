@@ -53,13 +53,13 @@ You will receive an acknowledgement within 72 hours.
 - [x] Per-call timeout enforcement
 - [x] Docker runner scaffold with `network_disabled=True`
 - [x] seccomp allowlist profile for worker process — `agent-gateway/sandbox/seccomp-worker.json` (Linux/Docker; denies networking, process-spawning, and dangerous kernel interfaces)
-- [ ] Read-only filesystem for worker container
-- [ ] CPU and memory quota enforcement in production
+- [x] Read-only filesystem for worker container — `docker_runner.py`: `read_only=True` + `tmpfs={'/tmp': 'size=16m'}` (writable scratch only in `/tmp`)
+- [x] CPU and memory quota enforcement — `docker_runner.py`: `mem_limit` (default 64 m), `nano_cpus` (default 0.5), `pids_limit` (default 64); all overridable via `SANDBOX_DOCKER_MEMORY`, `SANDBOX_DOCKER_CPUS`, `SANDBOX_DOCKER_PIDS`
 
 ### Network & Transport
 - [ ] TLS termination (run behind nginx/Caddy in production)
-- [ ] CORS policy — restrict `/tools/call` to localhost in production
-- [ ] Outbound allowlist for provider adapter HTTP calls
+- [x] CORS policy — `CORSMiddleware` defaults to `http://127.0.0.1:8080`; override with `AGENT_GATEWAY_CORS_ORIGINS` env var for multi-origin production deployments
+- [x] Outbound allowlist for provider adapter HTTP calls — `_check_outbound_url()` in `providers/adapters.py`; env `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST`
 - [x] SSE streaming CORS — `POST /chat/complete?stream=true` returns `Access-Control-Allow-Origin: *`; safe in practice because the gateway binds to `127.0.0.1` only; in production, pin this header to the local origin instead of `*`
 
 ### Audit & Monitoring
@@ -67,19 +67,19 @@ You will receive an acknowledgement within 72 hours.
 - [x] Prometheus metrics endpoint
 - [x] Audit export endpoint (`/admin/audit`)
 - [x] Log shipping to external SIEM
-- [ ] Alerting on `worker_healthy=0` or high validation error rate
+- [x] Alerting on `worker_healthy=0` or high validation error rate — background `alert-monitor` thread fires `gateway.alert` webhooks on worker health transitions and when `tool_validation_errors_total` rate exceeds `AGENT_GATEWAY_VALIDATION_ERR_THRESHOLD` in a rolling window; configurable via `PUT /admin/alerts/config`
 
 ### Supply Chain
 - [x] `pip-audit` in CI (checks for known CVEs)
 - [x] SBOM generation via `pip-licenses`
 - [x] Pinned dependency hashes in `requirements.lock` (`pip-compile --generate-hashes`)
-- [ ] Signed release tags and provenance attestation
+- [x] Signed release tags and provenance attestation — `.github/workflows/release.yml` triggers on `v*` tags; builds wheel + sdist, signs artifacts with `sigstore/gh-action-sigstore-python` (keyless Sigstore OIDC signing, `id-token: write` permission)
 
 ### Data Privacy
 - [x] Per-origin field redaction (persisted rules)
 - [x] `[REDACTED]` substitution for sensitive input values
 - [x] GDPR/CCPA data-deletion API — `consent_log.py` export/erase endpoints
-- [ ] Encrypted audit log at rest
+- [x] Encrypted audit log at rest — AES-256-GCM per-line encryption in `app.py` (`_encrypt_audit_line` / `_decrypt_audit_line`); enabled by setting `INTELLI_AUDIT_ENCRYPT_KEY` to a 64-hex-char (32-byte) key; no-op when env var is absent
 
 ---
 
