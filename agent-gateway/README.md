@@ -9,15 +9,41 @@ The gateway sits between AI agents and privileged browser/filesystem/network too
 - **RBAC + token auth** — Bearer tokens with access/refresh lifecycle and revocation
 - **Per-user tool scoping** — each user can be limited to a specific tool allow-list
 - **Provider key management** — store, rotate, and track expiry of LLM API keys
+- **Provider failover** — automatic fallback across LLM providers on failure
 - **Consent/context timeline** — logs every tab snapshot shared with an agent
 - **Emergency kill-switch** — instantly blocks all tool calls for incident response
 - **Content filtering** — literal and regex deny-lists applied to every tool call
 - **Rate limiting** — per-token and global request-rate caps
 - **Agent memory** — persistent key-value memory per agent, optionally with TTL
+- **Vector memory** — semantic embedding store for long-term recall
 - **Scheduled tasks** — recurring tool-call tasks with cron-like intervals
 - **Approval webhooks** — push notifications to external systems on queue events
-- **Audit log** — append-only immutable JSONL trail with CSV export
-- **Metrics** — per-tool call counts and latency histograms
+- **Audit log** — append-only immutable JSONL trail with CSV export; optional AES-256-GCM encryption
+- **Metrics** — per-tool call counts and latency histograms (Prometheus format)
+- **Chat proxy (SSE streaming)** — proxy completions to OpenAI / Anthropic / OpenRouter / Ollama
+- **Browser automation** — headless browser tools (click, screenshot, DOM query, form fill)
+- **Web tools** — fetch, search, and summarise web content
+- **PDF analysis** — extract text and structure from PDF files
+- **Video frame analysis** — ffmpeg frame extraction + vision model description
+- **Image upload** — multimodal image input for vision-capable models
+- **Coding agent** — code generation, execution, and linting tools
+- **Canvas** — structured multi-block output (text, code, data, charts)
+- **Sub-agents** — spawn and orchestrate child agent tasks
+- **Personas** — named agent personas with distinct system prompts
+- **Agent-to-agent (A2A)** — route tasks between personas; async task queue
+- **Session history** — per-session conversation history stored and searchable
+- **MCP client** — Model Context Protocol tool and resource integration
+- **Page diff watcher** — monitor URLs for changes and alert on diff
+- **Notification push** — outbound alerts to Telegram / Discord / Slack
+- **Notes / knowledge base** — local Markdown knowledge base with full-text search
+- **Secure credential store** — OS keychain + AES-256-GCM named credentials
+- **Plugin system** — install pip/zip/GitHub plugins; dynamic tool registry
+- **Voice I/O** — speech-to-text input and text-to-speech output
+- **Context compaction** — automatic conversation summarisation
+- **Skill ecosystem** — workspace of reusable agent skills
+- **Analytics** — usage analytics, session stats, and export
+- **Navigation guard** — block or warn on navigation to risky domains
+- **GDPR export/erase** — full actor data export and erasure via API
 - **Signed releases** — CI builds are signed with Sigstore/cosign
 
 ---
@@ -26,31 +52,31 @@ The gateway sits between AI agents and privileged browser/filesystem/network too
 
 ### 1. Install dependencies
 
-```powershell
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### 2. Configure the admin password
 
-```powershell
-$env:AGENT_GATEWAY_ADMIN_PASSWORD = "your-strong-password"
+```bash
+export AGENT_GATEWAY_ADMIN_PASS="your-strong-password"
 ```
 
 The first start creates an `admin` user automatically if one does not exist.
 
 ### 3. Start the gateway
 
-```powershell
+```bash
 uvicorn app:app --host 127.0.0.1 --port 8080
 ```
 
 ### 4. Run the test suite
 
-```powershell
+```bash
 pytest -q
-# Expected: ~1087 passed, 2 skipped
+# Expected: 1100+ passed
 ```
 
 ---
@@ -76,6 +102,15 @@ All pages are served at `http://127.0.0.1:8080/ui/<page>`.
 | `capabilities.html` | Tool capability manifest browser |
 | `consent.html` | Consent / context-sharing timeline viewer |
 | `tab_permission.html` | Browser tab snapshot permission request |
+| `chat.html` | Interactive chat UI with provider and model selection |
+| `canvas.html` | Structured multi-block canvas output viewer |
+| `personas.html` | Named agent persona management |
+| `mcp.html` | MCP server and resource browser |
+| `sessions.html` | Session history viewer |
+| `analytics.html` | Usage analytics and session statistics |
+| `watchers.html` | Page diff watcher management |
+| `setup.html` | First-run guided setup wizard |
+| `workspace.html` | Workspace and skill management |
 
 ---
 
@@ -226,6 +261,53 @@ All endpoints are documented in [`openapi.yaml`](openapi.yaml). Quick summary:
 | GET | `/admin/status` | admin | Gateway operational snapshot |
 | GET | `/admin/metrics/tools` | admin | Per-tool call counts and latency |
 
+### Notifications
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/notify/channels` | admin | List available notification channels |
+| POST | `/notify/{channel}` | admin | Send a push notification (telegram/discord/slack) |
+
+### Notes / Knowledge Base
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/notes/save` | admin | Save or update a note |
+| GET | `/notes` | admin | List saved notes |
+| GET | `/notes/search` | admin | Full-text search notes |
+| GET | `/notes/file` | admin | Retrieve raw note file |
+
+### Credentials
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/credentials` | admin | List stored credential names |
+| POST | `/credentials` | admin | Store a named credential |
+| GET | `/credentials/{name}` | admin | Retrieve a credential |
+| DELETE | `/credentials/{name}` | admin | Delete a credential |
+| POST | `/credentials/lock` | admin | Lock the credential store |
+
+### Agent-to-Agent (A2A)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/a2a/send` | Bearer | Send a task to another persona |
+| GET | `/a2a/tasks` | admin | List all A2A tasks |
+| GET | `/a2a/tasks/{id}` | admin | Get A2A task detail |
+| DELETE | `/a2a/tasks/{id}` | admin | Delete an A2A task |
+
+### Plugins
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/admin/plugins` | admin | List installed plugins |
+| POST | `/admin/plugins/install` | admin | Install a plugin (pip/zip/GitHub) |
+| DELETE | `/admin/plugins/{slug}` | admin | Uninstall a plugin |
+| POST | `/admin/plugins/{slug}/enable` | admin | Enable a plugin |
+| POST | `/admin/plugins/{slug}/disable` | admin | Disable a plugin |
+| POST | `/admin/plugins/{slug}/reload` | admin | Hot-reload a plugin |
+
+### Video tools
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/tools/video/frames` | Bearer | Extract frames from a video file |
+| POST | `/tools/video/describe` | Bearer | Extract frames and generate description |
+
 ---
 
 ## Authentication
@@ -350,7 +432,7 @@ Authorization: Bearer <admin-token>
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENT_GATEWAY_ADMIN_PASSWORD` | *(required)* | Default admin user password |
+| `AGENT_GATEWAY_ADMIN_PASS` | *(required)* | Default admin user password |
 | `AGENT_GATEWAY_ALLOWED_CAPS` | `fs.read,browser.dom` | Comma-separated capability allow-list; `ALL` for unrestricted |
 | `AGENT_GATEWAY_ACCESS_EXPIRE` | `3600` | Access token lifetime in seconds |
 | `AGENT_GATEWAY_REFRESH_EXPIRE` | `604800` | Refresh token lifetime in seconds |
@@ -361,7 +443,18 @@ Authorization: Bearer <admin-token>
 | `AGENT_GATEWAY_CONTENT_FILTER_PATH` | *(none)* | Path to JSON file with extra deny rules |
 | `AGENT_GATEWAY_MEMORY_PATH` | `agent_memory.json` | Path for persistent agent memory store |
 | `AGENT_GATEWAY_AUDIT_PATH` | `audit.log` | Path for the append-only audit JSONL log |
+| `INTELLI_AUDIT_ENCRYPT_KEY` | *(none)* | 32-byte hex key for AES-256-GCM audit encryption |
 | `SANDBOX_WORKER_PATH` | *(auto-detect)* | Explicit path to sandbox worker script |
+| `INTELLI_TELEGRAM_BOT_TOKEN` | *(none)* | Telegram bot token for push notifications |
+| `INTELLI_TELEGRAM_CHAT_ID` | *(none)* | Telegram chat/channel ID |
+| `INTELLI_DISCORD_WEBHOOK_URL` | *(none)* | Discord webhook URL |
+| `INTELLI_SLACK_WEBHOOK_URL` | *(none)* | Slack webhook URL |
+| `INTELLI_NOTIFY_TIMEOUT` | `10` | HTTP timeout (seconds) for notification requests |
+| `INTELLI_NOTES_DIR` | `~/.intelli/notes/` | Directory for local Markdown notes |
+| `INTELLI_MASTER_KEY` | *(none)* | Master key for the secure credential store |
+| `INTELLI_CRED_LOCK_TIMEOUT` | `300` | Seconds of inactivity before credential auto-lock |
+| `INTELLI_A2A_TASKS_FILE` | `a2a_tasks.json` | Persistence file for A2A task queue |
+| `INTELLI_PLUGINS_DIR` | `plugins/` | Directory for installed gateway plugins |
 
 ---
 
@@ -377,6 +470,10 @@ Authorization: Bearer <admin-token>
 | `consent_timeline.jsonl` | Context-sharing consent events |
 | `agent_memory.json` | Persistent agent key-value memory store |
 | `schedule_state.json` | Scheduled task definitions and run-count state |
+| `a2a_tasks.json` | Persisted A2A async task queue |
+| `content_filter_rules.json` | Saved content-filter deny rules |
+| `addons.json` | Installed browser-shell addon registry |
+| `~/.intelli/notes/` | Markdown notes / knowledge-base directory |
 
 ---
 
@@ -396,11 +493,11 @@ Authorization: Bearer <admin-token>
 
 ## Development
 
-```powershell
+```bash
 # Run with auto-reload
 uvicorn app:app --reload --host 127.0.0.1 --port 8080
 
-# Tests (~1087 pass, 2 skip)
+# Tests (1100+)
 pytest -q
 
 # Tests with coverage
@@ -417,7 +514,7 @@ inside a dedicated container or VM — the current implementation is a scaffold.
 
 The bundled CLI wraps every admin API endpoint:
 
-```powershell
+```bash
 # Authenticate (caches token to .gateway_token)
 python gateway_ctl.py login
 

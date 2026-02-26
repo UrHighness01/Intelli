@@ -15,7 +15,7 @@ uvicorn app:app --app-dir agent-gateway --host 0.0.0.0 --port 8080 --workers 4
 ```
 
 ### Via Electron Browser (recommended for desktop)
-```powershell
+```bash
 cd browser-shell && npm start
 # Gateway starts automatically; killed on window close
 ```
@@ -424,3 +424,140 @@ python gateway_ctl.py consent erase alice --yes
 # View consent timeline
 python gateway_ctl.py consent timeline --n 100
 ```
+
+---
+
+## 19. Push Notifications
+
+Set the relevant env vars for your channel before starting the gateway:
+
+```bash
+# Telegram
+export INTELLI_TELEGRAM_BOT_TOKEN=bot<token>
+export INTELLI_TELEGRAM_CHAT_ID=<chat_id>
+
+# Discord
+export INTELLI_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Slack
+export INTELLI_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+```
+
+Agents send notifications via the `notify` tool or directly:
+
+```bash
+curl -X POST http://localhost:8080/notify/telegram \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Alert: high-risk tool queued for approval"}'
+```
+
+List available channels: `GET /notify/channels`
+
+---
+
+## 20. Notes / Knowledge Base
+
+The notes module stores and searches Markdown files in `~/.intelli/notes/` (overridable
+via `INTELLI_NOTES_DIR`).
+
+```bash
+# Save a note
+curl -X POST http://localhost:8080/notes/save \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"setup","content":"# Setup\nGateway is on :8080"}'
+
+# List notes
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/notes
+
+# Full-text search
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/notes/search?q=gateway"
+```
+
+---
+
+## 21. Secure Credential Store
+
+The credential store (`credential_store.py`) uses the OS keychain when available,
+falling back to AES-256-GCM local encryption when `INTELLI_MASTER_KEY` is set.
+
+```bash
+# Store a credential
+curl -X POST http://localhost:8080/credentials \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"my-api-key","value":"sk-..."}'
+
+# Retrieve
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/credentials/my-api-key
+
+# Delete
+curl -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/credentials/my-api-key
+
+# Lock the store (requires re-auth on next access)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/credentials/lock
+```
+
+Set `INTELLI_CRED_LOCK_TIMEOUT=900` to auto-lock after 15 minutes of inactivity.
+
+---
+
+## 22. Agent-to-Agent (A2A) Routing
+
+```bash
+# Send a task from one persona to another
+curl -X POST http://localhost:8080/a2a/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"from_persona":"researcher","to_persona":"writer","task":"Summarise arxiv.org/abs/2401.0001"}'
+
+# List pending A2A tasks
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/a2a/tasks
+
+# Get task result
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/a2a/tasks/<task_id>
+```
+
+Task state is persisted to `INTELLI_A2A_TASKS_FILE` (default `agent-gateway/a2a_tasks.json`).
+
+---
+
+## 23. Plugin Management
+
+Plugins expose tools via an `intelli_plugin.json` manifest and are discovered in
+`INTELLI_PLUGINS_DIR` (default `agent-gateway/plugins/`).
+
+```bash
+# List installed plugins
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/admin/plugins
+
+# Install a plugin from PyPI
+curl -X POST http://localhost:8080/admin/plugins/install \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"intelli-weather"}'
+
+# Enable / disable
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/admin/plugins/intelli-weather/enable
+
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/admin/plugins/intelli-weather/disable
+
+# Hot-reload (picks up code changes without gateway restart)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/admin/plugins/intelli-weather/reload
+
+# Uninstall
+curl -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8080/admin/plugins/intelli-weather
+```
+
+The starter plugin `intelli-weather` (Open-Meteo, no API key required) is included
+in `agent-gateway/plugins/intelli-weather/`.
+

@@ -15,28 +15,42 @@ validates, redacts, approves, and audits every AI tool call before execution.
 
 | Path | Purpose |
 |------|---------|
-| `ROADMAP.md` | High-level phased roadmap and session progress |
-| `ARCHITECTURE.md` | Mermaid architecture diagram (all 20 subsystems) |
+| `ROADMAP.md` | Implementation log — all completed features with notes |
+| `ARCHITECTURE.md` | Mermaid architecture diagram (all subsystems) |
 | `THREAT_MODEL.md` | Threat model and privacy controls |
 | `SECURITY.md` | Security posture and known mitigations |
 | `LICENSE` | Source-available non-commercial license |
-| `agent-gateway/` | Local agent gateway (FastAPI + 1 087 tests) |
-| `agent-gateway/ui/` | 15 dark-mode admin UI pages |
+| `agent-gateway/` | Local agent gateway (FastAPI + 1 100+ tests) |
+| `agent-gateway/ui/` | 24 dark-mode admin UI pages |
 | `agent-gateway/gateway_ctl.py` | CLI management tool for all admin APIs |
-| `agent-gateway/openapi.yaml` | Full OpenAPI 3.0.3 spec (20 named tags) |
+| `agent-gateway/openapi.yaml` | Full OpenAPI 3.0.3 spec (20+ named tags) |
 | `agent-gateway/addons.py` | Addon JS-injection manager + persistence |
 | `agent-gateway/tab_snapshot.py` | In-process active-tab HTML snapshot store |
+| `agent-gateway/notifier.py` | Outbound push notifications (Telegram / Discord / Slack) |
+| `agent-gateway/notes.py` | Local Markdown knowledge base (~/.intelli/notes/) |
+| `agent-gateway/credential_store.py` | OS keychain + AES-256-GCM encrypted credential store |
+| `agent-gateway/a2a.py` | Agent-to-agent task routing across personas |
+| `agent-gateway/plugin_loader.py` | Plugin installer + dynamic tool registry |
+| `agent-gateway/voice.py` | Voice I/O — speech-to-text and text-to-speech |
+| `agent-gateway/canvas_manager.py` | Canvas / structured multi-block output |
+| `agent-gateway/mcp_client.py` | Model Context Protocol client |
+| `agent-gateway/personas.py` | Custom agent personas |
+| `agent-gateway/sessions.py` | Per-session conversation history |
+| `agent-gateway/watcher.py` | Page diff watcher — monitor URLs for changes |
+| `agent-gateway/memory_store.py` | Vector memory store |
+| `agent-gateway/workspace_manager.py` | Workspace and skill management |
 | `browser-shell/` | Electron 29 desktop browser wrapping the gateway (`npm start`) |
 | `browser-shell/main.js` | Main process — tab management, IPC, window controls |
 | `browser-shell/preload.js` | Context-bridge API surface exposed to chrome renderer |
 | `browser-shell/src/` | Chrome renderer — tab bar, address bar, sidebar, addons |
 | `docs/` | Deployment, developer guide, and operator runbook |
+| `scripts/log_shipper.py` | SIEM audit log shipper sidecar |
 
 ---
 
 ## Agent gateway — feature summary
 
-The gateway (`agent-gateway/`) is the most complete component:
+The gateway (`agent-gateway/`) is the core component:
 
 | Feature | Capability |
 |---------|------------|
@@ -49,16 +63,42 @@ The gateway (`agent-gateway/`) is the most complete component:
 | **Content filtering** | Literal and regex deny-rules applied before every tool call |
 | **Rate limiting** | Per-token and global caps, configurable via UI and API |
 | **Agent memory** | Persistent key-value store per agent with optional TTL |
+| **Vector memory** | Semantic embedding store for long-term recall |
 | **Scheduler** | Recurring tool-call tasks with interval, history, and live countdown |
 | **Provider key management** | Store, rotate, and track expiry of LLM API keys |
+| **Provider failover** | Automatic fallback across LLM providers on failure |
 | **Consent / context timeline** | Append-only log of every tab snapshot shared with an agent |
 | **Audit log** | Immutable JSONL trail — tail, filter, group-by, CSV export, live follow |
+| **Encrypted audit log** | Optional AES-256-GCM per-line encryption via `INTELLI_AUDIT_ENCRYPT_KEY` |
 | **Metrics** | Per-tool call counts and p50 / mean latency histograms |
 | **Approval webhooks** | Push notifications to external systems on queue events |
-| **Chat proxy** | Proxy completions to OpenAI / Anthropic / OpenRouter / Ollama |
+| **Chat proxy** | Streaming proxy to OpenAI / Anthropic / OpenRouter / Ollama |
 | **GDPR export/erase** | Full actor data export and erasure via API |
 | **Tab snapshot** | Active-tab HTML pushed automatically; agents read via `GET /tab/snapshot` |
 | **Addon system** | Agents write and activate JS addons injected into active tab at runtime |
+| **Browser automation** | Headless browser tools — click, screenshot, DOM query, form fill |
+| **Web tools** | Fetch, search, and summarise web content |
+| **PDF analysis** | Extract text and structure from PDF files |
+| **Image upload** | Multimodal image input for vision-capable models |
+| **Video frame analysis** | ffmpeg frame extraction + vision model description |
+| **Coding agent** | Code generation, execution, and linting tools |
+| **Canvas** | Structured multi-block output (text, code, data, charts) |
+| **Sub-agents** | Spawn and orchestrate child agent tasks |
+| **Personas** | Named agent personas with distinct system prompts |
+| **Agent-to-agent (A2A)** | Route tasks between personas; async task queue |
+| **Session history** | Per-session conversation history stored and searchable |
+| **MCP client** | Model Context Protocol tool and resource integration |
+| **Page diff watcher** | Monitor URLs for changes and alert on diff |
+| **Notification push** | Outbound alerts to Telegram / Discord / Slack |
+| **Notes / knowledge base** | Local Markdown knowledge base; full-text search |
+| **Secure credential store** | OS keychain + AES-256-GCM encrypted named credentials |
+| **Plugin system** | Install pip/zip/GitHub plugins; dynamic tool registry |
+| **Voice I/O** | Speech-to-text input and text-to-speech output |
+| **Context compaction** | Automatic conversation summarisation to keep context within limits |
+| **Skill ecosystem** | Workspace of reusable agent skills |
+| **Analytics** | Usage analytics, session stats, and export |
+| **Navigation guard** | Block or warn on navigation to risky domains |
+| **Sandbox** | Subprocess + Docker isolated tool execution |
 
 ---
 
@@ -85,29 +125,40 @@ The Electron shell (`browser-shell/`) wraps the gateway with a full tabbed brows
 
 ## Quickstart
 
-```powershell
+### Linux / macOS
+```bash
 # 1. Create virtualenv and install dependencies
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python3 -m venv agent-gateway/.venv
+source agent-gateway/.venv/bin/activate
 pip install -r agent-gateway/requirements.txt
 
 # 2. Set admin password
-$env:AGENT_GATEWAY_ADMIN_PASSWORD = "your-strong-password"
+export AGENT_GATEWAY_ADMIN_PASS="your-strong-password"
 
-# 3. Start the gateway
+# 3. Start the gateway (development — auto-reload)
 uvicorn app:app --app-dir agent-gateway --reload --host 127.0.0.1 --port 8080
 
 # 4. Run all tests
-pytest -q agent-gateway
-# Expected: 1087 passed, 2 skipped
+python -m pytest -q
+# Expected: 1100+ passed
+```
+
+### Windows (PowerShell)
+```powershell
+python -m venv agent-gateway/.venv
+.\.venv\Scripts\Activate.ps1
+pip install -r agent-gateway/requirements.txt
+$env:AGENT_GATEWAY_ADMIN_PASS = "your-strong-password"
+uvicorn app:app --app-dir agent-gateway --reload --host 127.0.0.1 --port 8080
 ```
 
 Open `http://127.0.0.1:8080/ui/` to access the admin hub.
 
 ### Desktop browser (Electron) — recommended
-```powershell
+```bash
 cd browser-shell
-npm install   # first time only
+npm install        # first time only
+node generate-icon.js  # first time only — placeholder icon
 npm start
 # Starts the gateway automatically and opens the Intelli browser window
 ```
@@ -155,29 +206,40 @@ Agents retrieve it via `GET /tab/snapshot`:
 
 ## Admin UI pages
 
+All 24 pages are served at `http://127.0.0.1:8080/ui/<page>`.
+
 | Page | Description |
 |------|-------------|
-| `index.html` | Searchable nav hub linking all admin panels |
-| `status.html` | Live gateway dashboard — call counts, uptime, alerts, scheduler ETA |
-| `audit.html` | Audit log viewer — sort, filter by actor/event, group-by, CSV export |
-| `approvals.html` | Pending approval queue — approve or reject queued tool calls |
+| `index.html` | Searchable admin hub with nav cards — live status bar |
+| `status.html` | Live gateway dashboard — kill-switch, alert config, top tool, scheduler ETA |
+| `audit.html` | Audit log viewer — sort, filter, group-by, CSV export, live-tail |
+| `approvals.html` | Pending approval queue — SSE live updates, approve / reject, auto-reject timer |
 | `users.html` | User management — create, delete, roles, tool restrictions, last-seen chip |
-| `providers.html` | LLM provider key storage, rotation, expiry + live chat proxy test |
-| `schedule.html` | Scheduler — create tasks, history sparkline, duration stat cards |
-| `metrics.html` | Per-tool call count table with p50 latency column |
-| `memory.html` | Agent memory — browse, edit, export-all, import (merge or replace) |
-| `content-filter.html` | Deny-rule management (literal and regex patterns) |
-| `rate-limits.html` | Per-token and global request-rate configuration |
-| `webhooks.html` | Approval webhook registration and event subscriptions |
-| `capabilities.html` | Tool capability manifest browser |
+| `providers.html` | LLM provider key management, rotation, expiry + chat proxy test panel |
+| `schedule.html` | Scheduler — tasks, history, duration sparkline, bulk enable/disable |
+| `metrics.html` | Per-tool call counts, p50 latency, bar chart, sparklines |
+| `memory.html` | Agent memory browser — export-all / import, TTL display, inline edit |
+| `content-filter.html` | Deny-rule management (literal + regex) with live test panel |
+| `rate-limits.html` | Per-token and global rate-limit configuration + live usage snapshot |
+| `webhooks.html` | Approval webhook registration — delivery history, retry highlight |
+| `capabilities.html` | Tool capability manifest browser — risk and approval filters |
 | `consent.html` | Context-sharing consent timeline viewer |
-| `tab_permission.html` | Browser tab snapshot permission request UI |
+| `tab_permission.html` | Browser tab snapshot permission and per-origin redaction rules |
+| `chat.html` | Streaming AI chat panel with provider selector |
+| `canvas.html` | Structured multi-block canvas output viewer |
+| `personas.html` | Agent persona management |
+| `mcp.html` | MCP tool and resource browser |
+| `sessions.html` | Per-session conversation history viewer |
+| `analytics.html` | Usage analytics and session stats |
+| `watchers.html` | Page diff watcher — monitor URLs for changes |
+| `setup.html` | First-run setup wizard |
+| `workspace.html` | Workspace and skill management |
 
 ---
 
 ## CLI (`gateway_ctl.py`)
 
-```powershell
+```bash
 cd agent-gateway
 
 python gateway_ctl.py login
@@ -189,6 +251,9 @@ python gateway_ctl.py users permissions set alice file.read,noop
 python gateway_ctl.py metrics top --n 5
 python gateway_ctl.py content-filter add "bad-word" --mode literal
 python gateway_ctl.py kill-switch on --reason "incident"
+python gateway_ctl.py approvals list
+python gateway_ctl.py memory export --output backup.json
+python gateway_ctl.py provider-health list
 ```
 
-See `agent-gateway/README.md` for the full endpoint reference and environment variables.
+See [agent-gateway/README.md](agent-gateway/README.md) for the full endpoint reference and environment variables.

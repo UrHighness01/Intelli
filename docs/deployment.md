@@ -19,6 +19,7 @@
 |---|---|
 | Python 3.11+ | Gateway runtime |
 | Node.js 18+ | Electron browser shell only |
+| ffmpeg | Optional — required for `video_frames` tool |
 | (Optional) Docker | Isolated sandbox worker |
 | (Optional) HashiCorp Vault | Production secrets management |
 
@@ -26,21 +27,22 @@
 
 ## 1. Local Development — Gateway Only
 
-```powershell
+```bash
 # Clone
 git clone https://github.com/UrHighness01/Intelli.git
 cd Intelli
 
 # Create and activate virtualenv
-python -m venv .venv
-.venv\Scripts\Activate.ps1          # Windows PowerShell
-# source .venv/bin/activate          # macOS / Linux
+python3 -m venv agent-gateway/.venv
+source agent-gateway/.venv/bin/activate          # Linux / macOS
+# .venv\Scripts\Activate.ps1                     # Windows PowerShell
 
 # Install dependencies
 pip install -r agent-gateway/requirements.txt
 
 # Required: set admin credentials
-$env:AGENT_GATEWAY_ADMIN_PASS = "changeme"
+export AGENT_GATEWAY_ADMIN_PASS="changeme"
+# $env:AGENT_GATEWAY_ADMIN_PASS = "changeme"     # Windows PowerShell
 
 # Start gateway (development — auto-reload)
 uvicorn app:app --app-dir agent-gateway --host 127.0.0.1 --port 8080 --reload
@@ -69,10 +71,10 @@ It uses `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python3` (macOS/Linux
 
 ## 3. Running Tests
 
-```powershell
+```bash
 # Full pytest suite (run from repo root)
 python -m pytest -q
-# Expected: ~1087 passed, 2 skipped
+# Expected: 1100+ passed, 1-2 skipped
 
 # Sandbox worker tests only (fast, no gateway required)
 python -m pytest agent-gateway/tests/test_sandbox_worker.py `
@@ -279,13 +281,54 @@ export VAULT_TOKEN=<your-token>
 | `VAULT_KV_MOUNT` | `secret` | Vault KV mount |
 | `VAULT_KV_PREFIX` | `intelli/providers` | Vault secret prefix |
 
+### Notifications (`notifier.py`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_TELEGRAM_BOT_TOKEN` | — | Telegram bot token |
+| `INTELLI_TELEGRAM_CHAT_ID` | — | Telegram destination chat ID |
+| `INTELLI_DISCORD_WEBHOOK_URL` | — | Discord incoming webhook URL |
+| `INTELLI_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL |
+| `INTELLI_NOTIFY_TIMEOUT` | `10` | Outbound notification timeout (seconds) |
+
+### Notes / Knowledge Base (`notes.py`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_NOTES_DIR` | `~/.intelli/notes/` | Directory for local Markdown notes |
+
+### Secure Credential Store (`credential_store.py`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_MASTER_KEY` | — | 64-hex AES-256-GCM master key for credential encryption |
+| `INTELLI_CRED_LOCK_TIMEOUT` | `0` | Seconds of inactivity before store auto-locks (0 = disabled) |
+
+### Agent-to-Agent (`a2a.py`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_A2A_TASKS_FILE` | `agent-gateway/a2a_tasks.json` | Path to A2A task persistence file |
+
+### Plugin System (`plugin_loader.py`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_PLUGINS_DIR` | `agent-gateway/plugins/` | Directory scanned for installed plugins |
+
+### Audit Encryption
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTELLI_AUDIT_ENCRYPT_KEY` | — | 64-hex AES-256-GCM key for per-line audit log encryption |
+
 ---
 
 ## 8. Persistent Files
 
 | File | Description |
 |---|---|
-| `agent-gateway/audit.log` | Append-only audit trail (JSONL) |
+| `agent-gateway/audit.log` | Append-only audit trail (JSONL; optionally AES-256-GCM encrypted) |
 | `agent-gateway/users.json` | User accounts (PBKDF2 hashed passwords) |
 | `agent-gateway/revoked_tokens.json` | Revoked token hashes + expiry |
 | `agent-gateway/redaction_rules.json` | Per-origin field redaction rules |
@@ -293,7 +336,11 @@ export VAULT_TOKEN=<your-token>
 | `agent-gateway/schedule.json` | Scheduled task definitions |
 | `agent-gateway/consent_timeline.jsonl` | Tab context consent log |
 | `agent-gateway/key_metadata.json` | Provider key TTL/rotation metadata |
+| `agent-gateway/content_filter_rules.json` | Content filter deny rules |
+| `agent-gateway/addons.json` | Saved JS addon definitions |
+| `agent-gateway/a2a_tasks.json` | Agent-to-agent task queue |
 | `agent-gateway/agent_memory/` | Per-agent key-value memory files (JSON) |
+| `~/.intelli/notes/` | Local Markdown knowledge base |
 
 ---
 
