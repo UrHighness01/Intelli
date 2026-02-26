@@ -75,3 +75,32 @@ id_ed25519
 tmp/
 temp/
 scratch/
+
+# ─── Reference clones (local only) ────────────────────────────────────────
+openclaw-ref/
+
+# ─── Provider / gateway runtime secrets & state ───────────────────────────
+# Provider API keys persisted by ProviderKeyStore fallback
+agent-gateway/provider_keys.json
+# Provider settings (model ids, endpoints) — may contain tokens
+agent-gateway/provider_settings.json
+# Admin token seed / cached token
+agent-gateway/.admin_token
+agent-gateway/admin_token.txt
+# Audit log (contains actor tokens hashes + request payloads)
+agent-gateway/audit.jsonl
+agent-gateway/audit_*.jsonl
+# Rate-limit state
+agent-gateway/rate_limit_state.json
+# Workspace (user's personal agent workspace — not part of the repo)
+.intelli/
+
+# ─── Electron build outputs ────────────────────────────────────────────────
+browser-shell/out/
+browser-shell/*.AppImage
+browser-shell/*.deb
+browser-shell/*.rpm
+browser-shell/*.snap
+browser-shell/*.exe
+browser-shell/*.dmg
+browser-shell/*.zip
