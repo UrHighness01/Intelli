@@ -942,12 +942,16 @@ function createMainWindow() {
   mainWin.on('resize',            syncBounds);
   mainWin.on('enter-full-screen', syncBounds);
   mainWin.on('leave-full-screen', syncBounds);
+  // restore fires when the window comes back from minimized — resize does NOT
+  // always fire in that case, so the BrowserView would keep its collapsed bounds.
+  mainWin.on('restore',           syncBounds);
 
   mainWin.on('closed', () => { mainWin = null; });
 
   // Forward maximize/unmaximize state to chrome renderer (updates button icon)
-  mainWin.on('maximize',   () => notifyChrome('win-maximize-changed', true));
-  mainWin.on('unmaximize', () => notifyChrome('win-maximize-changed', false));
+  // and re-sync bounds so the BrowserView fills the new window size.
+  mainWin.on('maximize',   () => { syncBounds(); notifyChrome('win-maximize-changed', true);  });
+  mainWin.on('unmaximize', () => { syncBounds(); notifyChrome('win-maximize-changed', false); });
 
   buildAppMenu();
 }
