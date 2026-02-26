@@ -1407,6 +1407,13 @@ def chat_complete(
     # ---- Content policy enforcement -----------------------------------
     _content_filter.check([m.get('content', '') for m in req.messages])
 
+    # Validate provider name — raise 400 for unrecognised providers before
+    # attempting failover (unknown names are never going to become available).
+    try:
+        get_adapter(req.provider)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f'unknown provider: {req.provider!r}')
+
     # Use FailoverAdapter: transparently retries with fallback providers on 429/5xx
     adapter = _FailoverAdapter(req.provider, req.model or None)
     if not adapter.is_available():
