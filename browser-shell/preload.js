@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchTab:     (id)   => ipcRenderer.invoke('switch-tab', id),
   getTabs:       ()     => ipcRenderer.invoke('get-tabs'),
   duplicateTab:  (id)            => ipcRenderer.invoke('duplicate-tab', id),
+  reorderTab:    (dragId, targetId) => ipcRenderer.invoke('reorder-tab', dragId, targetId),
   /** Show native OS context menu for a tab (renders above BrowserViews). */
   showTabCtx:    (tabId, tabUrl) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl }),
 
@@ -100,6 +101,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInactiveTabsPopup: (payload) => ipcRenderer.invoke('show-inactive-tabs-popup', payload),
   /** Returns the stored page screenshot (data:URL) for a tab, or null. */
   getTabPreview: (tabId) => ipcRenderer.invoke('get-tab-preview', tabId),
+  getSettings:  ()    => ipcRenderer.invoke('get-settings'),
+  saveSettings: (s)   => ipcRenderer.invoke('save-settings', s),
   /** Show the floating hover preview window for a tab. */
   showTabPreview: (data) => ipcRenderer.invoke('show-tab-preview', data),
   /** Hide/close the floating hover preview window. */
@@ -119,6 +122,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNavState:          (cb) => ipcRenderer.on('nav-state',           (_, d) => cb(d)),
   /** Called whenever tabs are created, closed, or switched. cb receives the full tab array. */
   onTabsUpdated:       (cb) => ipcRenderer.on('tabs-updated',        (_, tabs) => cb(tabs)),
+  /** Close the split-view mode. */
+  closeSplit:          ()   => ipcRenderer.send('close-split'),
+  /** Called when split mode changes. cb receives { splitTabId } or null. */
+  onSplitChanged:      (cb) => ipcRenderer.on('split-changed',       (_, d) => cb(d)),
+  /** Called when a tab’s audio mute state changes. cb receives { id, muted }. */
+  onTabMuted:          (cb) => ipcRenderer.on('tab-muted',           (_, d) => cb(d)),
 
   // ── Auto-updater notifications ────────────────────────────────────────────
   /** Called with { version, releaseDate } when a new release is available. */

@@ -2,15 +2,13 @@
 /**
  * preload-page.js — injected into every BrowserView (web pages).
  *
- * Removes the Electron / automation fingerprints that cause Google reCAPTCHA
- * and other bot-detection systems to challenge the browser.
+ * Supprime les fingerprints Electron / automation pour passer les checks
+ * de YouTube, Google reCAPTCHA et Cloudflare.
  *
- * Technique mirrors what Brave does: override read-only navigator properties
- * before any page script can observe them.
+ * Exécuté AVANT tout script de la page grâce à contextIsolation:false.
  */
 
 // ── 1. navigator.webdriver ─────────────────────────────────────────────────
-//   Electron sets this to `true`; real browsers set it to `undefined`.
 try {
   Object.defineProperty(navigator, 'webdriver', {
     get: () => undefined,
@@ -18,18 +16,28 @@ try {
   });
 } catch (_) {}
 
-// ── 2. navigator.plugins ───────────────────────────────────────────────────
-//   Headless/Electron has 0 plugins; real Chrome has several.
+// ── 2. Supprimer window.process (révèle Electron via process.versions.electron)
+try {
+  delete window.process;
+} catch (_) {
+  try {
+    Object.defineProperty(window, 'process', { get: () => undefined, configurable: true });
+  } catch (_2) {}
+}
+
+// ── 3. navigator.plugins ───────────────────────────────────────────────────
 try {
   const fakePlugins = [
-    { name: 'Chrome PDF Plugin',       filename: 'internal-pdf-viewer',   description: 'Portable Document Format' },
-    { name: 'Chrome PDF Viewer',       filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-    { name: 'Native Client',           filename: 'internal-nacl-plugin',  description: '' },
+    { name: 'PDF Viewer',             filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer',      filename: 'internal-pdf-viewer', description: '' },
+    { name: 'Chromium PDF Viewer',    filename: 'internal-pdf-viewer', description: '' },
+    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+    { name: 'WebKit built-in PDF',    filename: 'internal-pdf-viewer', description: '' },
   ];
   Object.defineProperty(navigator, 'plugins', {
     get: () => {
       const arr = fakePlugins.map(p => {
-        const plugin = Object.create(Plugin.prototype);
+        const plugin = Object.create(window.Plugin ? window.Plugin.prototype : {});
         Object.defineProperties(plugin, {
           name:        { value: p.name,        enumerable: true },
           filename:    { value: p.filename,    enumerable: true },
@@ -38,53 +46,116 @@ try {
         });
         return plugin;
       });
-      Object.setPrototypeOf(arr, PluginArray.prototype);
+      if (window.PluginArray) Object.setPrototypeOf(arr, window.PluginArray.prototype);
       Object.defineProperty(arr, 'length', { value: fakePlugins.length });
+      arr.item = (i) => arr[i];
+      arr.namedItem = (n) => arr.find(p => p.name === n) || null;
+      arr.refresh = () => {};
       return arr;
     },
     configurable: true,
   });
 } catch (_) {}
 
-// ── 3. navigator.languages ─────────────────────────────────────────────────
+// ── 4. navigator.languages + navigator.language ────────────────────────────
 try {
-  Object.defineProperty(navigator, 'languages', {
-    get: () => ['fr-CA', 'fr', 'en-CA', 'en'],
+  Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'], configurable: true });
+  Object.defineProperty(navigator, 'language',  { get: () => 'fr-FR', configurable: true });
+} catch (_) {}
+
+// ── 5. navigator.hardwareConcurrency + deviceMemory ───────────────────────
+try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true }); } catch (_) {}
+try { Object.defineProperty(navigator, 'deviceMemory',        { get: () => 8, configurable: true }); } catch (_) {}
+
+// ── 6. window.chrome — objet complet comme dans vrai Chrome ───────────────
+//   YouTube vérifie chrome.csi(), chrome.loadTimes(), chrome.runtime.sendMessage
+try {
+  const t0 = Date.now();
+  window.chrome = {
+    csi: () => ({
+      startE:    t0,
+      onloadT:   t0 + 120,
+      pageT:     t0 + 150,
+      tran:      15,
+    }),
+    loadTimes: () => ({
+      commitLoadTime:             t0 / 1000,
+      connectionInfo:             'h2',
+      finishDocumentLoadTime:     (t0 + 120) / 1000,
+      finishLoadTime:             (t0 + 150) / 1000,
+      firstPaintAfterLoadTime:    0,
+      firstPaintTime:             (t0 + 80) / 1000,
+      navigationType:             'Other',
+      npnNegotiatedProtocol:      'h2',
+      requestTime:                t0 / 1000,
+      startLoadTime:              t0 / 1000,
+      wasAlternateProtocolAvailable: false,
+      wasFetchedViaSpdy:          true,
+      wasNpnNegotiated:           true,
+    }),
+    app: {
+      isInstalled:    false,
+      getDetails:     () => null,
+      getIsInstalled: () => false,
+      installState:   () => {},
+      runningState:   () => 'cannot_run',
+      InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+      RunningState:  { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+    },
+    runtime: {
+      id:           undefined,
+      connect:      () => {},
+      sendMessage:  () => {},
+      onConnect:    { addListener: () => {}, removeListener: () => {} },
+      onMessage:    { addListener: () => {}, removeListener: () => {} },
+    },
+    webstore: {
+      onInstallStageChanged: { addListener: () => {} },
+      onDownloadProgress:    { addListener: () => {} },
+      install:               () => {},
+    },
+  };
+} catch (_) {}
+
+// ── 7. document.hasFocus() → toujours true ────────────────────────────────
+//   BrowserView non-focusé retourne false → drapeau automation pour YouTube.
+try {
+  Object.defineProperty(document, 'hasFocus', {
+    value: () => true,
+    writable: true,
     configurable: true,
   });
 } catch (_) {}
 
-// ── 4. window.chrome ──────────────────────────────────────────────────────
-//   Electron doesn't expose window.chrome; real Chrome does.
+// ── 8. WebGL vendor / renderer ────────────────────────────────────────────
 try {
-  if (!window.chrome) {
-    window.chrome = {
-      app:     { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } },
-      runtime: { id: undefined },
+  const patchGL = (Ctx) => {
+    if (!Ctx) return;
+    const orig = Ctx.prototype.getParameter;
+    Ctx.prototype.getParameter = function (param) {
+      if (param === 37445) return 'Google Inc. (Intel)';
+      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+      return orig.call(this, param);
     };
-  }
+  };
+  patchGL(window.WebGLRenderingContext);
+  patchGL(window.WebGL2RenderingContext);
 } catch (_) {}
 
-// ── 5. Permissions API ─────────────────────────────────────────────────────
-//   navigator.permissions.query({name:'notifications'}) returns 'denied'
-//   in headless; spoof to behave like a real browser.
+// ── 9. Permissions API ─────────────────────────────────────────────────────
 try {
   const origQuery = window.navigator.permissions.query.bind(navigator.permissions);
   window.navigator.permissions.__proto__.query = (params) => {
     if (params.name === 'notifications') {
-      return Promise.resolve({ state: Notification.permission, onchange: null });
+      return Promise.resolve({ state: 'default', onchange: null });
     }
-    return origQuery(params);
+    if (['camera', 'microphone', 'geolocation'].includes(params.name)) {
+      return Promise.resolve({ state: 'prompt', onchange: null });
+    }
+    return origQuery(params).catch(() => Promise.resolve({ state: 'prompt', onchange: null }));
   };
 } catch (_) {}
 
-// ── 6. WebGL vendor / renderer ────────────────────────────────────────────
-//   Electron exposes "Google SwiftShader" which is an automation marker.
-try {
-  const getParam = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function (param) {
-    if (param === 37445) return 'Intel Inc.';                   // UNMASKED_VENDOR_WEBGL
-    if (param === 37446) return 'Intel Iris OpenGL Engine';     // UNMASKED_RENDERER_WEBGL
-    return getParam.call(this, param);
-  };
-} catch (_) {}
+// ── 10. screen / window dimensions cohérentes ─────────────────────────────
+try { Object.defineProperty(window, 'outerWidth',  { get: () => window.innerWidth,       configurable: true }); } catch (_) {}
+try { Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 74, configurable: true }); } catch (_) {}

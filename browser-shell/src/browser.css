@@ -12,8 +12,8 @@
   --addr-h:     52px;
   --chrome-h:   88px;       /* tab-h + addr-h — must match main.js CHROME_HEIGHT */
   --radius:     6px;
-  --tab-min:    140px;
-  --tab-max:    220px;
+  --tab-min:    72px;
+  --tab-max:    240px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -59,6 +59,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 0;
   min-width: var(--tab-min);
   max-width: var(--tab-max);
   height: 30px;
@@ -67,7 +68,6 @@ html, body {
   background: var(--surface2);
   color: var(--muted);
   cursor: pointer;
-  flex-shrink: 1;
   overflow: hidden;
   position: relative;
   transition: background 0.12s, color 0.12s;
@@ -75,6 +75,72 @@ html, body {
 }
 .tab:hover         { background: var(--surface); color: var(--text); }
 .tab.active        { background: var(--surface); color: var(--text); }
+.tab.dragging      { opacity: 0.5; }
+.tab.drag-over     { border-left: 2px solid var(--accent, #60a5fa); background: rgba(96,165,250,.15); }
+/* Admin Hub tab — shrinks to fit its label, never grows */
+.tab.admin-hub {
+  flex: 0 0 auto;
+  min-width: unset;
+  max-width: unset;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+/* ── Merged split tab ─────────────────────────────────────────────────────── */
+.tab.split-merged {
+  /* Exactly the same footprint as one normal tab */
+  flex: 0 1 var(--tab-max);
+  width: var(--tab-max);
+  min-width: var(--tab-min);
+  max-width: var(--tab-max);
+  display: flex;
+  align-items: center;
+  padding: 0;
+  gap: 0;
+  background: var(--surface);
+  border-top: 2px solid var(--accent, #60a5fa);
+  overflow: hidden;
+  cursor: default;
+}
+.split-side {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  flex: 1;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  height: 100%;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.split-side:hover { background: rgba(96,165,250,.18); }
+.split-side .tab-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  pointer-events: none;
+}
+.split-side .split-fav {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.split-divider {
+  color: var(--border, #444);
+  font-size: 14px;
+  padding: 0 2px;
+  pointer-events: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+/* Empêche les éléments enfants (titre, favicon…) d'intercepter les events drag,
+   sinon dragleave se déclenche sur le .tab parent quand la souris passe sur un child. */
+.tab > *           { pointer-events: none; }
+/* Le bouton fermer doit rester cliquable */
+.tab > .tab-close  { pointer-events: auto; }
 .tab.active::after {
   content: '';
   position: absolute;
@@ -111,21 +177,19 @@ html, body {
 .tab:hover .tab-close,
 .tab.active .tab-close { opacity: 0.7; }
 .tab-close:hover       { background: var(--danger); opacity: 1 !important; color: #fff; }
+.tab-close.hidden      { display: none !important; }
 
-#new-tab-btn {
+/* Speaker / mute icon — visible only when tab has audio or is muted */
+.tab-audio-icon {
   flex-shrink: 0;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  color: var(--muted);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  transition: background 0.12s, color 0.12s;
-  -webkit-app-region: no-drag;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.85;
+  pointer-events: none;
 }
-#new-tab-btn:hover { background: var(--surface2); color: var(--text); }
+.tab-audio-icon.hidden { display: none; }
+
+/* #new-tab-btn now uses .nav-btn class in the address bar */
 
 /* spacer hidden — #tabs takes flex:1 instead */
 .tab-bar-spacer { display: none; }
@@ -693,6 +757,29 @@ button { cursor: pointer; }
   cursor: pointer; flex-shrink: 0;
 }
 .btn-danger:hover { background: var(--danger); color: #fff; }
+
+/* ── Split-view tab indicator & close button ───────────────── */
+.tab.split { border-top: 2px solid var(--accent); }
+
+#btn-close-split {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 9px;
+  height: 24px;
+  background: rgba(108,99,255,0.18);
+  color: var(--accent);
+  border: 1px solid rgba(108,99,255,0.35);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+#btn-close-split:hover { background: rgba(108,99,255,0.32); }
+#btn-close-split.hidden { display: none; }
 
 /* ── Tab hover preview card (Chrome-style) ───────────────── */
 #tab-hover-card {

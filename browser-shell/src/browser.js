@@ -18,15 +18,79 @@ const $urlIn   = document.getElementById('url-input');
 const $gwDot   = document.getElementById('gw-dot');
 
 /* ── Tab rendering ──────────────────────────────────────────────── */
+function _makeTabSide(t) {
+  const isAdminHub = t.url && t.url.startsWith('http://127.0.0.1:8080/ui/');
+  const displayTitle = isAdminHub ? '⚙ Admin Hub' : (t.title || t.url || 'New Tab');
+  const side = document.createElement('div');
+  side.className = 'split-side';
+  side.dataset.id = t.id;
+  const fav = document.createElement('img');
+  fav.className = 'tab-favicon split-fav' + (t.favicon ? '' : ' hidden');
+  fav.src = t.favicon || '';
+  fav.alt = '';
+  const ttl = document.createElement('span');
+  ttl.className = 'tab-title';
+  ttl.textContent = displayTitle;
+  side.append(fav, ttl);
+  return side;
+}
+
 function renderTabs(tabs) {
   _tabs = tabs;
-  // Close any floating preview card before rebuilding the tab strip
-  _cancelTabPreview();
+  // Cancel the pending preview timer (but don't close an already-open window)
+  clearTimeout(_tpTimer); _tpTimer = null;
   $tabs.innerHTML = '';
   // Grouped tab IDs — these are hidden from the tab bar
   const groupedIds = new Set((_groupedTabs || []).map(g => g.id));
+
+  // Detect split pair
+  const leftTab  = tabs.find(t => t.splitLeft);
+  const rightTab = tabs.find(t => t.split);
+  const splitIds = new Set([leftTab?.id, rightTab?.id].filter(Boolean));
+
   for (const t of tabs) {
-    if (groupedIds.has(t.id)) continue;   // ← skip grouped tabs
+    if (groupedIds.has(t.id)) continue;
+
+    // ── Merged split tab (render once, at the leftTab position) ──────────────
+    if (splitIds.has(t.id)) {
+      if (t.id !== leftTab?.id) continue;   // skip the right tab — already rendered in merged element
+      if (!rightTab) continue;
+
+      const el = document.createElement('div');
+      el.className = 'tab split-merged active';   // always shown as "active" visually
+      el.dataset.leftId  = leftTab.id;
+      el.dataset.rightId = rightTab.id;
+
+      const leftSide  = _makeTabSide(leftTab);
+      leftSide.classList.add('split-side-left');
+      const divider = document.createElement('span');
+      divider.className = 'split-divider';
+      divider.textContent = '│';
+      const rightSide = _makeTabSide(rightTab);
+      rightSide.classList.add('split-side-right');
+
+      el.append(leftSide, divider, rightSide);
+
+      // Clicking left side → switch to left tab (keeps split)
+      leftSide.addEventListener('click', e => {
+        e.stopPropagation();
+        window.electronAPI.switchTab(leftTab.id);
+      });
+      // Clicking right side → switch to right tab (swaps sides in main.js)
+      rightSide.addEventListener('click', e => {
+        e.stopPropagation();
+        window.electronAPI.switchTab(rightTab.id);
+      });
+      // Right-click on merged tab → context menu of the active (left) tab
+      el.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        window.electronAPI.showTabCtx(leftTab.id, leftTab.url || '');
+      });
+      $tabs.appendChild(el);
+      continue;
+    }
+
+    // ── Normal tab ───────────────────────────────────────────────────────────
     const el = document.createElement('div');
     el.className = 'tab' + (t.id === _activeId ? ' active' : '');
     el.dataset.id = t.id;
@@ -36,12 +100,16 @@ function renderTabs(tabs) {
     fav.src = t.favicon || '';
     fav.alt = '';
 
+    const isAdminHub = t.url && t.url.startsWith('http://127.0.0.1:8080/ui/');
+    if (isAdminHub) el.classList.add('admin-hub');
+    const displayTitle = isAdminHub ? '⚙ Admin Hub' : (t.title || t.url || 'New Tab');
+
     const title = document.createElement('span');
     title.className = 'tab-title';
-    title.textContent = t.title || t.url || 'New Tab';
+    title.textContent = displayTitle;
 
     const close = document.createElement('span');
-    close.className = 'tab-close';
+    close.className = 'tab-close' + (isAdminHub ? ' hidden' : '');
     close.textContent = '×';
     close.title = 'Close tab';
     close.addEventListener('click', e => {
@@ -49,14 +117,57 @@ function renderTabs(tabs) {
       window.electronAPI.closeTab(t.id);
     });
 
-    el.append(fav, title, close);
-    el.addEventListener('click',       () => window.electronAPI.switchTab(t.id));
-    el.addEventListener('contextmenu', e  => {
+    const muteIcon = document.createElement('span');
+    if (t.muted) {
+      muteIcon.className = 'tab-audio-icon';
+      muteIcon.textContent = '🔇';
+      muteIcon.title = 'Son coupé';
+    } else if (t.audible) {
+      muteIcon.className = 'tab-audio-icon';
+      muteIcon.textContent = '🔊';
+      muteIcon.title = 'Son en cours';
+    } else {
+      muteIcon.className = 'tab-audio-icon hidden';
+      muteIcon.textContent = '';
+    }
+
+    el.append(fav, title, muteIcon, close);
+    el.addEventListener('click', () => window.electronAPI.switchTab(t.id));
+    if (isAdminHub) el.addEventListener('dblclick', e => { e.stopPropagation(); window.electronAPI.newTab(); });
+
+    if (!isAdminHub) {
+      el.draggable = true;
+      el.addEventListener('dragstart', e => {
+        _dragTabId = t.id;
+        e.dataTransfer.effectAllowed = 'move';
+        requestAnimationFrame(() => el.classList.add('dragging'));
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        _dragTabId = null;
+        $tabs.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
+      });
+    }
+    el.addEventListener('dragover', e => {
+      if (_dragTabId === null || _dragTabId === t.id) return;
+      if (isAdminHub) return;   // Admin Hub is pinned — not a valid drop target
       e.preventDefault();
-      // Native popup renders above all BrowserViews — pass id and current url
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      if (!isAdminHub && _dragTabId !== null && _dragTabId !== t.id) {
+        window.electronAPI.reorderTab(_dragTabId, t.id);
+      }
+      _dragTabId = null;
+    });
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault();
       window.electronAPI.showTabCtx(t.id, t.url || '');
     });
-    // ── Hover preview (only for non-active tabs) ──
     if (t.id !== _activeId) {
       el.addEventListener('mouseenter', () => _scheduleTabPreview(el, t));
       el.addEventListener('mouseleave',  _cancelTabPreview);
@@ -66,11 +177,15 @@ function renderTabs(tabs) {
 }
 
 /* ── Floating tab hover preview (BrowserWindow via main) ── */
-let _tpTimer = null;
+let _tpTimer  = null;
+let _tpActive = false;  // true quand la fenêtre preview est ouverte
+let _dragTabId = null;  // id de l'onglet en cours de drag
 
 function _scheduleTabPreview(tabEl, t) {
   _cancelTabPreview();
   _tpTimer = setTimeout(() => {
+    _tpTimer  = null;
+    _tpActive = true;
     const rect = tabEl.getBoundingClientRect();
     // Convert to screen coords
     const sx = window.screenX + rect.left;
@@ -89,7 +204,10 @@ function _scheduleTabPreview(tabEl, t) {
 function _cancelTabPreview() {
   clearTimeout(_tpTimer);
   _tpTimer = null;
-  window.electronAPI.hideTabPreview();
+  if (_tpActive) {
+    _tpActive = false;
+    window.electronAPI.hideTabPreview();
+  }
 }
 
 /* ── Address bar ────────────────────────────────────────────────── */
@@ -189,6 +307,19 @@ window.electronAPI.onNavState(({ id, canGoBack, canGoForward }) => {
   if (id === _activeId) setNavState(canGoBack, canGoForward);
 });
 
+window.electronAPI.onTabMuted(({ id, muted, audible }) => {
+  const tab = _tabs.find(t => t.id === id);
+  if (tab) {
+    tab.muted = muted;
+    if (audible !== undefined) tab.audible = audible;
+    renderTabs(_tabs);
+  }
+});
+
+window.electronAPI.onSplitChanged(() => {
+  // split state tracked via tabs-updated
+});
+
 // Main-process can ask us to open a panel (e.g. from the native three-dot menu)
 window.electronAPI.onOpenPanel(name => openPanel(name));
 window.electronAPI.onRequestBookmarkToggle(() => toggleBookmarkCurrentPage());
@@ -196,6 +327,7 @@ window.electronAPI.onZoomChanged(() => refreshZoomIndicator());
 
 /* ── Button handlers ────────────────────────────────────────────── */
 $newTab.addEventListener('click', () => window.electronAPI.newTab());
+
 $back.addEventListener('click',   () => window.electronAPI.goBack());
 $fwd.addEventListener('click',    () => window.electronAPI.goForward());
 $home.addEventListener('click',   () => window.electronAPI.goHome());
@@ -308,7 +440,7 @@ async function openPanel(name) {
   window.electronAPI.setPanelVisible(true);
   if (name === 'bookmarks')     loadBookmarksPanel();
   if (name === 'history')       loadHistoryPanel();
-  if (name === 'settings')      renderTabGroupList();
+  if (name === 'settings')      { renderTabGroupList(); loadSettingsPanel(); }
 }
 
 function closeAllPanels() {
@@ -802,6 +934,44 @@ window.electronAPI.onGroupTab(({ id: rawId, url, title, favicon }) => {
 });
 
 /* ─── Settings panel ────────────────────────────────────────────── */
+async function loadSettingsPanel() {
+  const s = await window.electronAPI.getSettings();
+  const $sel  = document.getElementById('setting-newtab');
+  const $row  = document.getElementById('setting-newtab-custom-row');
+  const $inp  = document.getElementById('setting-newtab-custom-url');
+  if (!$sel) return;
+  $sel.value = s.newtab || 'duckduckgo';
+  // Si la valeur sauvegardée n'existe plus dans le select (ex: 'blank', 'home', 'tor'),
+  // l'option ne sera pas trouvée → selectedIndex=-1 → on remet duckduckgo par défaut.
+  if ($sel.selectedIndex === -1) {
+    $sel.value = 'duckduckgo';
+    s.newtab   = 'duckduckgo';
+    window.electronAPI.saveSettings(s);
+  }
+  $row.style.display = ($sel.value === 'custom') ? '' : 'none';
+  if (s.customUrl) $inp.value = s.customUrl;
+}
+
+async function _saveNewtabSetting() {
+  const $sel = document.getElementById('setting-newtab');
+  const $inp = document.getElementById('setting-newtab-custom-url');
+  const s    = await window.electronAPI.getSettings();
+  s.newtab    = $sel.value;
+  s.customUrl = $inp?.value.trim() || '';
+  await window.electronAPI.saveSettings(s);
+}
+
+document.getElementById('setting-newtab')?.addEventListener('change', () => {
+  const val  = document.getElementById('setting-newtab').value;
+  const $row = document.getElementById('setting-newtab-custom-row');
+  $row.style.display = (val === 'custom') ? '' : 'none';
+  if (val !== 'custom') _saveNewtabSetting();
+});
+document.getElementById('setting-newtab-save')?.addEventListener('click', _saveNewtabSetting);
+document.getElementById('setting-newtab-custom-url')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') _saveNewtabSetting();
+});
+
 document.getElementById('setting-open-hub')      ?.addEventListener('click', () => { window.electronAPI.goHome(); closeAllPanels(); });
 document.getElementById('setting-open-addons')   ?.addEventListener('click', () => { window.electronAPI.navigate('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
 document.getElementById('setting-open-downloads') ?.addEventListener('click', () => window.electronAPI.openDownloadsFolder());
