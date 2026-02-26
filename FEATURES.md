@@ -37,9 +37,7 @@
 
 ---
 
-## 1. Agent Browser Automation ✅
-
-**What OpenClaw does:**  
+## 1. Agent Browser Automation ✅  
 `src/browser/` — Full Playwright automation: CDP bridge, tab control, click/type/scroll/fill, screenshot, file downloads, form interactions, navigation guard, multiple Chrome profiles. The agent drives the browser like a human.
 
 **What Intelli can do:**  
@@ -57,9 +55,7 @@ Intelli already renders pages in `BrowserView` — we can expose IPC commands fr
 
 ---
 
-## 2. Persistent Vector Memory ✅
-
-**What OpenClaw does:**  
+## 2. Persistent Vector Memory ✅  
 `src/memory/` — Full vector memory system: embeddings via OpenAI/Gemini/Voyage/Mistral, SQLite-vec storage, hybrid search (semantic + keyword), MMR deduplication, temporal decay, batch operations, query expansion, QMD scoped semantic queries. The agent remembers conversations, web pages, and facts across sessions.
 
 **What Intelli can do:**  
@@ -81,9 +77,7 @@ Store browsing history, chat summaries, bookmarked pages, and important facts in
 
 ---
 
-## 3. Canvas — Live Agent UI ✅
-
-**What OpenClaw does:**  
+## 3. Canvas — Live Agent UI ✅  
 `src/canvas-host/` + `skills/canvas/` — The agent can render a live interactive canvas: charts, tables, maps, custom HTML/JS UIs. A2UI (agent-to-UI) protocol streams DOM updates directly to the canvas frame. Users can interact with the canvas and the agent reacts.
 
 **What Intelli can do:**  
@@ -102,9 +96,7 @@ Open a dedicated `BrowserView` canvas panel alongside the main tab. The agent wr
 
 ---
 
-## 4. Sub-Agents & Parallel Tasks ✅
-
-**What OpenClaw does:**  
+## 4. Sub-Agents & Parallel Tasks ✅  
 `src/agents/openclaw-tools.subagents.*` — Spawn child agent sessions with their own context, model, and tools. Parent agent delegates subtasks in parallel, collects results, and synthesizes. Depth limits prevent runaway recursion.
 
 **What Intelli can do:**  
@@ -123,9 +115,7 @@ When a task is complex ("research 5 competitor sites and summarize each"), the o
 
 ---
 
-## 5. Skill Ecosystem & ClawHub-style Registry ✅
-
-**What OpenClaw does:**  
+## 5. Skill Ecosystem & ClawHub-style Registry ✅  
 `skills/` — 60+ bundled skills (Obsidian, Notion, Spotify, GitHub, Slack, Discord, Apple Notes, Weather, 1Password, Camera, Canvas, PDF, Video Frames, Summarize, Coding Agent, Trello…). Skills are Markdown + YAML config + optional JS/Python. Community publishes to ClawHub.
 
 **What Intelli can do:**  
@@ -153,9 +143,7 @@ The current addon system injects JS into pages. Skills extend *the agent's capab
 
 ---
 
-## 6. Session Compaction (Context Window Management) ✅
-
-**What OpenClaw does:**  
+## 6. Session Compaction (Context Window Management) ✅  
 `src/agents/compaction.ts` — When the conversation approaches the model's context limit, the agent summarizes older turns into a compact block, preserving essential facts. Retry logic handles compaction failures. Token counting per provider.
 
 **What Intelli can do:**  
@@ -173,9 +161,7 @@ Automatically summarize old chat history when approaching the model's token limi
 
 ---
 
-## 7. Voice I/O — TTS + Whisper STT ✅
-
-**What OpenClaw does:**  
+## 7. Voice I/O — TTS + Whisper STT ✅  
 `skills/openai-whisper/` + `skills/sherpa-onnx-tts/` + `src/agents/tools/tts-tool.ts` — Speech-to-text input via OpenAI Whisper (API or local). Text-to-speech output via OpenAI TTS or local Sherpa-ONNX (offline). Supports macOS/iOS/Android voices.
 
 **What Intelli can do:**  
@@ -194,9 +180,7 @@ Voice input via mic button in the chat UI (Whisper transcription) and voice outp
 
 ---
 
-## 8. Model Failover & Auth Profile Rotation ✅
-
-**What OpenClaw does:**  
+## 8. Model Failover & Auth Profile Rotation ✅  
 `src/agents/model-fallback.ts` + `src/agents/auth-profiles.ts` — Maintains a priority list of (provider, model, API-key-profile) tuples. On rate-limit or error, auto-rotates to the next profile. Cooldown tracking per profile. Supports multiple API keys per provider.
 
 **What Intelli can do:**  
@@ -215,9 +199,7 @@ Instead of failing when OpenAI rate-limits, automatically retry with Anthropic o
 
 ---
 
-## 9. Web Tools — Search, Fetch, Readability ✅
-
-**What OpenClaw does:**  
+## 9. Web Tools — Search, Fetch, Readability ✅  
 `src/agents/tools/web-tools.ts`, `web-fetch.ts`, `web-search.ts` — Agent can fetch any URL (with loopback auth guard for SSRF prevention), extract clean text via Readability, and search via DuckDuckGo/Brave/SearXNG. Cloudflare Markdown API support.
 
 **What Intelli can do:**  
@@ -236,9 +218,7 @@ Give the agent tools to *autonomously fetch and search the web*, beyond what the
 
 ---
 
-## 10. Image & Vision Upload ✅
-
-**What OpenClaw does:**  
+## 10. Image & Vision Upload ✅  
 `src/agents/tools/image-tool.ts` — Attach images to agent messages for vision analysis (GPT-4o, Claude, Gemini). Image sanitization (EXIF strip, resize) before sending. Screenshot tool returns base64.
 
 **What Intelli can do:**  
@@ -256,9 +236,7 @@ Users drag images into the chat, or click "📸 Screenshot" to attach the curren
 
 ---
 
-## 11. Cron / Scheduled Agent Tasks ✅
-
-**What OpenClaw does:**  
+## 11. Cron / Scheduled Agent Tasks ✅  
 `src/agents/tools/cron-tool.ts` + `src/cron/` — Agent creates cron jobs: "check my portfolio every hour and alert me if anything drops 5%". Jobs run in the background, results pushed to configured channel.
 
 **What Intelli can do:**  
@@ -276,9 +254,7 @@ The gateway's `scheduler.py` already exists. Extend it so the agent can *create 
 
 ---
 
-## 12. Tool Approval Flow ✅
-
-**What OpenClaw does:**  
+## 12. Tool Approval Flow ✅  
 `src/agents/bash-tools.exec-approval-request.ts` + existing Intelli `test_approvals_*.py` — Before executing risky tools (bash, file write, form submit), the gateway pauses and sends an approval request to the user. User approves/rejects; the agent proceeds accordingly.
 
 **What Intelli can do:**  
@@ -296,9 +272,7 @@ Intelli already has an approvals API skeleton. Wire it to the new agent tools so
 
 ---
 
-## 13. Coding Agent Mode ✅
-
-**What OpenClaw does:**  
+## 13. Coding Agent Mode ✅  
 `skills/coding-agent/` + bash tools + file read/write tools — Full coding loop: read files, edit with apply-patch, run bash, iterate. Supports Claude Code-style operation with file system access and terminal emulation.
 
 **What Intelli can do:**  
@@ -317,9 +291,7 @@ Intelli already has an approvals API skeleton. Wire it to the new agent tools so
 
 ---
 
-## 14. Agent Personas & Identity ✅
-
-**What OpenClaw does:**  
+## 14. Agent Personas & Identity ✅  
 `src/agents/identity.ts` + `SOUL.md` + `identity-avatar.ts` — Each agent has a name, avatar, personality, per-channel prefix, and human-like response delay. SOUL.md defines values. Multiple agent identities can be configured.
 
 **What Intelli can do:**  
@@ -340,9 +312,7 @@ Let users create multiple agent personas: "Research Assistant", "Code Helper", "
 
 ---
 
-## 15. MCP Server Integration ✅
-
-**What OpenClaw does:**  
+## 15. MCP Server Integration ✅  
 `skills/mcporter/` — Acts as a bridge to any MCP (Model Context Protocol) server without modifying core. Add MCP servers via config; they appear as tools to the agent. Decoupled from core runtime.
 
 **What Intelli can do:**  
@@ -380,9 +350,7 @@ Same pattern: the agent generates a skill (AGENTS.md fragment + Python tool stub
 
 ---
 
-## 17. Page Diff Watcher ✅
-
-**What OpenClaw does:**  
+## 17. Page Diff Watcher ✅  
 `skills/blogwatcher/` — Watches URLs for content changes (polls on cron), diffs the content, and notifies the user or agent when something changes.
 
 **What Intelli can do:**  
@@ -401,9 +369,7 @@ Native advantage: the browser is already fetching pages. Add a "Watch this page"
 
 ---
 
-## 18. PDF / Document Analysis ✅
-
-**What OpenClaw does:**  
+## 18. PDF / Document Analysis ✅  
 `skills/nano-pdf/` — Agent reads and analyzes PDF files: counts pages, extracts text, searches within a PDF, summarizes sections.
 
 **What Intelli can do:**  
@@ -502,9 +468,7 @@ Send agent results and watcher alerts to external channels. Users configure Tele
 
 ---
 
-## 23. Session History & Repair ✅
-
-**What OpenClaw does:**  
+## 23. Session History & Repair ✅  
 `src/agents/session-transcript-repair.ts` + `session-file-repair.ts` — Persists full conversation history to disk. On restart, repairs corrupted transcripts. History queryable per session.
 
 **What Intelli can do:**  
@@ -524,9 +488,7 @@ Persist chat history across gateway restarts. Users can browse past conversation
 
 ---
 
-## 24. Sandbox Code Execution ✅
-
-**What OpenClaw does:**  
+## 24. Sandbox Code Execution ✅  
 `src/agents/sandbox/` + `Dockerfile.sandbox` — Executes agent-generated code inside a Docker container with seccomp profiles, read-only mounts, and network restrictions. Prevents malicious code from escaping.
 
 **What Intelli can do:**  
@@ -547,9 +509,7 @@ Persist chat history across gateway restarts. Users can browse past conversation
 
 ---
 
-## 25. Navigation Guard & Security Layer ✅
-
-**What OpenClaw does:**  
+## 25. Navigation Guard & Security Layer ✅  
 `src/browser/navigation-guard.ts` — Blocks navigation to unsafe URLs. Prevents the agent from visiting SSRF targets, internal network addresses, or known malicious domains.
 
 **What Intelli can do:**  
@@ -606,9 +566,7 @@ Extract frames from video pages the user is watching (YouTube, Vimeo) or local v
 
 ---
 
-## 28. Usage Analytics & Observability ✅
-
-**What OpenClaw does:**  
+## 28. Usage Analytics & Observability ✅  
 `skills/model-usage/` + `src/agents/usage.ts` — Tracks token usage per model, cost estimates, usage over time. Detailed logs with provider attribution.
 
 **What Intelli can do:**  
