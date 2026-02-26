@@ -12,6 +12,8 @@ const {
   shell,
   dialog,
   nativeTheme,
+  nativeImage,
+  screen,
 } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
@@ -71,6 +73,7 @@ try {
 let tabs        = {};
 let activeTabId = null;
 let nextTabId   = 1;
+const tabPreviews = {};  // tabId → data:URL screenshot (captured when tab is grouped)
 
 // ─── User-data paths ──────────────────────────────────────────────────────────
 function userDataFile(name) {
@@ -331,6 +334,17 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
   view.webContents.on('page-favicon-updated', (_, favicons) => {
     notifyChrome('tab-favicon-updated', { id, favicon: favicons[0] || null });
   });
+  // Capture a screenshot ~800ms after the page finishes loading,
+  // but only while this tab is the active (visible) one.
+  view.webContents.on('did-finish-load', () => {
+    if (activeTabId !== id) return;
+    setTimeout(() => {
+      if (activeTabId !== id || view.webContents.isDestroyed()) return;
+      view.webContents.capturePage().then(img => {
+        if (!img.isEmpty()) tabPreviews[id] = img.resize({ width: 280, height: 175 }).toDataURL();
+      }).catch(() => {});
+    }, 800);
+  });
   // Right-click context menu on the page — adds Chrome-style Inspect option
   // (HTML menus beneath BrowserViews are inaccessible, so we must use native).
   view.webContents.on('context-menu', (_, params) => {
@@ -392,6 +406,15 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
  * Switch the visible tab.
  */
 function switchTab(id, win = mainWin) {
+  // Capture screenshot of the leaving tab so it can be shown on hover later
+  if (activeTabId && activeTabId !== id && tabs[activeTabId]) {
+    const _oldWc = tabs[activeTabId].view.webContents;
+    if (!_oldWc.isDestroyed()) {
+      _oldWc.capturePage().then(img => {
+        tabPreviews[activeTabId] = img.resize({ width: 280, height: 175 }).toDataURL();
+      }).catch(() => {});
+    }
+  }
   // Hide all views
   for (const t of Object.values(tabs)) {
     win.removeBrowserView(t.view);
@@ -496,6 +519,25 @@ function registerIPC() {
         click: () => {
           const url = tabs[tabId]?.view.webContents.getURL() || tabUrl || NEW_TAB_URL;
           createTab(url);
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Mettre en onglet inactif',
+        click: () => {
+          const tab = tabs[tabId];
+          if (!tab) return;
+          const wc  = tab.view.webContents;
+          // Capture a preview screenshot before grouping
+          wc.capturePage().then(img => {
+            tabPreviews[tabId] = img.resize({ width: 320, height: 200 }).toDataURL();
+          }).catch(() => {});
+          notifyChrome('group-tab', {
+            id:      tabId,
+            url:     wc.getURL()   || tabUrl || '',
+            title:   wc.getTitle() || '',
+            favicon: null,   // renderer has the cached favicon
+          });
         },
       },
       { type: 'separator' },
@@ -726,6 +768,119 @@ function registerIPC() {
     const tab = tabs[activeTabId];
     if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
   });
+
+  // ── Inactive-tabs popup (custom BrowserWindow — renders above BrowserViews) ───
+  let _tabsPopup = null;
+
+  function _closeTabsPopup() {
+    if (_tabsPopup && !_tabsPopup.isDestroyed()) { _tabsPopup.close(); }
+    _tabsPopup = null;
+  }
+
+  ipcMain.handle('show-inactive-tabs-popup', (_, { tabs, btnRect }) => {
+    _closeTabsPopup();
+    if (!tabs || tabs.length === 0) return;
+
+    // Attach stored screenshots
+    const tabsWithPreviews = tabs.map(g => ({
+      ...g,
+      preview: tabPreviews[Number(g.id)] || null,
+    }));
+
+    const popupW = 300;
+    const rowH   = 42;
+    const footerH = 34;
+    const popupH  = Math.min(tabs.length * rowH + footerH + 8, 490);
+
+    // Position below the button, clamp to screen
+    const display = screen.getDisplayNearestPoint({ x: btnRect.screenX, y: btnRect.screenY });
+    const { x: sx, y: sy, width: sw, height: sh } = display.bounds;
+    let px = Math.round(btnRect.screenX);
+    let py = Math.round(btnRect.screenY + btnRect.height);
+    if (px + popupW > sx + sw) px = sx + sw - popupW - 4;
+    if (py + popupH > sy + sh) py = Math.round(btnRect.screenY) - popupH;
+
+    _tabsPopup = new BrowserWindow({
+      x: px, y: py,
+      width: popupW, height: popupH,
+      frame: false, transparent: false,
+      skipTaskbar: true, alwaysOnTop: true,
+      resizable: false, movable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    _tabsPopup.loadFile(path.join(__dirname, 'src', 'inactive-tabs-popup.html'));
+    _tabsPopup.once('ready-to-show', () => {
+      if (!_tabsPopup || _tabsPopup.isDestroyed()) return;
+      _tabsPopup.show();
+      _tabsPopup.webContents.send('init-tabs', tabsWithPreviews);
+    });
+    _tabsPopup.on('blur', () => setTimeout(_closeTabsPopup, 150));
+  });
+
+  ipcMain.on('popup-restore', (_, id) => {
+    _closeTabsPopup();
+    mainWin.webContents.send('restore-inactive-tab', id);
+  });
+  ipcMain.on('popup-remove', (_, id) => {
+    mainWin.webContents.send('remove-inactive-tab', id);
+  });
+  ipcMain.on('popup-restore-all', () => {
+    _closeTabsPopup();
+    mainWin.webContents.send('restore-all-inactive-tabs');
+  });
+  ipcMain.on('popup-clear', () => {
+    _closeTabsPopup();
+    mainWin.webContents.send('clear-inactive-tabs');
+  });
+  ipcMain.on('popup-close', _closeTabsPopup);
+
+  // ── Tab hover preview ─────────────────────────────────────────────
+  // Returns the cached screenshot (data: URL) for a given tabId.
+  // Screenshots are captured on did-finish-load and on switchTab departure.
+  ipcMain.handle('get-tab-preview', (_, tabId) => tabPreviews[Number(tabId)] || null);
+
+  // ── Tab hover preview floating window ───────────────────────────
+  let _hoverWin = null;
+
+  function _closeHoverWin() {
+    if (_hoverWin && !_hoverWin.isDestroyed()) { _hoverWin.close(); }
+    _hoverWin = null;
+  }
+
+  ipcMain.handle('show-tab-preview', (_, { tabId, screenX, screenY, title, url, favicon }) => {
+    _closeHoverWin();
+    const preview = tabPreviews[Number(tabId)] || null;
+    const hasImg  = !!preview;
+    const W = 220;
+    const H = hasImg ? 192 : 126;
+
+    let domain = '';
+    try { domain = new URL(url || '').hostname.replace(/^www\./, ''); } catch {}
+
+    const disp = screen.getDisplayNearestPoint({ x: screenX, y: screenY });
+    const { x: sx, width: sw, height: sh, y: sy } = disp.bounds;
+    let px = Math.round(screenX);
+    let py = Math.round(screenY);
+    if (px + W > sx + sw) px = sx + sw - W - 4;
+    if (py + H > sy + sh) py = py - H - 4;
+
+    _hoverWin = new BrowserWindow({
+      x: px, y: py, width: W, height: H,
+      frame: false, transparent: true,
+      skipTaskbar: true, alwaysOnTop: true,
+      focusable: false, resizable: false, movable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    _hoverWin.setIgnoreMouseEvents(true);
+    _hoverWin.loadFile(path.join(__dirname, 'src', 'tab-preview-card.html'));
+    _hoverWin.once('ready-to-show', () => {
+      if (!_hoverWin || _hoverWin.isDestroyed()) return;
+      _hoverWin.showInactive();
+      _hoverWin.webContents.send('init-preview', { title, url, favicon, domain, preview });
+    });
+  });
+
+  ipcMain.on('hide-tab-preview', _closeHoverWin);
 
   // ── Downloads ─────────────────────────────────────────────────────────────
   ipcMain.handle('open-downloads-folder', () => {

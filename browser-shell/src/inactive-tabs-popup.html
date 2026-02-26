@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 12px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: none;
+}
+#list {
+  max-height: 480px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+#list::-webkit-scrollbar { width: 4px; }
+#list::-webkit-scrollbar-track { background: transparent; }
+#list::-webkit-scrollbar-thumb { background: #45475a; border-radius: 2px; }
+
+.tab-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s;
+}
+.tab-row:hover { background: #313244; }
+
+.tab-favicon {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  object-fit: contain;
+}
+.tab-favicon-placeholder {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  background: #45475a;
+  border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: #6c7086;
+}
+.tab-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.tab-title {
+  font-size: 12px;
+  color: #cdd6f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.tab-domain {
+  font-size: 10px;
+  color: #6c7086;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+  margin-top: 1px;
+}
+.tab-remove {
+  opacity: 0;
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: #6c7086;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+}
+.tab-row:hover .tab-remove { opacity: 1; }
+.tab-remove:hover { background: #f38ba8; color: #1e1e2e; }
+
+/* Preview card */
+#preview-card {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  display: none;
+  flex-direction: column;
+}
+#preview-card.visible { display: flex; }
+#preview-img {
+  width: 280px;
+  height: 176px;
+  object-fit: cover;
+  background: #313244;
+  display: block;
+  flex-shrink: 0;
+}
+#preview-no-img {
+  width: 280px;
+  height: 176px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6c7086;
+  font-size: 11px;
+  background: #313244;
+}
+
+.footer {
+  display: flex;
+  border-top: 1px solid #313244;
+  margin-top: 2px;
+}
+.footer-btn {
+  flex: 1;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  color: #a6adc8;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.1s, color 0.1s;
+}
+.footer-btn:hover { background: #313244; color: #cdd6f4; }
+.footer-btn + .footer-btn { border-left: 1px solid #313244; }
+</style>
+</head>
+<body>
+<div id="list"></div>
+<div class="footer">
+  <button class="footer-btn" id="btn-restore-all">↩ Tout restaurer</button>
+  <button class="footer-btn" id="btn-clear">🗑 Clear</button>
+</div>
+
+<!-- Floating preview card (positioned via JS) -->
+<div id="preview-card">
+  <img id="preview-img" src="" alt="" style="display:none"/>
+  <div id="preview-no-img" style="display:none">Aucun aperçu disponible</div>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+let _tabs = [];
+let _hoverTimer = null;
+
+function buildList() {
+  const $list = document.getElementById('list');
+  $list.innerHTML = '';
+  _tabs.forEach(g => {
+    const row = document.createElement('div');
+    row.className = 'tab-row';
+    row.dataset.id = g.id;
+
+    // Favicon
+    if (g.favicon) {
+      const img = document.createElement('img');
+      img.className = 'tab-favicon';
+      img.src = g.favicon;
+      img.onerror = () => { img.replaceWith(makePlaceholder()); };
+      row.appendChild(img);
+    } else {
+      row.appendChild(makePlaceholder());
+    }
+
+    // Info
+    const info = document.createElement('div');
+    info.className = 'tab-info';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'tab-title';
+    let host = '';
+    try { host = new URL(g.url || '').hostname.replace(/^www\./, ''); } catch {}
+    titleEl.textContent = (g.title && g.title !== g.url) ? g.title : (host || g.url || 'Onglet');
+    info.appendChild(titleEl);
+    if (host) {
+      const domEl = document.createElement('div');
+      domEl.className = 'tab-domain';
+      domEl.textContent = host;
+      info.appendChild(domEl);
+    }
+    row.appendChild(info);
+
+    // Remove button
+    const rm = document.createElement('button');
+    rm.className = 'tab-remove';
+    rm.textContent = '✕';
+    rm.title = 'Retirer';
+    rm.addEventListener('click', e => {
+      e.stopPropagation();
+      ipcRenderer.send('popup-remove', g.id);
+      row.remove();
+      _tabs = _tabs.filter(t => t.id !== g.id);
+      if (_tabs.length === 0) ipcRenderer.send('popup-close');
+    });
+    row.appendChild(rm);
+
+    // Click = restore
+    row.addEventListener('click', () => {
+      ipcRenderer.send('popup-restore', g.id);
+    });
+
+    // Hover preview (2 sec delay)
+    row.addEventListener('mouseenter', () => {
+      clearTimeout(_hoverTimer);
+      _hoverTimer = setTimeout(() => showPreview(g, row), 2000);
+    });
+    row.addEventListener('mouseleave', () => {
+      clearTimeout(_hoverTimer);
+      hidePreview();
+    });
+
+    $list.appendChild(row);
+  });
+}
+
+function makePlaceholder() {
+  const d = document.createElement('div');
+  d.className = 'tab-favicon-placeholder';
+  d.textContent = '⊕';
+  return d;
+}
+
+function showPreview(g, row) {
+  const card = document.getElementById('preview-card');
+  const img  = document.getElementById('preview-img');
+  const noImg = document.getElementById('preview-no-img');
+  if (g.preview) {
+    img.src = g.preview;
+    img.style.display = 'block';
+    noImg.style.display = 'none';
+  } else {
+    img.style.display = 'none';
+    noImg.style.display = 'flex';
+  }
+  // Position: to the right of the popup
+  const rect = row.getBoundingClientRect();
+  const winW = window.innerWidth;
+  const cardW = 282;
+  const left = winW + 8;  // right side of popup window
+  const top  = Math.max(4, rect.top - 4);
+  card.style.left = left + 'px';
+  card.style.top  = top  + 'px';
+  card.classList.add('visible');
+}
+
+function hidePreview() {
+  const card = document.getElementById('preview-card');
+  card.classList.remove('visible');
+}
+
+// Footer actions
+document.getElementById('btn-restore-all').addEventListener('click', () => {
+  ipcRenderer.send('popup-restore-all');
+});
+document.getElementById('btn-clear').addEventListener('click', () => {
+  ipcRenderer.send('popup-clear');
+});
+
+// Receive tab data from main
+ipcRenderer.on('init-tabs', (_, tabs) => {
+  _tabs = tabs;
+  buildList();
+});
+
+// Close on Escape or click outside
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') ipcRenderer.send('popup-close');
+});
+</script>
+</body>
+</html>

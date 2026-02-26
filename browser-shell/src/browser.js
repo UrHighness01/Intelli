@@ -20,8 +20,13 @@ const $gwDot   = document.getElementById('gw-dot');
 /* ── Tab rendering ──────────────────────────────────────────────── */
 function renderTabs(tabs) {
   _tabs = tabs;
+  // Close any floating preview card before rebuilding the tab strip
+  _cancelTabPreview();
   $tabs.innerHTML = '';
+  // Grouped tab IDs — these are hidden from the tab bar
+  const groupedIds = new Set((_groupedTabs || []).map(g => g.id));
   for (const t of tabs) {
+    if (groupedIds.has(t.id)) continue;   // ← skip grouped tabs
     const el = document.createElement('div');
     el.className = 'tab' + (t.id === _activeId ? ' active' : '');
     el.dataset.id = t.id;
@@ -51,8 +56,40 @@ function renderTabs(tabs) {
       // Native popup renders above all BrowserViews — pass id and current url
       window.electronAPI.showTabCtx(t.id, t.url || '');
     });
+    // ── Hover preview (only for non-active tabs) ──
+    if (t.id !== _activeId) {
+      el.addEventListener('mouseenter', () => _scheduleTabPreview(el, t));
+      el.addEventListener('mouseleave',  _cancelTabPreview);
+    }
     $tabs.appendChild(el);
   }
+}
+
+/* ── Floating tab hover preview (BrowserWindow via main) ── */
+let _tpTimer = null;
+
+function _scheduleTabPreview(tabEl, t) {
+  _cancelTabPreview();
+  _tpTimer = setTimeout(() => {
+    const rect = tabEl.getBoundingClientRect();
+    // Convert to screen coords
+    const sx = window.screenX + rect.left;
+    const sy = window.screenY + rect.bottom + 4;
+    window.electronAPI.showTabPreview({
+      tabId:   t.id,
+      screenX: Math.round(sx),
+      screenY: Math.round(sy),
+      title:   t.title || '',
+      url:     t.url   || '',
+      favicon: t.favicon || null,
+    });
+  }, 700);
+}
+
+function _cancelTabPreview() {
+  clearTimeout(_tpTimer);
+  _tpTimer = null;
+  window.electronAPI.hideTabPreview();
 }
 
 /* ── Address bar ────────────────────────────────────────────────── */
@@ -119,13 +156,33 @@ window.electronAPI.onTabsUpdated(incoming => {
   const faviconCache = Object.fromEntries(_tabs.map(t => [t.id, t.favicon]));
   const merged = incoming.map(t => ({ ...t, favicon: faviconCache[t.id] ?? t.favicon }));
   const active = merged.find(t => t.active);
+
+  // Record last-seen time for the tab that is LOSING focus (was active before)
+  if (_activeId && active && active.id !== _activeId) {
+    _tabLastSeen[_activeId] = Date.now();
+  }
+  // Initialize last-seen for any brand-new tab that's not active
+  for (const t of merged) {
+    if (!t.active && _tabLastSeen[t.id] === undefined) {
+      _tabLastSeen[t.id] = Date.now();
+    }
+  }
+
   if (active) {
     _activeId = active.id;
     _tgMarkActive(active.id);
   }
+
+  // Purge grouped entries whose tab was closed externally
+  const ids = new Set(merged.map(t => t.id));
+  const before = _groupedTabs.length;
+  _groupedTabs = _groupedTabs.filter(g => ids.has(g.id));
+  if (_groupedTabs.length !== before) _tgSave();
+
   renderTabs(merged);
   const activeTab = merged.find(t => t.id === _activeId);
   if (activeTab?.url) updateAddressBar(activeTab.url);
+  renderTabGroupList();
 });
 
 window.electronAPI.onNavState(({ id, canGoBack, canGoForward }) => {
@@ -238,24 +295,27 @@ if ($btnAppMenu) $btnAppMenu.addEventListener('click', () => window.electronAPI.
    so they render above all BrowserViews.
    ═══════════════════════════════════════════════════════════════ */
 
-const $backdrop = document.getElementById('panel-backdrop');
+const $backdrop  = document.getElementById('panel-backdrop');
 let _openPanel  = null;
 
-function openPanel(name) {
+async function openPanel(name) {
   closeAllPanels();
   const el = document.getElementById('panel-' + name);
   if (!el) return;
+  _openPanel = name;
   el.classList.remove('hidden');
   $backdrop.classList.remove('hidden');
-  _openPanel = name;
   window.electronAPI.setPanelVisible(true);
-  if (name === 'bookmarks') loadBookmarksPanel();
-  if (name === 'history')   loadHistoryPanel();
-  if (name === 'settings')  renderTabGroupList();
+  if (name === 'bookmarks')     loadBookmarksPanel();
+  if (name === 'history')       loadHistoryPanel();
+  if (name === 'settings')      renderTabGroupList();
 }
 
 function closeAllPanels() {
-  document.querySelectorAll('.side-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.side-panel').forEach(p => {
+    p.classList.add('hidden');
+    p.style.visibility = '';
+  });
   $backdrop.classList.add('hidden');
   _openPanel = null;
   window.electronAPI.setPanelVisible(false);
@@ -441,8 +501,10 @@ const TG_STORAGE_DELAY   = 'tg_delay_min';
 let _tgEnabled    = localStorage.getItem(TG_STORAGE_ENABLED) === 'true';
 let _tgDelayMin   = parseInt(localStorage.getItem(TG_STORAGE_DELAY) || '5', 10);
 let _tabLastSeen  = {};   // { tabId → Date.now() }
-let _groupedTabs  = JSON.parse(localStorage.getItem('tg_grouped') || '[]');
-                          // [{ id, url, title, favicon, groupedAt }]
+let _tgSelPop     = new Set();  // IDs selected for bulk actions (unused placeholder)
+let _groupedTabs  = JSON.parse(localStorage.getItem('tg_grouped') || '[]')
+                      .map(g => ({ ...g, id: Number(g.id) }));
+                          // [{ id, url, title, favicon, groupedAt }] — ids always numeric
 
 /* Persiste la liste groupée */
 function _tgSave() {
@@ -459,122 +521,203 @@ function _tgRelTime(ts) {
   return h === 1 ? 'il y a 1 h' : `il y a ${h} h`;
 }
 
-/* ─── Popover grouped-tabs (tab bar) ──────────────────────────────────────── */
-const $tgBtn       = document.getElementById('btn-tab-groups');
-const $tgBadge     = document.getElementById('tg-badge');
-const $tgPopover   = document.getElementById('tg-popover');
-const $tgPopList   = document.getElementById('tg-popover-list');
-const $tgPopBd     = document.getElementById('tg-popover-backdrop');
-let   _tgPopOpen   = false;
+/* ── Onglets inactifs — bouton tab-bar ──────────────────────────────── */
+const $tgBtn   = document.getElementById('btn-tab-groups');
+const $tgBadge = document.getElementById('tg-badge');
 
-function _tgOpenPopover() {
-  if (!$tgPopover) return;
-  _tgPopOpen = true;
-  $tgPopover.classList.remove('hidden');
-  $tgPopBd?.classList.remove('hidden');
-  $tgBtn?.classList.add('active');
-  _tgFillPopover();
-}
+$tgBtn?.addEventListener('click', async () => {
+  const rect = $tgBtn.getBoundingClientRect();
+  const btnRect = {
+    screenX: window.screenX + rect.left,
+    screenY: window.screenY + rect.bottom,
+    height:  0,
+    width:   rect.width,
+  };
+  window.electronAPI.showInactiveTabsPopup({ tabs: _groupedTabs, btnRect });
+});
 
-function _tgClosePopover() {
-  _tgPopOpen = false;
-  $tgPopover?.classList.add('hidden');
-  $tgPopBd?.classList.add('hidden');
-  $tgBtn?.classList.remove('active');
-}
+window.electronAPI.onRestoreInactiveTab(id => {
+  console.log('[tgRestore] received id:', id, 'grouped:', JSON.stringify(_groupedTabs.map(t => t.id)));
+  const g = _groupedTabs.find(t => Number(t.id) === Number(id));
+  if (g) {
+    _tgRestoreTab(g, true).catch(err => console.error('[tgRestore] error:', err));
+  } else {
+    console.warn('[tgRestore] tab not found for id:', id);
+  }
+});
 
-$tgBtn?.addEventListener('click', () => _tgPopOpen ? _tgClosePopover() : _tgOpenPopover());
-$tgPopBd?.addEventListener('click', _tgClosePopover);
-document.getElementById('tg-popover-close')?.addEventListener('click', _tgClosePopover);
+window.electronAPI.onRemoveInactiveTab(async id => {
+  const numId = Number(id);
+  await window.electronAPI.closeTab(numId);
+  _groupedTabs = _groupedTabs.filter(t => Number(t.id) !== numId);
+  _tgSave();
+  renderTabGroupList();
+});
 
-/* Construit une rangée de la liste (réutilisé dans popover & settings) */
-function _tgBuildRow(g, containerClass, onOpen) {
+window.electronAPI.onClearInactiveTabs(async () => {
+  const ids = _groupedTabs.map(t => Number(t.id));
+  for (const id of ids) await window.electronAPI.closeTab(id);
+  _groupedTabs = [];
+  _tgSave();
+  renderTabGroupList();
+});
+
+window.electronAPI.onRestoreAllInactiveTabs(() => {
+  const all = [..._groupedTabs];
+  _groupedTabs = [];
+  _tgSave();
+  // Restore each tab sequentially (open URL for each)
+  (async () => {
+    for (const g of all) {
+      const numId = Number(g.id);
+      const exists = _tabs.some(t => Number(t.id) === numId);
+      if (exists) {
+        // just un-group it, don't navigate
+      } else {
+        await window.electronAPI.newTab(g.url || '');
+      }
+    }
+    renderTabs(_tabs);
+    renderTabGroupList();
+  })();
+});
+
+
+/* ── Selection bars ──────────────────────────────────────────────────────── */
+function _tgUpdateSelBar() {}
+
+
+
+function _tgBuildRow(g) {
   const row = document.createElement('div');
-  row.className = containerClass;
+  row.className = 'tg-item';
+  row.dataset.id = g.id;
+  row.title = 'Cliquer pour rouvrir';
+
+  // Favicon
   if (g.favicon) {
     const img = document.createElement('img');
     img.src = g.favicon; img.alt = '';
     row.appendChild(img);
   } else {
     const ph = document.createElement('div');
-    ph.style.cssText = 'width:14px;height:14px;border-radius:3px;background:var(--surface2);flex-shrink:0';
+    ph.className = 'tg-item-favicon-ph';
     row.appendChild(ph);
   }
+
+  // Info — titre + URL
   const info = document.createElement('div');
   info.className = 'tg-item-info';
   const titleEl = document.createElement('div');
   titleEl.className = 'tg-item-title';
-  try { titleEl.textContent = g.title || new URL(g.url).hostname || g.url; }
-  catch { titleEl.textContent = g.title || g.url; }
+  titleEl.textContent = g.title || g.url || 'Onglet';
+  titleEl.title = g.title || '';
+  const urlEl = document.createElement('div');
+  urlEl.className = 'tg-item-url';
+  urlEl.textContent = g.url;
+  urlEl.title = g.url;
+  info.append(titleEl, urlEl);
+
+  // Time badge
   const timeEl = document.createElement('div');
   timeEl.className = 'tg-item-time';
   timeEl.textContent = _tgRelTime(g.groupedAt);
-  info.append(titleEl, timeEl);
-  const btn = document.createElement('button');
-  btn.className = 'tg-item-restore';
-  btn.textContent = 'Ouvrir';
-  btn.addEventListener('click', e => { e.stopPropagation(); onOpen(g); });
-  row.addEventListener('click', () => onOpen(g));
-  row.append(info, btn);
+
+  // Bouton × : supprimer sans restaurer
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'tg-item-close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Supprimer de la liste';
+  closeBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    _groupedTabs = _groupedTabs.filter(t => t.id !== g.id);
+    _tgSave();
+    renderTabGroupList();
+  });
+
+  row.append(info, timeEl, closeBtn);
+
+  // Clic n'importe où = restaurer l'onglet
+  row.addEventListener('click', () => _tgRestoreTab(g, true));
+
   return row;
 }
 
-function _tgRestoreTab(g) {
-  _groupedTabs = _groupedTabs.filter(t => t.id !== g.id);
+async function _tgRestoreTab(g, closeUI = true) {
+  console.log('[tgRestore] restoring tab:', g.id, g.url, '| _tabs ids:', _tabs.map(t => t.id));
+  // Remove from group list FIRST so _tgCheck doesn't re-group it
+  _groupedTabs = _groupedTabs.filter(t => Number(t.id) !== Number(g.id));
+  _tgSelPop.delete(g.id);
   _tgSave();
-  window.electronAPI.switchTab(g.id);
+
+  _tabLastSeen[g.id] = Date.now();
+
+  // IDs can become strings after JSON round-trip — always coerce to number
+  const numId = Number(g.id);
+  const tabStillExists = _tabs.some(t => Number(t.id) === numId);
+  console.log('[tgRestore] tabStillExists:', tabStillExists, 'numId:', numId);
+
+  if (tabStillExists) {
+    // BrowserView is still alive — just switch to it
+    _activeId = numId;
+    await window.electronAPI.switchTab(numId);
+    renderTabs(_tabs);
+  } else {
+    // Tab was destroyed (e.g. app restarted, old session) — recreate it
+    console.log('[tgRestore] tab not in _tabs, opening URL:', g.url);
+    _activeId = null;   // will be corrected by onTabsUpdated after newTab
+    await window.electronAPI.newTab(g.url || '');
+  }
+
+  if (closeUI) {
+    closeAllPanels();
+  }
   renderTabGroupList();
-  _tgClosePopover();
-  closeAllPanels();
 }
 
-/* Remplit le popover de la tab bar */
-function _tgFillPopover() {
-  if (!$tgPopList) return;
-  $tgPopList.innerHTML = '';
+/* Remplit le panel onglets inactifs */
+function _tgFillPanel() {
+  const $list = document.getElementById('tg-panel-list');
+  if (!$list) return;
+  $list.innerHTML = '';
   for (const g of _groupedTabs) {
-    $tgPopList.appendChild(_tgBuildRow(g, 'tg-item', _tgRestoreTab));
+    $list.appendChild(_tgBuildRow(g));
   }
 }
 
 /* Met à jour bouton tab-bar + badge + listes */
 function renderTabGroupList() {
   const count = _groupedTabs.length;
-  // ── Bouton tab-bar ──
+
+  // ── Bouton tab-bar : visible dès que l'option est active ──
   if ($tgBtn) {
-    if (_tgEnabled && count > 0) {
+    if (_tgEnabled) {
       $tgBtn.classList.remove('hidden');
     } else {
       $tgBtn.classList.add('hidden');
-      _tgClosePopover();
     }
   }
-  if ($tgBadge) $tgBadge.textContent = count;
-
-  // ── Popover (si ouvert) ──
-  if (_tgPopOpen) _tgFillPopover();
-
-  // ── Panel Settings liste ──
-  const $list  = document.getElementById('tab-group-list');
-  const $count = document.getElementById('tg-count');
-  if ($count) $count.textContent = count ? `(${count})` : '';
-  if ($list) {
-    $list.innerHTML = '';
-    for (const g of _groupedTabs) {
-      $list.appendChild(_tgBuildRow(g, 'tg-item', _tgRestoreTab));
-    }
+  // Badge : affiché seulement s'il y a des onglets groupés
+  if ($tgBadge) {
+    $tgBadge.textContent = count;
+    $tgBadge.style.display = count > 0 ? '' : 'none';
   }
+
+
 }
+
 
 /* Vérifie périodiquement les onglets inactifs */
 function _tgCheck() {
   if (!_tgEnabled) return;
   const threshold = _tgDelayMin * 60 * 1000;
   const now = Date.now();
+  let changed = false;
   for (const tab of _tabs) {
     if (tab.id === _activeId) continue;                          // onglet actif = jamais groupé
     if (_groupedTabs.some(g => g.id === tab.id)) continue;      // déjà groupé
-    const last = _tabLastSeen[tab.id] || now;
+    const last = _tabLastSeen[tab.id];
+    if (last === undefined) continue;                            // pas encore suivi
     if (now - last >= threshold) {
       _groupedTabs.push({
         id:        tab.id,
@@ -583,10 +726,14 @@ function _tgCheck() {
         favicon:   tab.favicon || null,
         groupedAt: now,
       });
+      changed = true;
     }
   }
-  _tgSave();
-  renderTabGroupList();
+  if (changed) {
+    _tgSave();
+    renderTabs(_tabs);          // retirer les onglets groupés de la barre
+    renderTabGroupList();       // les ajouter dans la liste
+  }
 }
 
 /* Marque un onglet comme actif (réinitialise son timer) */
@@ -620,19 +767,38 @@ if ($tgDelay) {
   });
 }
 
-// Lancer le check toutes les 60 secondes
-setInterval(_tgCheck, 60_000);
+// Lancer le check toutes les 10 secondes (assez précis pour un délai de 1 min)
+setInterval(_tgCheck, 10_000);
 
 // Restaurer l'état du bouton au démarrage
 renderTabGroupList();
 
-// Synchroniser avec les événements IPC existants
-window.electronAPI.onTabsUpdated(incoming => {
-  // Purger les groupés si l'onglet n'existe plus
-  const ids = new Set(incoming.map(t => t.id));
-  _groupedTabs = _groupedTabs.filter(g => ids.has(g.id));
+// Clic droit sur un onglet → "Mettre en onglet inactif"
+window.electronAPI.onGroupTab(({ id: rawId, url, title, favicon }) => {
+  if (!_tgEnabled) return;   // feature off — ignore
+  const id = Number(rawId);  // always numeric
+  if (_groupedTabs.some(g => g.id === id)) return;   // already grouped
+  // Use cached favicon from _tabs if main process sent null
+  const cachedTab = _tabs.find(t => t.id === id);
+  _groupedTabs.push({
+    id,
+    url:       url   || cachedTab?.url   || '',
+    title:     title || cachedTab?.title || url || 'Onglet',
+    favicon:   favicon ?? cachedTab?.favicon ?? null,
+    groupedAt: Date.now(),
+  });
   _tgSave();
-  renderTabGroupList();
+  renderTabs(_tabs);        // retire l'onglet de la tab bar
+  renderTabGroupList();     // l'ajoute dans la liste
+
+  // Si c'était l'onglet actif, basculer automatiquement sur un autre
+  if (id === _activeId) {
+    const next = _tabs.find(t => t.id !== id && !_groupedTabs.some(g => g.id === t.id));
+    if (next) {
+      _activeId = next.id;
+      window.electronAPI.switchTab(next.id);
+    }
+  }
 });
 
 /* ─── Settings panel ────────────────────────────────────────────── */

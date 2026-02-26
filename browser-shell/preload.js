@@ -91,7 +91,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeWindow:      ()    => ipcRenderer.invoke('win-close'),
   isMaximized:      ()    => ipcRenderer.invoke('win-is-maximized'),
   /** Calls cb(isMaximized: boolean) whenever the window is maximized/restored. */
-  onMaximizeChange: (cb)  => ipcRenderer.on('win-maximize-changed', (_, v) => cb(v)),
+  onMaximizeChange: (cb)  => ipcRenderer.on('win-maximize-changed', (_, v) => cb(v)),  /** Called when the user picks "Mettre en onglet inactif" from the tab context menu.
+   *  cb receives { id, url, title, favicon } */
+  onGroupTab: (cb) => ipcRenderer.on('group-tab', (_, d) => cb(d)),
+  /** Show a native context menu listing inactive tabs. `tabs` is the _groupedTabs array. */
+  showInactiveTabsMenu: (tabs) => ipcRenderer.invoke('show-inactive-tabs-menu', tabs),
+  /** Show the custom popup listing inactive tabs with hover previews. */
+  showInactiveTabsPopup: (payload) => ipcRenderer.invoke('show-inactive-tabs-popup', payload),
+  /** Returns the stored page screenshot (data:URL) for a tab, or null. */
+  getTabPreview: (tabId) => ipcRenderer.invoke('get-tab-preview', tabId),
+  /** Show the floating hover preview window for a tab. */
+  showTabPreview: (data) => ipcRenderer.invoke('show-tab-preview', data),
+  /** Hide/close the floating hover preview window. */
+  hideTabPreview: ()     => ipcRenderer.send('hide-tab-preview'),
+  /** Called when the user clicks a tab in the inactive-tabs native menu. cb receives the tab id. */
+  onRestoreInactiveTab: (cb)   => ipcRenderer.on('restore-inactive-tab', (_, id) => cb(id)),
+  /** Called when the user clicks ✕ Retirer next to a tab. cb receives the tab id. */
+  onRemoveInactiveTab:  (cb)   => ipcRenderer.on('remove-inactive-tab',  (_, id) => cb(id)),
+  /** Called when the user clicks 🗑 Clear. */
+  onClearInactiveTabs:   (cb) => ipcRenderer.on('clear-inactive-tabs',        (_) => cb()),
+  /** Called when the user clicks ↩ Tout restaurer. */
+  onRestoreAllInactiveTabs: (cb) => ipcRenderer.on('restore-all-inactive-tabs', (_) => cb()),
   // ── Events from main → renderer ──────────────────────────────────────────
   onTabTitleUpdated:   (cb) => ipcRenderer.on('tab-title-updated',   (_, d) => cb(d)),
   onTabFaviconUpdated: (cb) => ipcRenderer.on('tab-favicon-updated', (_, d) => cb(d)),

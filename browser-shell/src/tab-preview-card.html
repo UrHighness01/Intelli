@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 220px;
+  background: transparent;
+  overflow: hidden;
+}
+.card {
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  background: #1a1d27;
+  border: 1px solid #2d3148;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.65);
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.favicon { width: 14px; height: 14px; flex-shrink: 0; }
+.title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2e4f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.domain {
+  font-size: 10px;
+  color: #7b7f9e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thumb {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+.no-thumb {
+  width: 100%;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7b7f9e;
+  font-size: 11px;
+  background: #22263a;
+  border-radius: 4px;
+}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="header">
+    <img class="favicon" id="fav" src="" alt="" style="display:none">
+    <span class="title" id="title"></span>
+  </div>
+  <span class="domain" id="domain" style="display:none"></span>
+  <div id="img-area"></div>
+</div>
+<script>
+const { ipcRenderer } = require('electron');
+ipcRenderer.on('init-preview', (_, d) => {
+  const $fav    = document.getElementById('fav');
+  const $title  = document.getElementById('title');
+  const $domain = document.getElementById('domain');
+  const $img    = document.getElementById('img-area');
+
+  $title.textContent = d.title || 'New Tab';
+
+  if (d.favicon) { $fav.src = d.favicon; $fav.style.display = ''; }
+  if (d.domain)  { $domain.textContent = d.domain; $domain.style.display = ''; }
+
+  if (d.preview) {
+    $img.innerHTML = `<img class="thumb" src="${d.preview}" alt="">`;
+  } else {
+    $img.innerHTML = '<div class="no-thumb">Aucun aperçu disponible</div>';
+  }
+});
+</script>
+</body>
+</html>
