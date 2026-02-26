@@ -100,9 +100,14 @@ try {
 let tabs        = {};
 let tabOrder    = [];   // ordered array of tab IDs (for drag-to-reorder)
 let activeTabId = null;
-let splitTabId  = null;   // tab shown on the right in split view (null = no split)
+let splitPairs  = [];  // [{ leftId, rightId, paused }] — all active split pairs
 let nextTabId   = 1;
 const tabPreviews = {};  // tabId → data:URL screenshot (captured when tab is grouped)
+let _hoverWin     = null;  // floating preview BrowserWindow (module-scope for cleanup)
+function _closeHoverWin() {
+  if (_hoverWin && !_hoverWin.isDestroyed()) { _hoverWin.destroy(); }
+  _hoverWin = null;
+}
 
 // ─── User-data paths ──────────────────────────────────────────────────────────
 function userDataFile(name) {
@@ -329,7 +334,7 @@ function tabBounds(win) {
   const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
   const panelW = panelVisible ? PANEL_WIDTH   : 0;
   const totalW = Math.max(0, w - sideW - panelW);
-  if (splitTabId !== null) {
+  if (getActivePair() !== null) {
     return { x: 0, y: CHROME_HEIGHT, width: Math.floor(totalW / 2) - 1, height: Math.max(0, h - CHROME_HEIGHT) };
   }
   return { x: 0, y: CHROME_HEIGHT, width: totalW, height: Math.max(0, h - CHROME_HEIGHT) };
@@ -351,27 +356,71 @@ function splitRightBounds(win) {
   return { x: half + 1, y: CHROME_HEIGHT, width: totalW - half - 1, height: Math.max(0, h - CHROME_HEIGHT) };
 }
 
-/** Enter split-view: active tab on left, `id` on right. */
+// ── Split-pairs helpers ───────────────────────────────────────────────────────
+/** Returns the split pair containing tab `id`, or null. */
+function getPairOf(id) {
+  return splitPairs.find(p => p.leftId === id || p.rightId === id) || null;
+}
+
+/** Returns the currently visible (non-paused) split pair, or null. */
+function getActivePair() {
+  return splitPairs.find(p => !p.paused) || null;
+}
+
+/**
+ * Internal: show a split pair side-by-side, pausing all other pairs.
+ * Sets activeTabId to pair.leftId.
+ */
+function _showPair(pair, win = mainWin) {
+  for (const p of splitPairs) if (p !== pair) p.paused = true;
+  pair.paused = false;
+  activeTabId = pair.leftId;
+  for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
+  const lt = tabs[pair.leftId];
+  const rt = tabs[pair.rightId];
+  if (lt && rt) {
+    win.addBrowserView(lt.view);
+    win.addBrowserView(rt.view);
+    lt.view.setBounds(tabBounds(win));
+    rt.view.setBounds(splitRightBounds(win));
+  }
+  notifyChrome('split-changed', { splitTabId: pair.rightId });
+}
+
+/** Enter split-view: active tab on left, `id` on right. Creates a new pair. */
 function enterSplit(id, win = mainWin) {
   if (!tabs[id] || !tabs[activeTabId]) return;
-  splitTabId = id;
-  for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
-  win.addBrowserView(tabs[activeTabId].view);
-  win.addBrowserView(tabs[id].view);
-  tabs[activeTabId].view.setBounds(tabBounds(win));
-  tabs[id].view.setBounds(splitRightBounds(win));
-  notifyChrome('split-changed', { splitTabId: id });
+  // Pause any currently visible pair
+  const ap = getActivePair();
+  if (ap) ap.paused = true;
+  const pair = { leftId: activeTabId, rightId: id, paused: false };
+  splitPairs.push(pair);
+  _showPair(pair, win);
   notifyTabsUpdated();
 }
 
-/** Exit split-view and restore single-tab layout. */
-function exitSplit(win = mainWin) {
-  splitTabId = null;
+/** Close the split pair that contains `tabId`. */
+function exitSplitForTab(tabId, win = mainWin) {
+  const pair = getPairOf(tabId);
+  if (!pair) return;
+  splitPairs = splitPairs.filter(p => p !== pair);
   for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
-  const at = tabs[activeTabId];
-  if (at) { win.addBrowserView(at.view); at.view.setBounds(tabBounds(win)); }
-  notifyChrome('split-changed', null);
+  // If another pair exists, activate the first one; otherwise show solo
+  const next = splitPairs[0];
+  if (next) {
+    next.paused = false;
+    _showPair(next, win);
+  } else {
+    notifyChrome('split-changed', null);
+    const at = tabs[activeTabId];
+    if (at) { win.addBrowserView(at.view); at.view.setBounds(tabBounds(win)); }
+  }
   notifyTabsUpdated();
+}
+
+/** Exit split-view for the active tab's pair (backward compat). */
+function exitSplit(win = mainWin) {
+  exitSplitForTab(activeTabId, win);
 }
 
 /**
@@ -552,58 +601,51 @@ function switchTab(id, win = mainWin) {
   const tab = tabs[id];
   if (!tab) return;
 
-  if (splitTabId !== null) {
-    if (id === splitTabId) {
-      // User clicked the right (split) tab → swap sides: it becomes the active left tab
-      const oldActive = activeTabId;
-      splitTabId  = oldActive;
-      activeTabId = id;
-      const st = tabs[splitTabId];
-      if (st) {
-        win.addBrowserView(tab.view);
-        win.addBrowserView(st.view);
-        tab.view.setBounds(tabBounds(win));
-        st.view.setBounds(splitRightBounds(win));
-      } else {
-        splitTabId = null;
-        notifyChrome('split-changed', null);
-        win.addBrowserView(tab.view);
-        tab.view.setBounds(tabBounds(win));
+  const pair       = getPairOf(id);
+  const activePair = getActivePair();
+
+  if (pair) {
+    if (pair.paused) {
+      // ─── Restore paused pair ───────────────────────────────────────────────
+      // If the right side was clicked, make it the active (left) side
+      if (id === pair.rightId) {
+        const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
       }
-      const wc2 = tab.view.webContents;
-      notifyChrome('url-changed', { id, url: wc2.getURL() });
-      notifyChrome('nav-state', { id, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
-      notifyTabsUpdated();
-      return;
+      _showPair(pair, win);
+    } else if (id === pair.rightId) {
+      // ─── Swap sides in the active pair ────────────────────────────────────
+      const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
+      activeTabId = pair.leftId;
+      const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+      if (lt && rt) {
+        win.addBrowserView(lt.view); win.addBrowserView(rt.view);
+        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
+      } else { exitSplitForTab(id, win); }
     } else {
-      // Clicked the active (left) tab or any other tab → replace left side, keep split
-      activeTabId = id;
-      const st = tabs[splitTabId];
-      if (st) {
-        win.addBrowserView(tab.view);
-        win.addBrowserView(st.view);
-        tab.view.setBounds(tabBounds(win));
-        st.view.setBounds(splitRightBounds(win));
-      } else {
-        splitTabId = null;
-        notifyChrome('split-changed', null);
-        win.addBrowserView(tab.view);
-        tab.view.setBounds(tabBounds(win));
+      // ─── Clicked active left — refresh bounds ─────────────────────────────
+      const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+      if (lt && rt) {
+        win.addBrowserView(lt.view); win.addBrowserView(rt.view);
+        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
       }
     }
-  } else {
-    win.addBrowserView(tab.view);
-    tab.view.setBounds(tabBounds(win));
+    const wc2 = tabs[activeTabId]?.view.webContents;
+    if (wc2) {
+      notifyChrome('url-changed', { id: activeTabId, url: wc2.getURL() });
+      notifyChrome('nav-state', { id: activeTabId, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
+    }
+    notifyTabsUpdated();
+    return;
   }
-  activeTabId = id;
 
+  // ─── Solo (unpaired) tab clicked ─────────────────────────────────────────
+  if (activePair) activePair.paused = true;   // pause any visible split pair
+  activeTabId = id;
+  win.addBrowserView(tab.view);
+  tab.view.setBounds(tabBounds(win));
   const wc = tab.view.webContents;
   notifyChrome('url-changed', { id, url: wc.getURL() });
-  notifyChrome('nav-state', {
-    id,
-    canGoBack:    wc.canGoBack(),
-    canGoForward: wc.canGoForward(),
-  });
+  notifyChrome('nav-state', { id, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
   notifyTabsUpdated();
 }
 
@@ -616,10 +658,11 @@ function closeTab(id, win = mainWin) {
   // Admin Hub tabs are pinned — cannot be closed
   const _tabUrl = tab.view.webContents.isDestroyed() ? '' : (tab.view.webContents.getURL() || '');
   if (_tabUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
-  // Exit split if the split tab is being closed
-  if (splitTabId === id) {
-    splitTabId = null;
-    notifyChrome('split-changed', null);
+  // Remove pair if the closing tab was part of one
+  const closingPair = getPairOf(id);
+  if (closingPair) {
+    splitPairs = splitPairs.filter(p => p !== closingPair);
+    if (!getActivePair()) notifyChrome('split-changed', splitPairs.length > 0 ? {} : null);
   }
   win.removeBrowserView(tab.view);
   tab.view.webContents.destroy();
@@ -664,8 +707,13 @@ function notifyTabsUpdated() {
     active:      t.id === activeTabId,
     muted:       t.view.webContents.isAudioMuted(),
     audible:     t.view.webContents.isCurrentlyAudible(),
-    split:       t.id === splitTabId,
-    splitLeft:   splitTabId !== null && t.id === activeTabId,
+    pairId:      (() => { const p = getPairOf(t.id); return p ? splitPairs.indexOf(p) : null; })(),
+    pairLeft:    (() => { const p = getPairOf(t.id); return p ? t.id === p.leftId : false; })(),
+    pairPaused:  (() => { const p = getPairOf(t.id); return p ? p.paused : false; })(),
+    // legacy flags kept for any remaining references
+    split:       (() => { const p = getPairOf(t.id); return p ? t.id === p.rightId : false; })(),
+    splitLeft:   (() => { const p = getPairOf(t.id); return p ? t.id === p.leftId : false; })(),
+    splitPaused: (() => { const p = getPairOf(t.id); return p ? p.paused : false; })(),
     parentId:    t.parentId || null,
     parentTitle: t.parentId && tabs[t.parentId]
                    ? (tabs[t.parentId].view.webContents.getTitle() || null)
@@ -701,6 +749,22 @@ function registerIPC() {
   // Close split view (sent from the chrome renderer close-split button)
   ipcMain.on('close-split', () => exitSplit());
 
+  // Swap left/right sides of a split pair (drag-to-swap from the tab bar pill)
+  ipcMain.handle('swap-split-sides', (_, tabId) => {
+    const pair = getPairOf(tabId);
+    if (!pair || pair.paused) return;
+    const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
+    activeTabId = pair.leftId;
+    const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+    if (lt && rt) {
+      mainWin.removeBrowserView(lt.view); mainWin.removeBrowserView(rt.view);
+      mainWin.addBrowserView(lt.view);    mainWin.addBrowserView(rt.view);
+      lt.view.setBounds(tabBounds(mainWin));
+      rt.view.setBounds(splitRightBounds(mainWin));
+    }
+    notifyTabsUpdated();
+  });
+
   // Reorder tabs by drag-and-drop
   ipcMain.handle('reorder-tab', (_, dragId, targetId) => {
     // Admin Hub is always pinned at position 0 — it cannot be moved
@@ -726,7 +790,7 @@ function registerIPC() {
   ipcMain.handle('show-tab-ctx', (_, { tabId, tabUrl }) => {
     const wc         = tabs[tabId]?.view.webContents;
     const isMuted    = wc?.isAudioMuted() ?? false;
-    const isSplit    = splitTabId === tabId;
+    const isSplit    = getPairOf(tabId) !== null;
     const isActive   = activeTabId === tabId;
     const isAdminHub = (tabUrl || '').startsWith(GATEWAY_ORIGIN + '/ui/');
     const items = [
@@ -742,10 +806,10 @@ function registerIPC() {
           notifyTabsUpdated();
         },
       }] : []),
-      // Split: "Fermer" always visible when in split mode; "Fractionner" only for inactive non-admin tabs
-      ...(splitTabId !== null
-        ? [{ label: '⊟ Fermer la vue fractionnée', click: () => exitSplit() }]
-        : (!isActive && !isAdminHub
+      // Split: close the pair this tab belongs to; show "fractionner" for any unpaired inactive tab
+      ...(getPairOf(tabId)
+        ? [{ label: '⊟ Fermer la vue fractionnée', click: () => exitSplitForTab(tabId) }]
+        : (!isActive
             ? [{ label: '⊟ Vue fractionnée', click: () => enterSplit(tabId) }]
             : [])),
       { type: 'separator' },
@@ -1076,12 +1140,7 @@ function registerIPC() {
   ipcMain.handle('get-tab-preview', (_, tabId) => tabPreviews[Number(tabId)] || null);
 
   // ── Tab hover preview floating window ───────────────────────────
-  let _hoverWin = null;
-
-  function _closeHoverWin() {
-    if (_hoverWin && !_hoverWin.isDestroyed()) { _hoverWin.close(); }
-    _hoverWin = null;
-  }
+  // (_hoverWin and _closeHoverWin are module-scope — see top of file)
 
   ipcMain.handle('show-tab-preview', (_, { tabId, screenX, screenY, title, url, favicon }) => {
     _closeHoverWin();
@@ -1351,10 +1410,13 @@ function createMainWindow() {
 
   // Keep BrowserView bounds in sync when window is resized
   function syncBounds() {
-    const tab = tabs[activeTabId];
-    if (tab) tab.view.setBounds(tabBounds(mainWin));
-    if (splitTabId !== null && tabs[splitTabId]) {
-      tabs[splitTabId].view.setBounds(splitRightBounds(mainWin));
+    const ap = getActivePair();
+    if (ap) {
+      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(tabBounds(mainWin));
+      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(mainWin));
+    } else {
+      const tab = tabs[activeTabId];
+      if (tab) tab.view.setBounds(tabBounds(mainWin));
     }
     if (sidebarOpen && sidebarView) sidebarView.setBounds(sidebarBounds(mainWin));
   }
@@ -1366,7 +1428,8 @@ function createMainWindow() {
   // always fire in that case, so the BrowserView would keep its collapsed bounds.
   mainWin.on('restore',           syncBounds);
 
-  mainWin.on('closed', () => { mainWin = null; });
+  mainWin.on('closed',  () => { _closeHoverWin(); mainWin = null; });
+  mainWin.on('blur',    () => _closeHoverWin());
 
   // Forward maximize/unmaximize state to chrome renderer (updates button icon)
   // and re-sync bounds so the BrowserView fills the new window size.
@@ -1523,8 +1586,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Shut down gateway before quitting
+// Shut down gateway before quitting; also destroy any floating preview window
 app.on('before-quit', () => {
+  _closeHoverWin();
   stopGateway();
 });
 

@@ -37,27 +37,42 @@ function _makeTabSide(t) {
 
 function renderTabs(tabs) {
   _tabs = tabs;
-  // Cancel the pending preview timer (but don't close an already-open window)
-  clearTimeout(_tpTimer); _tpTimer = null;
+  // Cancel any pending/open preview on re-render
+  _cancelTabPreview();
   $tabs.innerHTML = '';
   // Grouped tab IDs — these are hidden from the tab bar
   const groupedIds = new Set((_groupedTabs || []).map(g => g.id));
 
-  // Detect split pair
-  const leftTab  = tabs.find(t => t.splitLeft);
-  const rightTab = tabs.find(t => t.split);
-  const splitIds = new Set([leftTab?.id, rightTab?.id].filter(Boolean));
+  // Build pair map from pairId fields: pairId → { left, right }
+  const pairMap = new Map();
+  for (const t of tabs) {
+    if (t.pairId !== null && t.pairId !== undefined) {
+      if (!pairMap.has(t.pairId)) pairMap.set(t.pairId, { left: null, right: null });
+      const entry = pairMap.get(t.pairId);
+      if (t.pairLeft) entry.left  = t;
+      else            entry.right = t;
+    }
+  }
+  const pairedIds = new Set();
+  for (const [, entry] of pairMap) {
+    if (entry.left)  pairedIds.add(entry.left.id);
+    if (entry.right) pairedIds.add(entry.right.id);
+  }
 
   for (const t of tabs) {
     if (groupedIds.has(t.id)) continue;
 
-    // ── Merged split tab (render once, at the leftTab position) ──────────────
-    if (splitIds.has(t.id)) {
-      if (t.id !== leftTab?.id) continue;   // skip the right tab — already rendered in merged element
-      if (!rightTab) continue;
+    // ── Merged split pill (render once, at the left tab's position) ──────────
+    if (pairedIds.has(t.id)) {
+      if (!t.pairLeft) continue;   // skip right tab — rendered inside the merged pill
+      const pEntry = pairMap.get(t.pairId);
+      if (!pEntry || !pEntry.left || !pEntry.right) continue;
+      const leftTab  = pEntry.left;
+      const rightTab = pEntry.right;
+      const isPaused = leftTab.pairPaused || false;
 
       const el = document.createElement('div');
-      el.className = 'tab split-merged active';   // always shown as "active" visually
+      el.className = 'tab split-merged' + (isPaused ? ' paused' : ' active');
       el.dataset.leftId  = leftTab.id;
       el.dataset.rightId = rightTab.id;
 
@@ -71,21 +86,51 @@ function renderTabs(tabs) {
 
       el.append(leftSide, divider, rightSide);
 
-      // Clicking left side → switch to left tab (keeps split)
+      // Left side click → restore pair (or keep active) with left as focus
       leftSide.addEventListener('click', e => {
         e.stopPropagation();
         window.electronAPI.switchTab(leftTab.id);
       });
-      // Clicking right side → switch to right tab (swaps sides in main.js)
+      // Right side click → restore pair (or swap) with right as focus
       rightSide.addEventListener('click', e => {
         e.stopPropagation();
         window.electronAPI.switchTab(rightTab.id);
       });
-      // Right-click on merged tab → context menu of the active (left) tab
+      // Right-click → context menu of the left (active) tab
       el.addEventListener('contextmenu', e => {
         e.preventDefault();
         window.electronAPI.showTabCtx(leftTab.id, leftTab.url || '');
       });
+
+      // ── Drag-to-swap: glisser un côté vers l'autre pour inverser gauche/droite ──
+      if (!isPaused) {
+        const _setupSplitDrag = (dragSide, dropSide) => {
+          dragSide.draggable = true;
+          dragSide.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('split-swap', String(leftTab.id));
+            e.dataTransfer.effectAllowed = 'move';
+            requestAnimationFrame(() => dragSide.classList.add('split-dragging'));
+          });
+          dragSide.addEventListener('dragend', () => dragSide.classList.remove('split-dragging'));
+          dropSide.addEventListener('dragover', e => {
+            if (e.dataTransfer.types.includes('split-swap')) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              dropSide.classList.add('split-drop-over');
+            }
+          });
+          dropSide.addEventListener('dragleave', () => dropSide.classList.remove('split-drop-over'));
+          dropSide.addEventListener('drop', e => {
+            dropSide.classList.remove('split-drop-over');
+            if (e.dataTransfer.getData('split-swap')) {
+              e.stopPropagation();
+              window.electronAPI.swapSplitSides(leftTab.id);
+            }
+          });
+        };
+        _setupSplitDrag(leftSide, rightSide);
+        _setupSplitDrag(rightSide, leftSide);
+      }
       $tabs.appendChild(el);
       continue;
     }
@@ -178,14 +223,12 @@ function renderTabs(tabs) {
 
 /* ── Floating tab hover preview (BrowserWindow via main) ── */
 let _tpTimer  = null;
-let _tpActive = false;  // true quand la fenêtre preview est ouverte
 let _dragTabId = null;  // id de l'onglet en cours de drag
 
 function _scheduleTabPreview(tabEl, t) {
   _cancelTabPreview();
   _tpTimer = setTimeout(() => {
-    _tpTimer  = null;
-    _tpActive = true;
+    _tpTimer = null;
     const rect = tabEl.getBoundingClientRect();
     // Convert to screen coords
     const sx = window.screenX + rect.left;
@@ -204,11 +247,14 @@ function _scheduleTabPreview(tabEl, t) {
 function _cancelTabPreview() {
   clearTimeout(_tpTimer);
   _tpTimer = null;
-  if (_tpActive) {
-    _tpActive = false;
-    window.electronAPI.hideTabPreview();
-  }
+  window.electronAPI.hideTabPreview();
 }
+
+// Always hide preview when the chrome window loses focus or is hidden
+window.addEventListener('blur',              _cancelTabPreview);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) _cancelTabPreview();
+});
 
 /* ── Address bar ────────────────────────────────────────────────── */
 function updateAddressBar(url) {

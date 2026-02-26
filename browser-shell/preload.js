@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTabs:       ()     => ipcRenderer.invoke('get-tabs'),
   duplicateTab:  (id)            => ipcRenderer.invoke('duplicate-tab', id),
   reorderTab:    (dragId, targetId) => ipcRenderer.invoke('reorder-tab', dragId, targetId),
+  /** Swap left/right sides of the active split pair (drag-to-swap in tab bar). */
+  swapSplitSides: (tabId) => ipcRenderer.invoke('swap-split-sides', tabId),
   /** Show native OS context menu for a tab (renders above BrowserViews). */
   showTabCtx:    (tabId, tabUrl) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl }),
 

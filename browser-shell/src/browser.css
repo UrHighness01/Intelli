@@ -25,8 +25,8 @@ html, body {
   color: var(--text);
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  /* allow the window to be dragged by clicking blank chrome areas */
-  -webkit-app-region: drag;
+  /* cursor explicit — pas de curseur 'grab' qui pourrait saigner dans les BrowserViews */
+  cursor: default;
   user-select: none;
 }
 
@@ -101,6 +101,21 @@ html, body {
   overflow: hidden;
   cursor: default;
 }
+/* Paused split: dimmed pill while viewing another tab solo */
+.tab.split-merged.paused {
+  opacity: 0.55;
+  border-top-color: var(--muted, #888);
+  position: relative;
+}
+.tab.split-merged.paused::after {
+  content: '⏸';
+  font-size: 9px;
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  opacity: 0.75;
+  pointer-events: none;
+}
 .split-side {
   display: flex;
   align-items: center;
@@ -115,6 +130,13 @@ html, body {
   pointer-events: auto;
 }
 .split-side:hover { background: rgba(96,165,250,.18); }
+/* Drag-to-swap visual feedback */
+.split-side.split-drop-over {
+  background: rgba(96,165,250,.40);
+  outline: 2px dashed var(--accent, #60a5fa);
+  outline-offset: -2px;
+}
+.split-side.split-dragging { opacity: 0.40; }
 .split-side .tab-title {
   overflow: hidden;
   white-space: nowrap;
@@ -141,6 +163,10 @@ html, body {
 .tab > *           { pointer-events: none; }
 /* Le bouton fermer doit rester cliquable */
 .tab > .tab-close  { pointer-events: auto; }
+/* Les côtés du split pill doivent rester cliquables (spécificité > .tab > *) */
+.tab.split-merged > .split-side { pointer-events: auto; }
+/* Paused split pill: curseur pointer pour indiquer qu'il est cliquable */
+.tab.split-merged.paused { cursor: pointer; }
 .tab.active::after {
   content: '';
   position: absolute;
@@ -202,8 +228,9 @@ html, body {
   padding: 0 10px;
   gap: 6px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
+  border-bottom: 1px solid var(--border);  /* Allows dragging the window from the empty address-bar background
+     (interactive children override with no-drag) */
+  -webkit-app-region: drag;}
 
 .nav-btn {
   display: flex; align-items: center; justify-content: center;
