@@ -119,7 +119,10 @@ window.electronAPI.onTabsUpdated(incoming => {
   const faviconCache = Object.fromEntries(_tabs.map(t => [t.id, t.favicon]));
   const merged = incoming.map(t => ({ ...t, favicon: faviconCache[t.id] ?? t.favicon }));
   const active = merged.find(t => t.active);
-  if (active) _activeId = active.id;
+  if (active) {
+    _activeId = active.id;
+    _tgMarkActive(active.id);
+  }
   renderTabs(merged);
   const activeTab = merged.find(t => t.id === _activeId);
   if (activeTab?.url) updateAddressBar(activeTab.url);
@@ -248,6 +251,7 @@ function openPanel(name) {
   window.electronAPI.setPanelVisible(true);
   if (name === 'bookmarks') loadBookmarksPanel();
   if (name === 'history')   loadHistoryPanel();
+  if (name === 'settings')  renderTabGroupList();
 }
 
 function closeAllPanels() {
@@ -426,6 +430,209 @@ $histClearBtn?.addEventListener('click', async () => {
   await window.electronAPI.historyClear();
   _historyData = [];
   renderHistoryList([]);
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   TAB GROUPS — regroupe les onglets inactifs après N minutes
+   ═══════════════════════════════════════════════════════════════ */
+const TG_STORAGE_ENABLED = 'tg_enabled';
+const TG_STORAGE_DELAY   = 'tg_delay_min';
+
+let _tgEnabled    = localStorage.getItem(TG_STORAGE_ENABLED) === 'true';
+let _tgDelayMin   = parseInt(localStorage.getItem(TG_STORAGE_DELAY) || '5', 10);
+let _tabLastSeen  = {};   // { tabId → Date.now() }
+let _groupedTabs  = JSON.parse(localStorage.getItem('tg_grouped') || '[]');
+                          // [{ id, url, title, favicon, groupedAt }]
+
+/* Persiste la liste groupée */
+function _tgSave() {
+  localStorage.setItem('tg_grouped', JSON.stringify(_groupedTabs));
+}
+
+/* Retourne une chaîne relative ex: "il y a 3 min" */
+function _tgRelTime(ts) {
+  const diff = Math.round((Date.now() - ts) / 60000);
+  if (diff < 1)  return 'maintenant';
+  if (diff === 1) return 'il y a 1 min';
+  if (diff < 60) return `il y a ${diff} min`;
+  const h = Math.floor(diff / 60);
+  return h === 1 ? 'il y a 1 h' : `il y a ${h} h`;
+}
+
+/* ─── Popover grouped-tabs (tab bar) ──────────────────────────────────────── */
+const $tgBtn       = document.getElementById('btn-tab-groups');
+const $tgBadge     = document.getElementById('tg-badge');
+const $tgPopover   = document.getElementById('tg-popover');
+const $tgPopList   = document.getElementById('tg-popover-list');
+const $tgPopBd     = document.getElementById('tg-popover-backdrop');
+let   _tgPopOpen   = false;
+
+function _tgOpenPopover() {
+  if (!$tgPopover) return;
+  _tgPopOpen = true;
+  $tgPopover.classList.remove('hidden');
+  $tgPopBd?.classList.remove('hidden');
+  $tgBtn?.classList.add('active');
+  _tgFillPopover();
+}
+
+function _tgClosePopover() {
+  _tgPopOpen = false;
+  $tgPopover?.classList.add('hidden');
+  $tgPopBd?.classList.add('hidden');
+  $tgBtn?.classList.remove('active');
+}
+
+$tgBtn?.addEventListener('click', () => _tgPopOpen ? _tgClosePopover() : _tgOpenPopover());
+$tgPopBd?.addEventListener('click', _tgClosePopover);
+document.getElementById('tg-popover-close')?.addEventListener('click', _tgClosePopover);
+
+/* Construit une rangée de la liste (réutilisé dans popover & settings) */
+function _tgBuildRow(g, containerClass, onOpen) {
+  const row = document.createElement('div');
+  row.className = containerClass;
+  if (g.favicon) {
+    const img = document.createElement('img');
+    img.src = g.favicon; img.alt = '';
+    row.appendChild(img);
+  } else {
+    const ph = document.createElement('div');
+    ph.style.cssText = 'width:14px;height:14px;border-radius:3px;background:var(--surface2);flex-shrink:0';
+    row.appendChild(ph);
+  }
+  const info = document.createElement('div');
+  info.className = 'tg-item-info';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'tg-item-title';
+  try { titleEl.textContent = g.title || new URL(g.url).hostname || g.url; }
+  catch { titleEl.textContent = g.title || g.url; }
+  const timeEl = document.createElement('div');
+  timeEl.className = 'tg-item-time';
+  timeEl.textContent = _tgRelTime(g.groupedAt);
+  info.append(titleEl, timeEl);
+  const btn = document.createElement('button');
+  btn.className = 'tg-item-restore';
+  btn.textContent = 'Ouvrir';
+  btn.addEventListener('click', e => { e.stopPropagation(); onOpen(g); });
+  row.addEventListener('click', () => onOpen(g));
+  row.append(info, btn);
+  return row;
+}
+
+function _tgRestoreTab(g) {
+  _groupedTabs = _groupedTabs.filter(t => t.id !== g.id);
+  _tgSave();
+  window.electronAPI.switchTab(g.id);
+  renderTabGroupList();
+  _tgClosePopover();
+  closeAllPanels();
+}
+
+/* Remplit le popover de la tab bar */
+function _tgFillPopover() {
+  if (!$tgPopList) return;
+  $tgPopList.innerHTML = '';
+  for (const g of _groupedTabs) {
+    $tgPopList.appendChild(_tgBuildRow(g, 'tg-item', _tgRestoreTab));
+  }
+}
+
+/* Met à jour bouton tab-bar + badge + listes */
+function renderTabGroupList() {
+  const count = _groupedTabs.length;
+  // ── Bouton tab-bar ──
+  if ($tgBtn) {
+    if (_tgEnabled && count > 0) {
+      $tgBtn.classList.remove('hidden');
+    } else {
+      $tgBtn.classList.add('hidden');
+      _tgClosePopover();
+    }
+  }
+  if ($tgBadge) $tgBadge.textContent = count;
+
+  // ── Popover (si ouvert) ──
+  if (_tgPopOpen) _tgFillPopover();
+
+  // ── Panel Settings liste ──
+  const $list  = document.getElementById('tab-group-list');
+  const $count = document.getElementById('tg-count');
+  if ($count) $count.textContent = count ? `(${count})` : '';
+  if ($list) {
+    $list.innerHTML = '';
+    for (const g of _groupedTabs) {
+      $list.appendChild(_tgBuildRow(g, 'tg-item', _tgRestoreTab));
+    }
+  }
+}
+
+/* Vérifie périodiquement les onglets inactifs */
+function _tgCheck() {
+  if (!_tgEnabled) return;
+  const threshold = _tgDelayMin * 60 * 1000;
+  const now = Date.now();
+  for (const tab of _tabs) {
+    if (tab.id === _activeId) continue;                          // onglet actif = jamais groupé
+    if (_groupedTabs.some(g => g.id === tab.id)) continue;      // déjà groupé
+    const last = _tabLastSeen[tab.id] || now;
+    if (now - last >= threshold) {
+      _groupedTabs.push({
+        id:        tab.id,
+        url:       tab.url   || '',
+        title:     tab.title || tab.url || 'Onglet',
+        favicon:   tab.favicon || null,
+        groupedAt: now,
+      });
+    }
+  }
+  _tgSave();
+  renderTabGroupList();
+}
+
+/* Marque un onglet comme actif (réinitialise son timer) */
+function _tgMarkActive(tabId) {
+  _tabLastSeen[tabId] = Date.now();
+  // retirer des groupés si l'utilisateur y navigue
+  if (_groupedTabs.some(g => g.id === tabId)) {
+    _groupedTabs = _groupedTabs.filter(g => g.id !== tabId);
+    _tgSave();
+    renderTabGroupList();
+  }
+}
+
+// Contrôles dans le panel Settings
+const $tgEnabled = document.getElementById('setting-tab-group-enabled');
+const $tgDelay   = document.getElementById('setting-tab-group-delay');
+
+if ($tgEnabled) {
+  $tgEnabled.checked = _tgEnabled;
+  $tgEnabled.addEventListener('change', () => {
+    _tgEnabled = $tgEnabled.checked;
+    localStorage.setItem(TG_STORAGE_ENABLED, _tgEnabled);
+    renderTabGroupList();   // show / hide tab-bar button immediately
+  });
+}
+if ($tgDelay) {
+  $tgDelay.value = String(_tgDelayMin);
+  $tgDelay.addEventListener('change', () => {
+    _tgDelayMin = parseInt($tgDelay.value, 10);
+    localStorage.setItem(TG_STORAGE_DELAY, _tgDelayMin);
+  });
+}
+
+// Lancer le check toutes les 60 secondes
+setInterval(_tgCheck, 60_000);
+
+// Restaurer l'état du bouton au démarrage
+renderTabGroupList();
+
+// Synchroniser avec les événements IPC existants
+window.electronAPI.onTabsUpdated(incoming => {
+  // Purger les groupés si l'onglet n'existe plus
+  const ids = new Set(incoming.map(t => t.id));
+  _groupedTabs = _groupedTabs.filter(g => ids.has(g.id));
+  _tgSave();
+  renderTabGroupList();
 });
 
 /* ─── Settings panel ────────────────────────────────────────────── */

@@ -30,6 +30,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-page.js",
       "src/**/*",
       "assets/**/*"
     ],

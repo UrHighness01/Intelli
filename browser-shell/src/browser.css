@@ -466,6 +466,163 @@ button { cursor: pointer; }
   min-height: 18px;
 }
 
+/* ── Grouped-tabs tab-bar button ──────────────────────────────────────────────── */
+#btn-tab-groups {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px 0 9px;
+  margin-right: 2px;
+  border: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  -webkit-app-region: no-drag;
+}
+#btn-tab-groups:hover  { background: var(--surface); }
+#btn-tab-groups.active { background: var(--surface); box-shadow: inset 0 -2px 0 var(--accent); }
+#btn-tab-groups.hidden { display: none; }
+
+.tg-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Grouped-tabs popover ────────────────────────────────────────────────────── */
+.tg-popover {
+  position: fixed;
+  top: var(--tab-h);
+  left: 0;
+  width: 300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: 2px 6px 20px rgba(0,0,0,0.5);
+  z-index: 9100;
+  animation: panel-slide-in 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  max-height: 400px;
+}
+.tg-popover.hidden { display: none; }
+
+.tg-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tg-popover-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.03em;
+}
+.tg-popover-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.tg-popover-list:empty::after {
+  content: 'Aucun onglet inactif.';
+  display: block;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#tg-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  top: var(--tab-h);
+  z-index: 9099;
+  background: transparent;
+}
+#tg-popover-backdrop.hidden { display: none; }
+
+/* ── Toggle switch (tab groups) ─────────────────────────────── */
+.tg-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.tg-switch input { opacity: 0; width: 0; height: 0; }
+.tg-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.tg-slider::before {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  left: 2px; top: 2px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s, background 0.2s;
+}
+.tg-switch input:checked + .tg-slider { background: var(--accent-dim); border-color: var(--accent); }
+.tg-switch input:checked + .tg-slider::before { transform: translateX(16px); background: var(--accent); }
+
+/* ── Tab group list ─────────────────────────────────────────── */
+.tg-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.tg-list:empty::after {
+  content: 'Aucun onglet inactif pour l\'instant.';
+  display: block;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.tg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+.tg-item:hover { background: var(--surface2); }
+.tg-item img   { width: 14px; height: 14px; flex-shrink: 0; object-fit: contain; }
+.tg-item-info  { flex: 1; min-width: 0; }
+.tg-item-title {
+  font-size: 12px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tg-item-time  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.tg-item-restore {
+  flex-shrink: 0; background: transparent; border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--muted); font-size: 10px;
+  padding: 2px 7px; cursor: pointer; transition: color 0.1s, border-color 0.1s;
+}
+.tg-item-restore:hover { color: var(--accent); border-color: var(--accent); }
+
 /* Check rows (clear data panel) */
 .check-row {
   display: flex;

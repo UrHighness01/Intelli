@@ -33,6 +33,17 @@ const HEALTH_POLL_MS    = 400;
 const NEW_TAB_URL       = `${GATEWAY_ORIGIN}/ui/`;
 const SETUP_URL         = `${GATEWAY_ORIGIN}/ui/setup.html`;
 
+// ─── Anti-fingerprint — must be set before app is ready ─────────────────────
+// Removes the flags that tell Google reCAPTCHA / bot-detection we are Electron.
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+app.commandLine.appendSwitch('disable-features',       'AutomationControlled,RendererCodeIntegrity');
+app.commandLine.appendSwitch('no-first-run');
+app.commandLine.appendSwitch('no-default-browser-check');
+
+// Real Chrome 122 UA string (Electron 29 = Chrome 122). The word "Electron"
+// is removed so sites cannot trivially fingerprint us.
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
 // ─── Gateway process handle ───────────────────────────────────────────────────
 let gatewayProcess  = null;
 let gatewayReady    = false;
@@ -277,9 +288,10 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
   const view = new BrowserView({
     webPreferences: {
       nodeIntegration:              false,
-      contextIsolation:             true,
-      sandbox:                      true,
+      contextIsolation:             false,   // must be false for preload-page spoofing
+      sandbox:                      false,   // preload-page.js needs access to window
       webviewTag:                   false,
+      preload:                      path.join(__dirname, 'preload-page.js'),
     },
   });
 
@@ -293,14 +305,28 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
     notifyChrome('tab-title-updated', { id, title });
   });
   view.webContents.on('did-navigate', (_, navUrl) => {
-    if (activeTabId === id) notifyChrome('url-changed', { id, url: navUrl });
+    if (activeTabId === id) {
+      notifyChrome('url-changed', { id, url: navUrl });
+      notifyChrome('nav-state', {
+        id,
+        canGoBack:    view.webContents.canGoBack(),
+        canGoForward: view.webContents.canGoForward(),
+      });
+    }
     // Record visit in history (skip internal gateway UI)
     if (!navUrl.startsWith(GATEWAY_ORIGIN)) {
       pushHistory(navUrl, view.webContents.getTitle());
     }
   });
   view.webContents.on('did-navigate-in-page', (_, navUrl) => {
-    if (activeTabId === id) notifyChrome('url-changed', { id, url: navUrl });
+    if (activeTabId === id) {
+      notifyChrome('url-changed', { id, url: navUrl });
+      notifyChrome('nav-state', {
+        id,
+        canGoBack:    view.webContents.canGoBack(),
+        canGoForward: view.webContents.canGoForward(),
+      });
+    }
   });
   view.webContents.on('page-favicon-updated', (_, favicons) => {
     notifyChrome('tab-favicon-updated', { id, favicon: favicons[0] || null });
@@ -962,6 +988,24 @@ function createMainWindow() {
 
 app.whenReady().then(async () => {
   installCSP();   // must be first — sets up webRequest before any window loads
+
+  // ── Override User-Agent on the default session ──────────────────────────
+  // Replaces "Electron/29.x.x" with a clean Chrome 122 UA so Google, Cloudflare
+  // and reCAPTCHA don't fingerprint us as automation.
+  session.defaultSession.setUserAgent(CHROME_UA);
+
+  // Strip the Sec-CH-UA hint that also reveals Electron
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const h = details.requestHeaders;
+    h['User-Agent']       = CHROME_UA;
+    h['Sec-CH-UA']        = '"Chromium";v="122", "Google Chrome";v="122", "Not-A.Brand";v="99"';
+    h['Sec-CH-UA-Mobile'] = '?0';
+    h['Sec-CH-UA-Platform'] = '"Windows"';
+    // Remove the header that exposes the Electron origin
+    delete h['X-Electron-Version'];
+    callback({ cancel: false, requestHeaders: h });
+  });
+
   setupDownloads(session.defaultSession);
   registerIPC();
 

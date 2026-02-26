@@ -15,6 +15,12 @@
 
   <!-- ── Tab bar ──────────────────────────────────────────────── -->
   <div id="tab-bar">
+    <!-- Grouped tabs button — visible only when option is enabled & count > 0 -->
+    <button id="btn-tab-groups" class="tg-tab-btn hidden" title="Onglets groupés">
+      &#8801;
+      <span id="tg-badge" class="tg-badge">0</span>
+    </button>
+
     <div id="tabs"></div>
     <div class="tab-bar-spacer"></div>
     <button id="new-tab-btn" title="New tab (Ctrl+T)">+</button>
@@ -150,6 +156,29 @@
       <span>DevTools (chrome)</span>
       <button class="btn-primary" id="setting-devtools-chrome">Open</button>
     </div>
+
+    <!-- ── Onglets groupés ──────────────────────────────────── -->
+    <div class="panel-section-label" style="margin-top:16px">Onglets groupés</div>
+    <div class="settings-row">
+      <span>Activer le regroupement</span>
+      <label class="tg-switch">
+        <input type="checkbox" id="setting-tab-group-enabled" />
+        <span class="tg-slider"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span>Regrouper après</span>
+      <select id="setting-tab-group-delay" class="panel-select">
+        <option value="1">1 minute</option>
+        <option value="5" selected>5 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 heure</option>
+        <option value="120">2 heures</option>
+      </select>
+    </div>
+    <div class="panel-section-label" style="margin-top:8px">Onglets inactifs <span id="tg-count" style="font-weight:400;color:var(--accent)"></span></div>
+    <div id="tab-group-list" class="panel-list tg-list"></div>
   </div>
 
   <!-- Clear browsing data panel -->
@@ -194,6 +223,16 @@
       <button id="devaddon-mgr-btn" class="btn-primary">Open</button>
     </div>
   </div>
+
+  <!-- Grouped tabs popover — anchored below the tab bar button -->
+  <div id="tg-popover" class="tg-popover hidden">
+    <div class="tg-popover-header">
+      <span class="tg-popover-title">Onglets groupés</span>
+      <button class="panel-close" id="tg-popover-close">&#10005;</button>
+    </div>
+    <div id="tg-popover-list" class="tg-popover-list"></div>
+  </div>
+  <div id="tg-popover-backdrop" class="hidden"></div>
 
   <!-- panel backdrop (click to dismiss) -->
   <div id="panel-backdrop" class="hidden"></div>
