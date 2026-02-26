@@ -6,38 +6,38 @@
 ---
 
 ## Table of Contents
-1. [Agent Browser Automation](#1-agent-browser-automation)
-2. [Persistent Vector Memory](#2-persistent-vector-memory)
-3. [Canvas — Live Agent UI](#3-canvas--live-agent-ui)
-4. [Sub-Agents & Parallel Tasks](#4-sub-agents--parallel-tasks)
-5. [Skill Ecosystem & ClawHub-style Registry](#5-skill-ecosystem--clawhub-style-registry)
-6. [Session Compaction (Context Window Management)](#6-session-compaction-context-window-management)
-7. [Voice I/O — TTS + Whisper STT](#7-voice-io--tts--whisper-stt)
-8. [Model Failover & Auth Profile Rotation](#8-model-failover--auth-profile-rotation)
-9. [Web Tools — Search, Fetch, Readability](#9-web-tools--search-fetch-readability)
-10. [Image & Vision Upload](#10-image--vision-upload)
-11. [Cron / Scheduled Agent Tasks](#11-cron--scheduled-agent-tasks)
-12. [Tool Approval Flow](#12-tool-approval-flow)
-13. [Coding Agent Mode](#13-coding-agent-mode)
-14. [Agent Personas & Identity](#14-agent-personas--identity)
-15. [MCP Server Integration](#15-mcp-server-integration)
+1. [Agent Browser Automation](#1-agent-browser-automation) ✅
+2. [Persistent Vector Memory](#2-persistent-vector-memory) ✅
+3. [Canvas — Live Agent UI](#3-canvas--live-agent-ui) ✅
+4. [Sub-Agents & Parallel Tasks](#4-sub-agents--parallel-tasks) ✅
+5. [Skill Ecosystem & ClawHub-style Registry](#5-skill-ecosystem--clawhub-style-registry) ✅
+6. [Session Compaction (Context Window Management)](#6-session-compaction-context-window-management) ✅
+7. [Voice I/O — TTS + Whisper STT](#7-voice-io--tts--whisper-stt) ✅
+8. [Model Failover & Auth Profile Rotation](#8-model-failover--auth-profile-rotation) ✅
+9. [Web Tools — Search, Fetch, Readability](#9-web-tools--search-fetch-readability) ✅
+10. [Image & Vision Upload](#10-image--vision-upload) ✅
+11. [Cron / Scheduled Agent Tasks](#11-cron--scheduled-agent-tasks) ✅
+12. [Tool Approval Flow](#12-tool-approval-flow) ✅
+13. [Coding Agent Mode](#13-coding-agent-mode) ✅
+14. [Agent Personas & Identity](#14-agent-personas--identity) ✅
+15. [MCP Server Integration](#15-mcp-server-integration) ✅
 16. [Skill Creator (AI Self-Extending)](#16-skill-creator-ai-self-extending)
-17. [Page Diff Watcher](#17-page-diff-watcher)
-18. [PDF / Document Analysis](#18-pdf--document-analysis)
+17. [Page Diff Watcher](#17-page-diff-watcher) ✅
+18. [PDF / Document Analysis](#18-pdf--document-analysis) ✅
 19. [Knowledge Base Connectors](#19-knowledge-base-connectors)
 20. [Secure Credential Store](#20-secure-credential-store)
 21. [Extension / Plugin System](#21-extension--plugin-system)
 22. [Notification & Webhook Push](#22-notification--webhook-push)
-23. [Session History & Repair](#23-session-history--repair)
-24. [Sandbox Code Execution](#24-sandbox-code-execution)
-25. [Navigation Guard & Security Layer](#25-navigation-guard--security-layer)
+23. [Session History & Repair](#23-session-history--repair) ✅
+24. [Sandbox Code Execution](#24-sandbox-code-execution) ✅
+25. [Navigation Guard & Security Layer](#25-navigation-guard--security-layer) ✅
 26. [A2A — Agent-to-Agent Sessions](#26-a2a--agent-to-agent-sessions)
 27. [Video Frame Analysis](#27-video-frame-analysis)
-28. [Usage Analytics & Observability](#28-usage-analytics--observability)
+28. [Usage Analytics & Observability](#28-usage-analytics--observability) ✅
 
 ---
 
-## 1. Agent Browser Automation
+## 1. Agent Browser Automation ✅
 
 **What OpenClaw does:**  
 `src/browser/` — Full Playwright automation: CDP bridge, tab control, click/type/scroll/fill, screenshot, file downloads, form interactions, navigation guard, multiple Chrome profiles. The agent drives the browser like a human.
@@ -57,7 +57,7 @@ Intelli already renders pages in `BrowserView` — we can expose IPC commands fr
 
 ---
 
-## 2. Persistent Vector Memory
+## 2. Persistent Vector Memory ✅
 
 **What OpenClaw does:**  
 `src/memory/` — Full vector memory system: embeddings via OpenAI/Gemini/Voyage/Mistral, SQLite-vec storage, hybrid search (semantic + keyword), MMR deduplication, temporal decay, batch operations, query expansion, QMD scoped semantic queries. The agent remembers conversations, web pages, and facts across sessions.
@@ -81,7 +81,7 @@ Store browsing history, chat summaries, bookmarked pages, and important facts in
 
 ---
 
-## 3. Canvas — Live Agent UI
+## 3. Canvas — Live Agent UI ✅
 
 **What OpenClaw does:**  
 `src/canvas-host/` + `skills/canvas/` — The agent can render a live interactive canvas: charts, tables, maps, custom HTML/JS UIs. A2UI (agent-to-UI) protocol streams DOM updates directly to the canvas frame. Users can interact with the canvas and the agent reacts.
@@ -102,7 +102,7 @@ Open a dedicated `BrowserView` canvas panel alongside the main tab. The agent wr
 
 ---
 
-## 4. Sub-Agents & Parallel Tasks
+## 4. Sub-Agents & Parallel Tasks ✅
 
 **What OpenClaw does:**  
 `src/agents/openclaw-tools.subagents.*` — Spawn child agent sessions with their own context, model, and tools. Parent agent delegates subtasks in parallel, collects results, and synthesizes. Depth limits prevent runaway recursion.
@@ -123,7 +123,7 @@ When a task is complex ("research 5 competitor sites and summarize each"), the o
 
 ---
 
-## 5. Skill Ecosystem & ClawHub-style Registry
+## 5. Skill Ecosystem & ClawHub-style Registry ✅
 
 **What OpenClaw does:**  
 `skills/` — 60+ bundled skills (Obsidian, Notion, Spotify, GitHub, Slack, Discord, Apple Notes, Weather, 1Password, Camera, Canvas, PDF, Video Frames, Summarize, Coding Agent, Trello…). Skills are Markdown + YAML config + optional JS/Python. Community publishes to ClawHub.
@@ -153,7 +153,7 @@ The current addon system injects JS into pages. Skills extend *the agent's capab
 
 ---
 
-## 6. Session Compaction (Context Window Management)
+## 6. Session Compaction (Context Window Management) ✅
 
 **What OpenClaw does:**  
 `src/agents/compaction.ts` — When the conversation approaches the model's context limit, the agent summarizes older turns into a compact block, preserving essential facts. Retry logic handles compaction failures. Token counting per provider.
@@ -173,7 +173,7 @@ Automatically summarize old chat history when approaching the model's token limi
 
 ---
 
-## 7. Voice I/O — TTS + Whisper STT
+## 7. Voice I/O — TTS + Whisper STT ✅
 
 **What OpenClaw does:**  
 `skills/openai-whisper/` + `skills/sherpa-onnx-tts/` + `src/agents/tools/tts-tool.ts` — Speech-to-text input via OpenAI Whisper (API or local). Text-to-speech output via OpenAI TTS or local Sherpa-ONNX (offline). Supports macOS/iOS/Android voices.
@@ -194,7 +194,7 @@ Voice input via mic button in the chat UI (Whisper transcription) and voice outp
 
 ---
 
-## 8. Model Failover & Auth Profile Rotation
+## 8. Model Failover & Auth Profile Rotation ✅
 
 **What OpenClaw does:**  
 `src/agents/model-fallback.ts` + `src/agents/auth-profiles.ts` — Maintains a priority list of (provider, model, API-key-profile) tuples. On rate-limit or error, auto-rotates to the next profile. Cooldown tracking per profile. Supports multiple API keys per provider.
@@ -215,7 +215,7 @@ Instead of failing when OpenAI rate-limits, automatically retry with Anthropic o
 
 ---
 
-## 9. Web Tools — Search, Fetch, Readability
+## 9. Web Tools — Search, Fetch, Readability ✅
 
 **What OpenClaw does:**  
 `src/agents/tools/web-tools.ts`, `web-fetch.ts`, `web-search.ts` — Agent can fetch any URL (with loopback auth guard for SSRF prevention), extract clean text via Readability, and search via DuckDuckGo/Brave/SearXNG. Cloudflare Markdown API support.
@@ -236,7 +236,7 @@ Give the agent tools to *autonomously fetch and search the web*, beyond what the
 
 ---
 
-## 10. Image & Vision Upload
+## 10. Image & Vision Upload ✅
 
 **What OpenClaw does:**  
 `src/agents/tools/image-tool.ts` — Attach images to agent messages for vision analysis (GPT-4o, Claude, Gemini). Image sanitization (EXIF strip, resize) before sending. Screenshot tool returns base64.
@@ -256,7 +256,7 @@ Users drag images into the chat, or click "📸 Screenshot" to attach the curren
 
 ---
 
-## 11. Cron / Scheduled Agent Tasks
+## 11. Cron / Scheduled Agent Tasks ✅
 
 **What OpenClaw does:**  
 `src/agents/tools/cron-tool.ts` + `src/cron/` — Agent creates cron jobs: "check my portfolio every hour and alert me if anything drops 5%". Jobs run in the background, results pushed to configured channel.
@@ -276,7 +276,7 @@ The gateway's `scheduler.py` already exists. Extend it so the agent can *create 
 
 ---
 
-## 12. Tool Approval Flow
+## 12. Tool Approval Flow ✅
 
 **What OpenClaw does:**  
 `src/agents/bash-tools.exec-approval-request.ts` + existing Intelli `test_approvals_*.py` — Before executing risky tools (bash, file write, form submit), the gateway pauses and sends an approval request to the user. User approves/rejects; the agent proceeds accordingly.
@@ -296,7 +296,7 @@ Intelli already has an approvals API skeleton. Wire it to the new agent tools so
 
 ---
 
-## 13. Coding Agent Mode
+## 13. Coding Agent Mode ✅
 
 **What OpenClaw does:**  
 `skills/coding-agent/` + bash tools + file read/write tools — Full coding loop: read files, edit with apply-patch, run bash, iterate. Supports Claude Code-style operation with file system access and terminal emulation.
@@ -317,7 +317,7 @@ Intelli already has an approvals API skeleton. Wire it to the new agent tools so
 
 ---
 
-## 14. Agent Personas & Identity
+## 14. Agent Personas & Identity ✅
 
 **What OpenClaw does:**  
 `src/agents/identity.ts` + `SOUL.md` + `identity-avatar.ts` — Each agent has a name, avatar, personality, per-channel prefix, and human-like response delay. SOUL.md defines values. Multiple agent identities can be configured.
@@ -340,7 +340,7 @@ Let users create multiple agent personas: "Research Assistant", "Code Helper", "
 
 ---
 
-## 15. MCP Server Integration
+## 15. MCP Server Integration ✅
 
 **What OpenClaw does:**  
 `skills/mcporter/` — Acts as a bridge to any MCP (Model Context Protocol) server without modifying core. Add MCP servers via config; they appear as tools to the agent. Decoupled from core runtime.
@@ -380,7 +380,7 @@ Same pattern: the agent generates a skill (AGENTS.md fragment + Python tool stub
 
 ---
 
-## 17. Page Diff Watcher
+## 17. Page Diff Watcher ✅
 
 **What OpenClaw does:**  
 `skills/blogwatcher/` — Watches URLs for content changes (polls on cron), diffs the content, and notifies the user or agent when something changes.
@@ -401,7 +401,7 @@ Native advantage: the browser is already fetching pages. Add a "Watch this page"
 
 ---
 
-## 18. PDF / Document Analysis
+## 18. PDF / Document Analysis ✅
 
 **What OpenClaw does:**  
 `skills/nano-pdf/` — Agent reads and analyzes PDF files: counts pages, extracts text, searches within a PDF, summarizes sections.
@@ -502,7 +502,7 @@ Send agent results and watcher alerts to external channels. Users configure Tele
 
 ---
 
-## 23. Session History & Repair
+## 23. Session History & Repair ✅
 
 **What OpenClaw does:**  
 `src/agents/session-transcript-repair.ts` + `session-file-repair.ts` — Persists full conversation history to disk. On restart, repairs corrupted transcripts. History queryable per session.
@@ -524,7 +524,7 @@ Persist chat history across gateway restarts. Users can browse past conversation
 
 ---
 
-## 24. Sandbox Code Execution
+## 24. Sandbox Code Execution ✅
 
 **What OpenClaw does:**  
 `src/agents/sandbox/` + `Dockerfile.sandbox` — Executes agent-generated code inside a Docker container with seccomp profiles, read-only mounts, and network restrictions. Prevents malicious code from escaping.
@@ -547,7 +547,7 @@ Persist chat history across gateway restarts. Users can browse past conversation
 
 ---
 
-## 25. Navigation Guard & Security Layer
+## 25. Navigation Guard & Security Layer ✅
 
 **What OpenClaw does:**  
 `src/browser/navigation-guard.ts` — Blocks navigation to unsafe URLs. Prevents the agent from visiting SSRF targets, internal network addresses, or known malicious domains.
@@ -606,7 +606,7 @@ Extract frames from video pages the user is watching (YouTube, Vimeo) or local v
 
 ---
 
-## 28. Usage Analytics & Observability
+## 28. Usage Analytics & Observability ✅
 
 **What OpenClaw does:**  
 `skills/model-usage/` + `src/agents/usage.ts` — Tracks token usage per model, cost estimates, usage over time. Detailed logs with provider attribution.
