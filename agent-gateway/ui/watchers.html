@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Page Watchers</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 16px;
+    }
+    header a.back { color: var(--muted); text-decoration: none; font-size: .85rem; }
+    header a.back:hover { color: var(--accent); }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+
+    main { padding: 24px 28px; display: grid; grid-template-columns: 300px 1fr; gap: 20px;
+           max-width: 1300px; margin: 0 auto; }
+
+    /* Auth ------------------------------------------------------------------ */
+    #auth-panel {
+      grid-column: 1 / -1;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 12px; color: var(--text);
+      font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600;
+    }
+    button:hover { opacity: .85; }
+    button.danger    { background: #7f2a2a; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.sm        { padding: 3px 9px; font-size: .76rem; }
+    button.full      { width: 100%; margin-top: 8px; }
+
+    input, textarea, select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; color: var(--text); font-family: inherit; font-size: .82rem;
+      outline: none; width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+
+    label.field-label { display: block; font-size: .75rem; color: var(--muted);
+                        margin-bottom: 4px; margin-top: 10px; }
+    label.field-label:first-child { margin-top: 0; }
+
+    /* Left panel ------------------------------------------------------------ */
+    #left { display: flex; flex-direction: column; gap: 14px; align-self: start; }
+
+    #create-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+    }
+    #create-card h3 { font-size: .95rem; font-weight: 600; margin-bottom: 14px; }
+
+    /* Right panel ----------------------------------------------------------- */
+    #right { display: flex; flex-direction: column; gap: 16px; }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .card-header h3 { font-size: .9rem; font-weight: 600; }
+    .badge {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 20px; padding: 2px 10px; font-size: .75rem; color: var(--muted);
+    }
+    .badge.alert-badge { background: #2a1a1a; border-color: var(--red); color: var(--red); }
+
+    /* Watcher table --------------------------------------------------------- */
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th { padding: 8px 12px; text-align: left; color: var(--muted); font-weight: 500;
+         border-bottom: 1px solid var(--border); font-size: .75rem; }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+
+    .label-col { font-weight: 500; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .url-col   { color: var(--accent); font-size: .78rem; max-width: 200px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .muted-val { color: var(--muted); font-size: .78rem; }
+    .dot       { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+    .dot.on    { background: var(--green); }
+    .dot.off   { background: var(--muted); }
+
+    .alert-count-badge {
+      background: var(--red); color: #fff; border-radius: 20px;
+      padding: 1px 7px; font-size: .72rem; font-weight: 700;
+    }
+
+    .row-actions { display: flex; gap: 5px; }
+
+    /* Toggle switch --------------------------------------------------------- */
+    .toggle-wrap { display: flex; align-items: center; }
+    .toggle-wrap input[type=checkbox] { display: none; }
+    .toggle-wrap label {
+      width: 32px; height: 18px; background: var(--border); border-radius: 100px;
+      cursor: pointer; position: relative; transition: background .2s; border: none; padding: 0;
+    }
+    .toggle-wrap label::after {
+      content: ''; position: absolute; width: 12px; height: 12px; background: #fff;
+      border-radius: 50%; top: 3px; left: 3px; transition: transform .2s;
+    }
+    .toggle-wrap input:checked + label { background: var(--green); }
+    .toggle-wrap input:checked + label::after { transform: translateX(14px); }
+
+    /* Alert feed ------------------------------------------------------------ */
+    #alert-feed { display: flex; flex-direction: column; gap: 0; }
+    .alert-item {
+      padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: .82rem;
+    }
+    .alert-item:last-child { border-bottom: none; }
+    .alert-meta { display: flex; gap: 10px; align-items: center; margin-bottom: 5px; flex-wrap: wrap; }
+    .alert-label { font-weight: 600; }
+    .alert-time  { color: var(--muted); font-size: .76rem; }
+    .alert-pct   { color: var(--yellow); font-size: .76rem; }
+    .diff-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; font-family: monospace; font-size: .74rem;
+      white-space: pre-wrap; word-break: break-all; color: var(--muted);
+      max-height: 120px; overflow-y: auto; margin-top: 5px;
+    }
+    .diff-add { color: var(--green); }
+    .diff-rem { color: var(--red); }
+
+    #empty-watchers, #empty-alerts {
+      padding: 32px; text-align: center; color: var(--muted); font-size: .85rem;
+    }
+
+    .status-bar {
+      grid-column: 1 / -1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 14px; font-size: .8rem; color: var(--muted);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .status-bar .dot { flex-shrink: 0; }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">← Dashboard</a>
+  <h1>👁️ Page Watchers</h1>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer Token</label>
+    <input id="token-input" type="password" placeholder="Paste admin token…" autocomplete="off" />
+    <button onclick="loadAll()">Load</button>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="status-bar">
+    <span class="dot off" id="status-dot"></span>
+    <span id="status-text">Enter your token and press Load.</span>
+  </div>
+
+  <!-- Left: create form -->
+  <div id="left">
+    <div class="card" id="create-card">
+      <div class="card-header"><h3>+ Add Watcher</h3></div>
+      <div style="padding:14px">
+        <label class="field-label">URL *</label>
+        <input id="f-url" type="url" placeholder="https://example.com/page" />
+
+        <label class="field-label">Label</label>
+        <input id="f-label" placeholder="My watcher" />
+
+        <label class="field-label">Poll interval (minutes)</label>
+        <input id="f-interval" type="number" value="60" min="1" max="10080" />
+
+        <label class="field-label">Alert threshold (fraction)</label>
+        <input id="f-threshold" type="number" value="0.02" min="0.001" max="1" step="0.001" />
+        <div style="color:var(--muted);font-size:.72rem;margin-top:4px">
+          0.02 = alert when ≥ 2% of content changes
+        </div>
+
+        <button class="full" onclick="createWatcher()">Create Watcher</button>
+        <div id="create-msg" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:14px">
+      <div style="font-size:.8rem;color:var(--muted);line-height:1.7">
+        <b style="color:var(--text)">How it works</b><br>
+        Watchers poll a URL on a fixed interval and compare the page text
+        to a saved baseline.<br><br>
+        <b style="color:var(--text)">Alert threshold</b><br>
+        0.02 = trigger an alert when ≥ 2% of content has changed.
+        Set lower (e.g. 0.005) for high-sensitivity monitoring.<br><br>
+        <b style="color:var(--text)">Trigger</b> forces an immediate poll
+        without waiting for the next scheduled run.
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: watchers table + alert feed -->
+  <div id="right">
+    <div class="card">
+      <div class="card-header">
+        <h3>Watchers</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge" id="watcher-count">0</span>
+          <button class="sm secondary" onclick="loadAll()">↺ Refresh</button>
+          <button class="sm danger" onclick="clearAlerts()">Clear Alerts</button>
+        </div>
+      </div>
+      <div id="watchers-wrap">
+        <div id="empty-watchers">No watchers yet. Add one using the form on the left.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Recent Alerts</h3>
+        <span class="badge alert-badge" id="alert-count">0 alerts</span>
+      </div>
+      <div id="alert-feed"><div id="empty-alerts" style="padding:24px;text-align:center;color:var(--muted)">No alerts yet.</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = '';   // same origin
+let _token = '';
+
+function tok() {
+  _token = document.getElementById('token-input').value.trim();
+  return _token;
+}
+
+function headers() {
+  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok() };
+}
+
+function setStatus(ok, msg) {
+  const dot  = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  dot.className  = 'dot ' + (ok ? 'on' : 'off');
+  text.textContent = msg;
+}
+
+// ── Load everything ─────────────────────────────────────────────────────────
+async function loadAll() {
+  try {
+    const [wrRes, alRes] = await Promise.all([
+      fetch(API + '/watchers',         { headers: headers() }),
+      fetch(API + '/watchers/alerts?limit=100', { headers: headers() }),
+    ]);
+    if (!wrRes.ok) { setStatus(false, 'Auth failed — check token.'); return; }
+    const { watchers } = await wrRes.json();
+    const alerts       = alRes.ok ? (await alRes.json()).alerts : [];
+    renderWatchers(watchers);
+    renderAlerts(alerts);
+    setStatus(true, `Loaded ${watchers.length} watcher(s), ${alerts.length} alert(s).`);
+  } catch (e) {
+    setStatus(false, 'Network error: ' + e.message);
+  }
+}
+
+// ── Render watchers table ────────────────────────────────────────────────────
+function renderWatchers(list) {
+  document.getElementById('watcher-count').textContent = list.length;
+  const wrap = document.getElementById('watchers-wrap');
+  if (!list.length) {
+    wrap.innerHTML = '<div id="empty-watchers">No watchers yet. Add one using the form on the left.</div>';
+    return;
+  }
+  let html = `
+<table>
+  <thead><tr>
+    <th>On</th><th>Label / URL</th><th>Interval</th><th>Last checked</th><th>Alerts</th><th>Actions</th>
+  </tr></thead>
+  <tbody>`;
+  for (const w of list) {
+    const lastChecked = w.last_checked
+      ? new Date(w.last_checked * 1000).toLocaleString()
+      : '—';
+    const ac = w.pending_alerts || 0;
+    html += `
+  <tr id="row-${w.id}">
+    <td>
+      <div class="toggle-wrap">
+        <input type="checkbox" id="en-${w.id}" ${w.enabled ? 'checked' : ''}
+               onchange="toggleEnabled('${w.id}', this.checked)">
+        <label for="en-${w.id}"></label>
+      </div>
+    </td>
+    <td>
+      <div class="label-col" title="${esc(w.label || w.url)}">${esc(w.label || '(no label)')}</div>
+      <div class="url-col"><a href="${esc(w.url)}" target="_blank" style="color:var(--accent)">${esc(w.url)}</a></div>
+    </td>
+    <td><span class="muted-val">${w.interval_minutes} min</span></td>
+    <td><span class="muted-val">${lastChecked}</span></td>
+    <td>${ac > 0 ? `<span class="alert-count-badge">${ac}</span>` : '<span class="muted-val">—</span>'}</td>
+    <td>
+      <div class="row-actions">
+        <button class="sm secondary" onclick="triggerWatcher('${w.id}')">⚡ Trigger</button>
+        <button class="sm danger"    onclick="deleteWatcher('${w.id}')">Delete</button>
+      </div>
+    </td>
+  </tr>`;
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+// ── Render alert feed ────────────────────────────────────────────────────────
+function renderAlerts(alerts) {
+  document.getElementById('alert-count').textContent = alerts.length + ' alert' + (alerts.length === 1 ? '' : 's');
+  const feed = document.getElementById('alert-feed');
+  if (!alerts.length) {
+    feed.innerHTML = '<div id="empty-alerts" style="padding:24px;text-align:center;color:var(--muted)">No alerts yet.</div>';
+    return;
+  }
+  // Sort newest first
+  alerts.sort((a, b) => b.ts - a.ts);
+  feed.innerHTML = alerts.map(a => {
+    const pct  = ((1 - (a.similarity ?? 1)) * 100).toFixed(1);
+    const time = new Date(a.ts * 1000).toLocaleString();
+    const diff = esc(a.diff || '').split('\n').map(line => {
+      if (line.startsWith('+') && !line.startsWith('+++'))
+        return `<span class="diff-add">${line}</span>`;
+      if (line.startsWith('-') && !line.startsWith('---'))
+        return `<span class="diff-rem">${line}</span>`;
+      return line;
+    }).join('\n');
+    return `
+<div class="alert-item">
+  <div class="alert-meta">
+    <span class="alert-label">${esc(a.label || a.wid)}</span>
+    <span class="alert-pct">~${pct}% changed</span>
+    <span class="alert-time">${time}</span>
+  </div>
+  ${diff ? `<div class="diff-box">${diff}</div>` : ''}
+</div>`;
+  }).join('');
+}
+
+// ── Create watcher ───────────────────────────────────────────────────────────
+async function createWatcher() {
+  const url       = document.getElementById('f-url').value.trim();
+  const label     = document.getElementById('f-label').value.trim();
+  const interval  = parseInt(document.getElementById('f-interval').value, 10) || 60;
+  const threshold = parseFloat(document.getElementById('f-threshold').value) || 0.02;
+  const msg       = document.getElementById('create-msg');
+
+  if (!url) { msg.textContent = 'URL is required.'; return; }
+  msg.textContent = 'Creating…';
+  try {
+    const r = await fetch(API + '/watchers', {
+      method:  'POST',
+      headers: headers(),
+      body:    JSON.stringify({ url, label, interval_minutes: interval, notify_threshold: threshold }),
+    });
+    if (!r.ok) { msg.textContent = 'Error: ' + (await r.text()); return; }
+    msg.textContent = 'Created!';
+    document.getElementById('f-url').value = '';
+    document.getElementById('f-label').value = '';
+    await loadAll();
+  } catch (e) { msg.textContent = 'Network error: ' + e.message; }
+}
+
+// ── Toggle enabled ───────────────────────────────────────────────────────────
+async function toggleEnabled(wid, enabled) {
+  try {
+    await fetch(API + '/watchers/' + wid, {
+      method:  'PUT',
+      headers: headers(),
+      body:    JSON.stringify({ enabled }),
+    });
+    setStatus(true, `Watcher ${wid} ${enabled ? 'enabled' : 'disabled'}.`);
+  } catch (e) { setStatus(false, 'Toggle failed: ' + e.message); }
+}
+
+// ── Trigger watcher ──────────────────────────────────────────────────────────
+async function triggerWatcher(wid) {
+  setStatus(true, 'Triggering poll…');
+  try {
+    const r = await fetch(API + '/watchers/' + wid + '/trigger', { method: 'POST', headers: headers() });
+    setStatus(r.ok, r.ok ? 'Poll triggered for ' + wid + '.' : 'Error: ' + await r.text());
+    if (r.ok) setTimeout(loadAll, 2000);
+  } catch (e) { setStatus(false, 'Error: ' + e.message); }
+}
+
+// ── Delete watcher ───────────────────────────────────────────────────────────
+async function deleteWatcher(wid) {
+  if (!confirm('Delete this watcher and all its alerts?')) return;
+  try {
+    const r = await fetch(API + '/watchers/' + wid, { method: 'DELETE', headers: headers() });
+    if (r.ok || r.status === 204) { setStatus(true, 'Deleted.'); await loadAll(); }
+    else setStatus(false, 'Delete failed.');
+  } catch (e) { setStatus(false, 'Error: ' + e.message); }
+}
+
+// ── Clear all alerts ─────────────────────────────────────────────────────────
+async function clearAlerts() {
+  if (!confirm('Clear all pending alerts?')) return;
+  // Load watcher IDs then clear each
+  try {
+    const r = await fetch(API + '/watchers', { headers: headers() });
+    const { watchers } = await r.json();
+    await Promise.all(watchers.map(w =>
+      fetch(API + '/watchers/' + w.id + '/alerts?clear=true', { headers: headers() })
+    ));
+    await loadAll();
+  } catch (e) { setStatus(false, 'Error: ' + e.message); }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Auto-load token from sessionStorage ──────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('intelli_token');
+  if (saved) {
+    document.getElementById('token-input').value = saved;
+    loadAll();
+  }
+});
+document.getElementById && document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('token-input').addEventListener('change', () => {
+    sessionStorage.setItem('intelli_token', document.getElementById('token-input').value.trim());
+  });
+});
+</script>
+</body>
+</html>

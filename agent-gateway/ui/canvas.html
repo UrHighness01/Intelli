@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli · Canvas</title>
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --surface2:#21253a;
+      --border:  #2d3145;
+      --accent:  #6c63ff;
+      --accent2: #a78bfa;
+      --green:   #3ddc84;
+      --red:     #ff6b6b;
+      --text:    #e2e4f0;
+      --muted:   #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      display: flex; flex-direction: column; height: 100vh;
+    }
+
+    /* ── Toolbar ─────────────────────────────────────────────────── */
+    #toolbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 5px 12px;
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0; height: 36px;
+    }
+    .logo { font-size: .95rem; font-weight: 800; color: var(--accent); letter-spacing: -.02em; }
+    .logo span { color: var(--accent2); }
+    #canvas-title {
+      font-size: .78rem; font-weight: 600; color: var(--muted); flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tb-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); border-radius: 5px; padding: 3px 9px;
+      font-size: .72rem; cursor: pointer; white-space: nowrap;
+    }
+    .tb-btn:hover { color: var(--text); border-color: var(--accent); }
+    #status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+      transition: background .3s;
+    }
+    #status-dot.live  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #status-dot.error { background: var(--red); }
+
+    /* ── Canvas iframe ───────────────────────────────────────────── */
+    #canvas-frame {
+      flex: 1; width: 100%; border: none;
+      background: white;
+    }
+
+    /* ── History drawer (slide-in from right) ────────────────────── */
+    #history-drawer {
+      position: fixed; top: 36px; right: 0; bottom: 0;
+      width: 280px;
+      background: var(--surface); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      transform: translateX(100%);
+      transition: transform .2s ease;
+      z-index: 10;
+    }
+    #history-drawer.open { transform: translateX(0); }
+    .drawer-title {
+      padding: 10px 14px; font-size: .75rem; font-weight: 700;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    #history-list {
+      flex: 1; overflow-y: auto; padding: 6px 0;
+    }
+    .hist-item {
+      padding: 6px 14px; cursor: pointer; font-size: .75rem;
+      color: var(--muted); border-left: 2px solid transparent;
+    }
+    .hist-item:hover { color: var(--text); border-color: var(--accent); background: var(--surface2); }
+    .hist-item .hi-title { color: var(--text); font-weight: 600; margin-bottom: 2px; }
+    .hist-item .hi-time  { font-size: .68rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <div id="toolbar">
+    <span class="logo">In<span>te</span>lli</span>
+    <div id="status-dot" title="Waiting for canvas content…"></div>
+    <div id="canvas-title">Canvas — waiting for agent…</div>
+    <button class="tb-btn" onclick="toggleHistory()">📋 History</button>
+    <button class="tb-btn" onclick="clearCanvas()">🗑 Clear</button>
+    <button class="tb-btn" onclick="exportCanvas()">💾 Export</button>
+  </div>
+
+  <iframe id="canvas-frame" sandbox="allow-scripts allow-same-origin allow-forms"
+          srcdoc=""></iframe>
+
+  <div id="history-drawer">
+    <div class="drawer-title">Canvas History</div>
+    <div id="history-list"></div>
+  </div>
+
+  <script>
+    const GW    = 'http://127.0.0.1:8080';
+    const frame = document.getElementById('canvas-frame');
+    const dot   = document.getElementById('status-dot');
+    const title = document.getElementById('canvas-title');
+    const token = localStorage.getItem('gw_token') || '';
+
+    // ── History ───────────────────────────────────────────────────
+    const _history = []; // [{html, title, ts}]
+    let _drawerOpen = false;
+
+    function pushHistory(html, t) {
+      _history.unshift({ html, title: t || 'Canvas', ts: Date.now() });
+      if (_history.length > 50) _history.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const list = document.getElementById('history-list');
+      list.innerHTML = _history.map((item, i) => `
+        <div class="hist-item" onclick="loadHistory(${i})">
+          <div class="hi-title">${escHtml(item.title || 'Canvas')}</div>
+          <div class="hi-time">${new Date(item.ts).toLocaleTimeString()}</div>
+        </div>`).join('');
+    }
+
+    function loadHistory(i) {
+      const item = _history[i];
+      if (!item) return;
+      frame.srcdoc = item.html;
+      title.textContent = item.title || 'Canvas';
+    }
+
+    function toggleHistory() {
+      _drawerOpen = !_drawerOpen;
+      document.getElementById('history-drawer').classList.toggle('open', _drawerOpen);
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── Canvas actions ────────────────────────────────────────────
+    function clearCanvas() {
+      fetch(`${GW}/canvas/clear`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).catch(() => {});
+    }
+
+    function exportCanvas() {
+      const html = frame.srcdoc || frame.contentDocument?.documentElement?.outerHTML || '';
+      if (!html) return;
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'canvas-export.html';
+      a.click();
+    }
+
+    // ── SSE connection ────────────────────────────────────────────
+    let _es = null;
+    let _retryDelay = 2000;
+
+    function connect() {
+      if (_es) { _es.close(); _es = null; }
+
+      const url = token
+        ? `${GW}/canvas/stream?token=${encodeURIComponent(token)}`
+        : `${GW}/canvas/stream`;
+
+      _es = new EventSource(url);
+
+      _es.onopen = () => {
+        dot.className = 'live';
+        dot.title = 'Connected — waiting for canvas updates';
+        _retryDelay = 2000;
+      };
+
+      _es.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev.type === 'render') {
+            frame.srcdoc = ev.html || '';
+            const t = ev.title || ('Canvas ' + new Date(ev.ts).toLocaleTimeString());
+            title.textContent = t;
+            pushHistory(ev.html, t);
+          } else if (ev.type === 'clear') {
+            frame.srcdoc = '';
+            title.textContent = 'Canvas — cleared';
+          } else if (ev.type === 'ping') {
+            // keepalive — no action
+          }
+        } catch (_) {}
+      };
+
+      _es.onerror = () => {
+        dot.className = 'error';
+        dot.title = `Reconnecting in ${_retryDelay / 1000}s…`;
+        _es.close();
+        _es = null;
+        setTimeout(connect, _retryDelay);
+        _retryDelay = Math.min(_retryDelay * 1.5, 30_000);
+      };
+    }
+
+    // Also load the current canvas snapshot on first load
+    fetch(`${GW}/canvas/snapshot`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.html) {
+          frame.srcdoc = d.html;
+          title.textContent = d.title || 'Canvas';
+          if (d.html) pushHistory(d.html, d.title);
+        }
+      })
+      .catch(() => {});
+
+    connect();
+  </script>
+</body>
+</html>

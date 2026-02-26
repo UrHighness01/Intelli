@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intelli — Session History</title>
+<style>
+  :root {
+    --surface:  #1a1d27;
+    --surface2: #21253a;
+    --border:   #2d3145;
+    --accent:   #6e9ef5;
+    --green:    #3ddc84;
+    --red:      #ff6b6b;
+    --yellow:   #ffd166;
+    --text:     #e2e4f0;
+    --muted:    #7b7f9e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--surface);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ───────────────────────────────────────────────────── */
+  #header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  #header h1 { font-size: 1rem; font-weight: 600; flex: 1; }
+  #stat-count { font-size: .72rem; color: var(--muted); }
+  .hdr-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); padding: 4px 10px; cursor: pointer; font-size: .8rem;
+    text-decoration: none; display: inline-block;
+  }
+  .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Search bar ───────────────────────────────────────────────── */
+  #search-bar {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 14px;
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #search-bar input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: .85rem;
+    outline: none;
+  }
+  #search-bar input:focus { border-color: var(--accent); }
+  #search-bar button {
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: .83rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #search-bar button:hover { opacity: .88; }
+
+  /* ── Main layout: list + detail ───────────────────────────────── */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Session list (left) ──────────────────────────────────────── */
+  #session-list {
+    width: 340px;
+    min-width: 240px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .session-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background .12s;
+  }
+  .session-item:hover { background: var(--surface2); }
+  .session-item.selected { background: var(--surface2); border-left: 3px solid var(--accent); padding-left: 11px; }
+  .session-date {
+    font-size: .68rem;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .session-preview {
+    font-size: .82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session-count {
+    font-size: .68rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  #empty-list {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+
+  /* ── Session detail (right) ───────────────────────────────────── */
+  #detail-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #detail-header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #detail-header h2 { font-size: .9rem; font-weight: 600; flex: 1; color: var(--muted); }
+  .action-btn {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: .78rem;
+    cursor: pointer;
+    background: none;
+    color: var(--muted);
+  }
+  .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .action-btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .action-btn.primary {
+    background: var(--accent);
+    color: #0d1117;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .action-btn.primary:hover { opacity: .88; }
+
+  #detail-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #detail-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  .dmsg {
+    max-width: 78%;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: .85rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .dmsg.user {
+    align-self: flex-end;
+    background: #2a2d40;
+    border-bottom-right-radius: 2px;
+  }
+  .dmsg.assistant {
+    align-self: flex-start;
+    background: #1e2136;
+    border-bottom-left-radius: 2px;
+  }
+  .dmsg-meta { font-size: .68rem; color: var(--muted); margin-bottom: 3px; }
+
+  /* ── Status bar ───────────────────────────────────────────────── */
+  #status-bar {
+    padding: 5px 14px;
+    font-size: .72rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <h1>📋 Session History</h1>
+  <span id="stat-count">— sessions</span>
+  <button class="hdr-btn" onclick="loadSessions()">↻ Refresh</button>
+  <a class="hdr-btn" href="chat.html">← Back to Chat</a>
+</div>
+
+<!-- Search -->
+<div id="search-bar">
+  <input id="search-input" placeholder="Search sessions…" oninput="debounceSearch()"
+         onkeydown="if(event.key==='Enter') doSearch()" />
+  <button onclick="doSearch()">Search</button>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <!-- Session list -->
+  <div id="session-list">
+    <div id="empty-list" style="display:none">No sessions found.</div>
+  </div>
+
+  <!-- Detail pane -->
+  <div id="detail-pane">
+    <div id="detail-header" style="display:none">
+      <h2 id="detail-title">Session</h2>
+      <button class="action-btn primary" id="btn-resume" onclick="resumeSession()">▶ Resume</button>
+      <button class="action-btn danger"  id="btn-delete" onclick="deleteSession()">✕ Delete</button>
+    </div>
+    <div id="detail-messages"></div>
+    <div id="detail-placeholder">← Select a session to preview it</div>
+  </div>
+</div>
+
+<!-- Status -->
+<div id="status-bar" id="status-bar">Ready.</div>
+
+<script>
+const GW = '';
+const TOKEN = (() => {
+  try { return localStorage.getItem('gw_token') || ''; } catch { return ''; }
+})();
+
+function authH() {
+  return { 'Content-Type': 'application/json',
+           'Authorization': `Bearer ${TOKEN}` };
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let _sessions = [];
+let _selectedId = null;
+let _searchTimer = null;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function setStatus(msg, ok = true) {
+  const el = document.getElementById('status-bar');
+  if (el) { el.textContent = msg; el.style.color = ok ? 'var(--muted)' : 'var(--red)'; }
+}
+
+function fmtDate(ts) {
+  if (!ts) return '?';
+  const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+  return isNaN(d) ? '?' : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// Load sessions
+// ---------------------------------------------------------------------------
+async function loadSessions(q = '') {
+  try {
+    const url = q ? `${GW}/sessions?limit=100&q=${encodeURIComponent(q)}`
+                  : `${GW}/sessions?limit=100`;
+    const r = await fetch(url, { headers: authH() });
+    if (!r.ok) throw new Error(await r.text());
+    _sessions = await r.json();
+    renderList(_sessions);
+    document.getElementById('stat-count').textContent =
+      `${_sessions.length} session${_sessions.length !== 1 ? 's' : ''}`;
+    setStatus(`Loaded ${_sessions.length} session(s).`);
+  } catch (e) {
+    setStatus(`Load failed: ${e.message}`, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render list
+// ---------------------------------------------------------------------------
+function renderList(list) {
+  const container = document.getElementById('session-list');
+  const empty     = document.getElementById('empty-list');
+  // Remove old items (keep empty-list div)
+  [...container.children].forEach(c => { if (c.id !== 'empty-list') c.remove(); });
+
+  if (!list.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  for (const s of list) {
+    const div = document.createElement('div');
+    div.className = 'session-item' + (s.id === _selectedId ? ' selected' : '');
+    div.dataset.id = s.id;
+    div.innerHTML = `
+      <div class="session-date">${fmtDate(s.last_ts || s.created_at)}</div>
+      <div class="session-preview">${esc(s.preview || '(no preview)')}</div>
+      <div class="session-count">${s.msg_count || '?'} messages &nbsp;·&nbsp; ${esc(s.id.slice(0,8))}…</div>`;
+    div.addEventListener('click', () => selectSession(s.id));
+    container.appendChild(div);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Select session
+// ---------------------------------------------------------------------------
+async function selectSession(id) {
+  _selectedId = id;
+  // Update selected styles
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === id);
+  });
+
+  // Show header
+  const hdr = document.getElementById('detail-header');
+  hdr.style.display = 'flex';
+  document.getElementById('detail-placeholder').style.display = 'none';
+
+  const s = _sessions.find(x => x.id === id) || {};
+  document.getElementById('detail-title').textContent =
+    `${s.preview ? s.preview.slice(0, 50) : id.slice(0, 16)}… — ${fmtDate(s.last_ts)}`;
+
+  // Load messages
+  try {
+    const r = await fetch(`${GW}/sessions/${encodeURIComponent(id)}`, { headers: authH() });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderMessages(data.messages || []);
+    setStatus(`${data.count} messages.`);
+  } catch (e) {
+    setStatus(`Load failed: ${e.message}`, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render messages in detail pane
+// ---------------------------------------------------------------------------
+function renderMessages(msgs) {
+  const pane = document.getElementById('detail-messages');
+  pane.innerHTML = '';
+  for (const m of msgs) {
+    if (!['user', 'assistant'].includes(m.role)) continue;
+    const wrap = document.createElement('div');
+    wrap.className = `dmsg ${m.role}`;
+    const meta = document.createElement('div');
+    meta.className = 'dmsg-meta';
+    meta.textContent = m.role === 'user' ? '🧑 You' : `🤖 ${m.provider || 'AI'}`;
+    if (m.ts) meta.textContent += ` · ${fmtDate(m.ts)}`;
+    wrap.appendChild(meta);
+    const body = document.createElement('div');
+    body.textContent = m.content || '';
+    wrap.appendChild(body);
+    pane.appendChild(wrap);
+  }
+  pane.scrollTop = pane.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Resume session — navigate to chat.html with that session loaded
+// ---------------------------------------------------------------------------
+function resumeSession() {
+  if (!_selectedId) return;
+  localStorage.setItem('intelli_session_id', _selectedId);
+  localStorage.setItem('intelli_resume_session_id', _selectedId);
+  window.location.href = 'chat.html';
+}
+
+// ---------------------------------------------------------------------------
+// Delete session
+// ---------------------------------------------------------------------------
+async function deleteSession() {
+  if (!_selectedId) return;
+  if (!confirm('Delete this session permanently?')) return;
+  try {
+    const r = await fetch(`${GW}/sessions/${encodeURIComponent(_selectedId)}`, {
+      method: 'DELETE', headers: authH(),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    setStatus('Session deleted.');
+    _sessions = _sessions.filter(s => s.id !== _selectedId);
+    _selectedId = null;
+    document.getElementById('detail-header').style.display = 'none';
+    document.getElementById('detail-messages').innerHTML = '';
+    document.getElementById('detail-placeholder').style.display = 'flex';
+    renderList(_sessions);
+    document.getElementById('stat-count').textContent =
+      `${_sessions.length} session${_sessions.length !== 1 ? 's' : ''}`;
+  } catch (e) {
+    setStatus(`Delete failed: ${e.message}`, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+function debounceSearch() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(doSearch, 350);
+}
+
+function doSearch() {
+  clearTimeout(_searchTimer);
+  const q = document.getElementById('search-input').value.trim();
+  loadSessions(q);
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+loadSessions();
+</script>
+</body>
+</html>

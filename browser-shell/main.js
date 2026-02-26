@@ -269,6 +269,59 @@ function sidebarBounds(win) {
 }
 
 /**
+ * Navigation guard — synchronous private-IP / dangerous-scheme check.
+ * Returns null if the URL is allowed, or a reason string if it should be blocked.
+ */
+function _isBlockedURL(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    const proto = u.protocol;
+
+    // Always allow the gateway admin UI
+    if (urlStr.startsWith(GATEWAY_ORIGIN + '/')) return null;
+
+    // Block inherently dangerous schemes
+    if (['javascript:', 'data:', 'vbscript:'].includes(proto)) {
+      return `Blocked scheme: ${proto.slice(0, -1)}`;
+    }
+
+    // Only apply host checks for http/https/ftp
+    if (!['http:', 'https:', 'ftp:'].includes(proto)) return null;
+
+    const h = u.hostname.toLowerCase();
+
+    // Loopback hostnames (but allow 127.0.0.1:8080 = gateway)
+    if (h === 'localhost' || h === '::1' || h === '0.0.0.0') {
+      if (h === 'localhost' && String(u.port) === String(GATEWAY_PORT)) return null;
+      return `Loopback host blocked: ${h}`;
+    }
+
+    // Private IPv4 ranges
+    const ipv4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipv4) {
+      const [, a, b] = ipv4.map(Number);
+      if (a === 127) {
+        if (String(u.port) === String(GATEWAY_PORT)) return null; // gateway
+        return `Loopback IP blocked: ${h}`;
+      }
+      if (a === 10)                              return `Private IP (10.x) blocked`;
+      if (a === 172 && b >= 16 && b <= 31)      return `Private IP (172.16-31.x) blocked`;
+      if (a === 192 && b === 168)               return `Private IP (192.168.x) blocked`;
+      if (a === 169 && b === 254)               return `Link-local IP blocked`;
+    }
+
+    // .internal / .local / .lan hostnames
+    if (h.endsWith('.internal') || h.endsWith('.local') || h.endsWith('.lan')) {
+      return `Internal hostname blocked: ${h}`;
+    }
+
+    return null; // allowed
+  } catch {
+    return null; // malformed URL — let the browser handle it
+  }
+}
+
+/**
  * Create a new tab and attach it to the window.
  * Returns the tab id.
  */
@@ -292,6 +345,19 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
   view.webContents.on('page-title-updated', (_, title) => {
     notifyChrome('tab-title-updated', { id, title });
   });
+
+  // Navigation guard: block private IPs and dangerous schemes synchronously.
+  view.webContents.on('will-navigate', (event, navUrl) => {
+    const reason = _isBlockedURL(navUrl);
+    if (reason) {
+      event.preventDefault();
+      const warningURL = `${GATEWAY_ORIGIN}/ui/index.html#blocked`;
+      view.webContents.loadURL(warningURL);
+      notifyChrome('nav-blocked', { id, url: navUrl, reason });
+      console.warn(`[NavGuard] Blocked navigation to ${navUrl}: ${reason}`);
+    }
+  });
+
   view.webContents.on('did-navigate', (_, navUrl) => {
     if (activeTabId === id) notifyChrome('url-changed', { id, url: navUrl });
     // Record visit in history (skip internal gateway UI)
@@ -815,6 +881,169 @@ function registerIPC() {
   });
   ipcMain.handle('win-close',        () => mainWin?.close());
   ipcMain.handle('win-is-maximized', () => mainWin?.isMaximized() ?? false);
+
+  // ── Browser automation command handlers ─────────────────────────────────
+  // These execute commands from the agent gateway's browser_tools.py queue.
+  // The gateway enqueues commands; Electron polls, executes, and posts results.
+
+  async function executeBrowserCommand(cmd) {
+    const { id, command, args } = cmd;
+    const tab = tabs[activeTabId];
+    if (!tab) {
+      return { id, result: { error: 'No active tab' } };
+    }
+    const wc = tab.view.webContents;
+
+    try {
+      switch (command) {
+        case 'click': {
+          const { selector, button = 'left' } = args;
+          const code = `
+            (function() {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { error: 'Element not found: ${selector}' };
+              el.scrollIntoView({ block: 'center' });
+              const rect = el.getBoundingClientRect();
+              el.click();
+              return { success: true, bounds: { x: rect.x, y: rect.y, w: rect.width, h: rect.height } };
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'type': {
+          const { selector, text, clear = true } = args;
+          const code = `
+            (function() {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { error: 'Element not found: ${selector}' };
+              el.scrollIntoView({ block: 'center' });
+              el.focus();
+              if (${clear}) el.value = '';
+              el.value += ${JSON.stringify(text)};
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return { success: true };
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'scroll': {
+          const { pixels = 0, to_bottom = false } = args;
+          const code = to_bottom
+            ? 'window.scrollTo(0, document.body.scrollHeight); ({ success: true })'
+            : `window.scrollBy(0, ${pixels}); ({ success: true })`;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'navigate': {
+          const { url } = args;
+          await wc.loadURL(url);
+          return { id, result: { success: true, url } };
+        }
+
+        case 'screenshot': {
+          const img = await wc.capturePage();
+          const b64 = img.toPNG().toString('base64');
+          return { id, result: { success: true, image: b64 } };
+        }
+
+        case 'eval': {
+          const { code } = args;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: { success: true, result: res } };
+        }
+
+        case 'wait': {
+          const { selector, timeout = 10 } = args;
+          const startTime = Date.now();
+          const code = `
+            (function() {
+              return new Promise((resolve) => {
+                const check = () => {
+                  const el = document.querySelector(${JSON.stringify(selector)});
+                  if (el) {
+                    resolve({ success: true });
+                  } else if (Date.now() - ${startTime} > ${timeout * 1000}) {
+                    resolve({ error: 'Timeout waiting for ${selector}' });
+                  } else {
+                    setTimeout(check, 100);
+                  }
+                };
+                check();
+              });
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        default:
+          return { id, result: { error: `Unknown command: ${command}` } };
+      }
+    } catch (err) {
+      return { id, result: { error: err.message } };
+    }
+  }
+
+  // Poll the gateway for browser automation commands every 500ms
+  async function pollBrowserCommands() {
+    if (!gatewayReady || !adminToken) return;
+
+    try {
+      const body = JSON.stringify({});
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/browser/command-queue',
+        method:   'GET',
+        headers:  {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type':  'application/json',
+        },
+      }, res => {
+        let data = '';
+        res.on('data', d => data += d);
+        res.on('end', async () => {
+          try {
+            const json = JSON.parse(data);
+            if (json.command && json.id) {
+              // Execute the command
+              const result = await executeBrowserCommand(json);
+              // Post result back to gateway
+              const resultBody = JSON.stringify(result);
+              const postReq = http.request({
+                hostname: GATEWAY_HOST,
+                port:     GATEWAY_PORT,
+                path:     '/browser/result',
+                method:   'POST',
+                headers:  {
+                  'Authorization':  `Bearer ${adminToken}`,
+                  'Content-Type':   'application/json',
+                  'Content-Length': Buffer.byteLength(resultBody),
+                },
+              });
+              postReq.write(resultBody);
+              postReq.end();
+            }
+          } catch (e) {
+            console.error('[browser-commands] parse error:', e.message);
+          }
+        });
+      });
+      req.on('error', () => { /* silent fail — gateway might be restarting */ });
+      req.end();
+    } catch (e) {
+      console.error('[browser-commands] poll error:', e.message);
+    }
+  }
+
+  // Start polling loop
+  setInterval(pollBrowserCommands, 500);
 
   // ── Sidebar toggle ──────────────────────────────────────────────────────
   // Creates the sidebar BrowserView lazily on first use, then shows/hides it

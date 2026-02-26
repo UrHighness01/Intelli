@@ -55,7 +55,7 @@ def _ensure_root() -> Path:
 
 
 def _seed_defaults() -> None:
-    """Write default builtin files if they don't exist yet."""
+    """Write default builtin files and starter skills if they don't exist yet."""
     agents_md = _WORKSPACE_ROOT / 'AGENTS.md'
     if not agents_md.exists():
         agents_md.write_text(_DEFAULT_AGENTS_MD, encoding='utf-8')
@@ -67,6 +67,84 @@ def _seed_defaults() -> None:
     tools_md = _WORKSPACE_ROOT / 'TOOLS.md'
     if not tools_md.exists():
         tools_md.write_text(_DEFAULT_TOOLS_MD, encoding='utf-8')
+
+    # Seed starter skills
+    _seed_skill('page-summarize', _SKILL_PAGE_SUMMARIZE)
+    _seed_skill('web-search', _SKILL_WEB_SEARCH)
+    _seed_skill('translate', _SKILL_TRANSLATE)
+
+
+def _seed_skill(slug: str, content: str) -> None:
+    skill_dir = _WORKSPACE_ROOT / 'skills' / slug
+    skill_md  = skill_dir / 'SKILL.md'
+    if not skill_md.exists():
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_md.write_text(content, encoding='utf-8')
+
+
+_SKILL_PAGE_SUMMARIZE = """\
+---
+name: Page Summarize
+slug: page-summarize
+description: Summarize the current browser tab in a few sentences.
+trigger: /summarize
+---
+
+# Page Summarize
+
+When the user types `/summarize` or asks to summarize the page:
+
+1. Read the active tab HTML from context (enable Page context in the chat bar).
+2. Extract the main content — ignore navbars, ads, footers.
+3. Return a structured summary:
+   - **Title & URL**
+   - **What it is** (1 sentence)
+   - **Key points** (3-5 bullets)
+   - **Takeaway** (1 sentence)
+
+Be concise.  Do not pad.  If the page is code/docs, summarize the API surface.
+"""
+
+_SKILL_WEB_SEARCH = """\
+---
+name: Web Search
+slug: web-search
+description: Search the web and return top results with a synthesized answer.
+trigger: /search
+---
+
+# Web Search
+
+When asked to search for something or when the user types `/search <query>`:
+
+1. Call the `web_search` tool with the user's query.
+2. Review the titles and snippets returned.
+3. If you need more detail on a result, call `web_fetch` on its URL.
+4. Synthesize a clear answer citing the sources (title + URL).
+
+Always cite your sources at the bottom as:
+> Source: [Title](URL)
+"""
+
+_SKILL_TRANSLATE = """\
+---
+name: Translate
+slug: translate
+description: Translate text into any language.
+trigger: /translate
+---
+
+# Translate
+
+When the user types `/translate <text>` or asks you to translate something:
+
+1. Detect the source language (or use what the user specified).
+2. Identify the target language from the request, defaulting to English if unclear.
+3. Provide the translation, then optionally add a pronunciation guide for non-Latin scripts.
+4. If the text is from the active page, reference the page title.
+
+Keep translations natural, not word-for-word literal.
+"""
 
 
 _DEFAULT_AGENTS_MD = """\
@@ -119,27 +197,36 @@ edge cases in your mind before presenting a solution.
 """
 
 _DEFAULT_TOOLS_MD = """\
-# Available Tools
+# Available Agent Tools
 
-## Browser tools
-- `GET /tab/snapshot` — Fetch the HTML source, URL, and title of the active tab
-- `PUT /tab/snapshot` — (Browser → Gateway) push a new page snapshot
-- `GET /tab/inject-queue` — Poll pending addon injections
-- `POST /addons` — Create a new addon (name, description, code_js)
-- `POST /addons/{name}/activate` — Inject and activate an addon
+## Web tools (built-in, always available)
 
-## Workspace tools
-- `GET /workspace/files` — List all workspace files
-- `GET /workspace/file?path=<rel>` — Read a workspace file
-- `POST /workspace/file?path=<rel>` — Write / create a workspace file
-- `DELETE /workspace/file?path=<rel>` — Delete a workspace file
-- `GET /workspace/skills` — List skills with metadata
-- `POST /workspace/skills` — Create a new skill
+These tools are called using the ReAct protocol:
 
-## Chat
-- `POST /chat/complete` — Chat with context injection support
-  - `use_page_context: true` — prepend active tab snapshot as system context
-  - `use_workspace: true` — prepend AGENTS.md + SOUL.md as system prompt
+    TOOL_CALL: {"name": "<tool>", "args": {<arg>: <value>}}
+
+### web_search
+Search the web using DuckDuckGo.  Returns title, URL and snippet per result.
+- `query` (string, required) — search query
+- `max_results` (integer, optional, default 5)
+
+Example:
+    TOOL_CALL: {"name": "web_search", "args": {"query": "Python asyncio tutorial"}}
+
+### web_fetch
+Fetch a URL and return clean, readable plain text.  Best for articles, docs, GitHub.
+- `url` (string, required) — full http/https URL
+- `max_chars` (integer, optional, default 8000)
+
+Example:
+    TOOL_CALL: {"name": "web_fetch", "args": {"url": "https://docs.python.org/3/library/asyncio.html"}}
+
+## Browser / gateway REST endpoints
+- `GET /tab/snapshot` — HTML source + URL + title of active tab
+- `POST /addons` — Create a JS addon injected into the active tab
+- `GET /workspace/files` — List workspace files
+- `GET/POST /workspace/file?path=<rel>` — Read/write file
+- `GET /workspace/skills` — List skills
 """
 
 

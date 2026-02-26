@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, Query
+from fastapi import FastAPI, HTTPException, Request, Depends, Query, UploadFile, File as FastAPIFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,9 @@ from providers.adapters import get_adapter, available_providers, ProviderSetting
 from providers.provider_adapter import ProviderKeyStore
 from providers.key_rotation import store_key_with_ttl, rotate_key, get_key_metadata, list_expiring
 from tools.capability import CapabilityVerifier, _MANIFEST_DIR, ToolManifest
+from tools.tool_runner import run_tool_loop, build_tool_system_block
 import consent_log as _consent
+import approval_gate as _approval_gate
 import agent_memory as _agent_memory
 import content_filter as _content_filter
 import rate_limit as _rate_limit
@@ -32,6 +34,16 @@ import scheduler as _scheduler
 import tab_snapshot as _tab_snapshot
 import addons as _addons
 import workspace_manager as _workspace
+import compaction as _compaction
+import canvas_manager as _canvas_mgr
+import failover as _failover
+from failover import FailoverAdapter as _FailoverAdapter
+import memory_store as _memory
+import personas as _personas
+import sessions as _sessions
+import watcher as _watcher
+import mcp_client as _mcp
+_canvas = _canvas_mgr.get_canvas()
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
 
@@ -254,6 +266,15 @@ _alert_monitor_thread = threading.Thread(
     target=_alert_monitor, daemon=True, name='alert-monitor')
 _alert_monitor_thread.start()
 
+# Page-diff watcher daemon
+_watcher.start()
+
+# MCP server integration — start all configured servers
+try:
+    _mcp.start_all()
+except Exception as _mcp_err:
+    import logging as _l; _l.getLogger(__name__).warning('MCP start_all: %s', _mcp_err)
+
 # startup time for basic metrics
 _start_time = datetime.now(timezone.utc)
 
@@ -273,6 +294,22 @@ def _require_admin_token(request: Request):
     token = parts[1]
     if not auth.check_role(token, 'admin'):
         raise HTTPException(status_code=403, detail='forbidden')
+    return token
+
+
+def _require_bearer(request: Request) -> str:
+    """Accept any valid user token (user or admin).  Returns the token string."""
+    if request is None:
+        return ''
+    authh = request.headers.get('authorization') or request.headers.get('Authorization')
+    if not authh:
+        raise HTTPException(status_code=401, detail='missing authorization')
+    parts = authh.split()
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        raise HTTPException(status_code=401, detail='invalid authorization')
+    token = parts[1]
+    if not auth.get_user_for_token(token):
+        raise HTTPException(status_code=401, detail='invalid or expired token')
     return token
 
 
@@ -1319,7 +1356,10 @@ class ChatRequest(BaseModel):
     # Context injection flags
     use_workspace: bool = False    # prepend AGENTS.md + SOUL.md as system prompt
     use_page_context: bool = False # prepend active tab snapshot to system prompt
+    use_tools: bool = True         # enable ReAct tool loop (web_search, web_fetch, …)
     system_prompt: str = ''        # extra system prompt injected by caller
+    persona: str = ''              # persona slug — injects SOUL.md before everything else
+    session_id: str = ''           # persist this conversation to disk for session history
 
 
 @app.post('/chat/complete')
@@ -1356,23 +1396,28 @@ def chat_complete(
     # ---- Content policy enforcement -----------------------------------
     _content_filter.check([m.get('content', '') for m in req.messages])
 
-    try:
-        adapter = get_adapter(req.provider)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+    # Use FailoverAdapter: transparently retries with fallback providers on 429/5xx
+    adapter = _FailoverAdapter(req.provider, req.model or None)
     if not adapter.is_available():
         raise HTTPException(
             status_code=503,
-            detail=f'provider {req.provider!r} is not configured or unreachable',
+            detail=f'provider {req.provider!r} and all fallbacks are unavailable',
         )
 
     kwargs: dict = {}
     if req.model:
         kwargs['model'] = req.model
 
+    # ---- Resolve session ID (generate if caller didn't supply one) --------
+    sid = req.session_id.strip() or _sessions.new_session_id()
+
     # ---- Build system prompt ----------------------------------------
     system_parts: list[str] = []
+    # Persona SOUL.md injected first so it frames everything that follows
+    if req.persona:
+        persona_prompt = _personas.build_system_prompt(req.persona)
+        if persona_prompt:
+            system_parts.append(persona_prompt)
     if req.use_workspace:
         ws_prompt = _workspace.build_system_prompt(include_tools=True)
         if ws_prompt:
@@ -1383,6 +1428,16 @@ def chat_complete(
             system_parts.append(_workspace.build_page_context_block(snap))
     if req.system_prompt:
         system_parts.append(req.system_prompt)
+    # ---- Auto-inject relevant memories from vector store ----------------
+    last_user_text = next(
+        (m.get('content', '') for m in reversed(req.messages) if m.get('role') == 'user'), ''
+    )
+    if last_user_text:
+        mem_ctx = _memory.build_memory_context(last_user_text)
+        if mem_ctx:
+            system_parts.append(mem_ctx)
+    if req.use_tools:
+        system_parts.append(build_tool_system_block())
     if system_parts:
         combined_system = '\n\n---\n\n'.join(system_parts)
         # Inject as a leading system message if the provider supports it
@@ -1394,30 +1449,98 @@ def chat_complete(
         messages_with_sys = list(req.messages)
 
     if stream:
-        # SSE streaming: run the blocking adapter call synchronously inside a
-        # generator that emits word-by-word token events followed by a final
-        # done event with the complete result payload.
-        def _sse_gen():
-            import json as _json
+        # SSE streaming: runs the tool loop in a background thread and pushes
+        # events (tool_call, tool_result, approval_required, tokens) in real time.
+        # SSE keepalive comments every 10 s prevent long approval waits from
+        # dropping the connection.
+        async def _sse_gen():
+            import asyncio as _asyncio
+            import queue as _queue
+            ev_queue: _queue.Queue = _queue.Queue()
+            _DONE = object()          # sentinel value
+            result_holder: list = [None]
+            error_holder:  list = [None]
+
+            def _on_tool_call(name, args):
+                ev_queue.put({'type': 'tool_call', 'tool': name, 'args': args})
+
+            def _on_tool_result(name, res):
+                ev_queue.put({
+                    'type': 'tool_result', 'tool': name,
+                    'result': (res[:400] + '…') if len(res) > 400 else res,
+                })
+
+            def _thread_fn():
+                try:
+                    if req.use_tools:
+                        result_holder[0] = run_tool_loop(
+                            adapter,
+                            messages=messages_with_sys,
+                            temperature=req.temperature,
+                            max_tokens=req.max_tokens,
+                            session_id=sid,
+                            approval_queue=ev_queue,
+                            on_tool_call=_on_tool_call,
+                            on_tool_result=_on_tool_result,
+                            **kwargs,
+                        )
+                    else:
+                        result_holder[0] = adapter.chat_complete(
+                            messages=messages_with_sys,
+                            temperature=req.temperature,
+                            max_tokens=req.max_tokens,
+                            **kwargs,
+                        )
+                    _metrics.inc('provider_requests_total', labels={'provider': req.provider})
+                except Exception as exc:
+                    error_holder[0] = str(exc)
+                    _metrics.inc('provider_errors_total', labels={'provider': req.provider})
+                finally:
+                    ev_queue.put(_DONE)
+
+            t = threading.Thread(
+                target=_thread_fn, daemon=True, name=f'tool-loop-{sid[:6]}')
+            t.start()
+
+            loop = _asyncio.get_running_loop()
+            while True:
+                try:
+                    ev = await loop.run_in_executor(
+                        None, lambda: ev_queue.get(timeout=10)
+                    )
+                    if ev is _DONE:
+                        break
+                    yield f'data: {json.dumps(ev)}\n\n'
+                except _queue.Empty:
+                    yield ': keepalive\n\n'  # SSE comment keeps connection alive
+
+            if error_holder[0]:
+                yield f'data: {json.dumps({"error": error_holder[0], "done": True})}\n\n'
+                return
+
+            result: dict = result_holder[0] or {'content': ''}
+            content: str = result.get('content', '')
+
+            # Persist session (best-effort — never fail the response)
             try:
-                result = adapter.chat_complete(
-                    messages=messages_with_sys,
-                    temperature=req.temperature,
-                    max_tokens=req.max_tokens,
-                    **kwargs,
-                )
-                _metrics.inc('provider_requests_total', labels={'provider': req.provider})
-                content: str = result.get('content', '')
-                # Emit tokens word by word for a streaming-feel UX
-                words = content.split(' ')
-                for i, word in enumerate(words):
-                    token = word + (' ' if i < len(words) - 1 else '')
-                    yield f"data: {_json.dumps({'token': token, 'done': False})}\n\n"
-                # Final event: full result + done=True
-                yield f"data: {_json.dumps({**result, 'done': True})}\n\n"
-            except Exception as exc:
-                _metrics.inc('provider_errors_total', labels={'provider': req.provider})
-                yield f"data: {_json.dumps({'error': str(exc), 'done': True})}\n\n"
+                _msg_meta = {'provider': req.provider, 'model': req.model or ''}
+                for m in req.messages:
+                    if m.get('role') in ('user', 'assistant'):
+                        _sessions.save_message(sid, m['role'], m.get('content', ''), _msg_meta)
+                if content:
+                    _sessions.save_message(sid, 'assistant', content,
+                                           {'provider': req.provider, 'model': result.get('model', req.model)})
+            except Exception:
+                pass
+
+            # Emit tokens word by word for a streaming-feel UX
+            words = content.split(' ')
+            for i, word in enumerate(words):
+                token = word + (' ' if i < len(words) - 1 else '')
+                yield f'data: {json.dumps({"token": token, "done": False})}\n\n'
+            # Final event: full result + done=True + failover info + session_id
+            _fo = adapter.last_result_meta
+            yield f'data: {json.dumps({**result, "done": True, "session_id": sid, **_fo})}\n\n'
 
         return StreamingResponse(
             _sse_gen(),
@@ -1430,17 +1553,44 @@ def chat_complete(
         )
 
     try:
-        result = adapter.chat_complete(
-            messages=messages_with_sys,
-            temperature=req.temperature,
-            max_tokens=req.max_tokens,
-            **kwargs,
-        )
+        if req.use_tools:
+            result = run_tool_loop(
+                adapter,
+                messages=messages_with_sys,
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
+                session_id=sid,
+                **kwargs,
+            )
+        else:
+            result = adapter.chat_complete(
+                messages=messages_with_sys,
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
+                **kwargs,
+            )
     except Exception as exc:
         _metrics.inc('provider_errors_total', labels={'provider': req.provider})
         raise HTTPException(status_code=502, detail=f'provider error: {exc}')
 
     _metrics.inc('provider_requests_total', labels={'provider': req.provider})
+
+    # Persist session (best-effort)
+    try:
+        _msg_meta = {'provider': req.provider, 'model': req.model or ''}
+        for m in req.messages:
+            if m.get('role') in ('user', 'assistant'):
+                _sessions.save_message(sid, m['role'], m.get('content', ''), _msg_meta)
+        asst_content = result.get('content', '')
+        if asst_content:
+            _sessions.save_message(sid, 'assistant', asst_content,
+                                   {'provider': req.provider, 'model': result.get('model', req.model)})
+    except Exception:
+        pass
+
+    # Attach failover metadata + session_id so UI can persist and warn
+    result.update(adapter.last_result_meta)
+    result['session_id'] = sid
     return result
 
 
@@ -2018,6 +2168,20 @@ def tab_snapshot_put(body: TabSnapshotBody):
     No auth required — endpoint is only reachable from localhost.
     """
     _tab_snapshot.set_snapshot(body.url, body.title, body.html)
+    # Auto-store page visit in vector memory (fire-and-forget in background thread)
+    if body.url and not body.url.startswith(('about:', 'chrome:', 'file:')):
+        def _store_page():
+            try:
+                text = _memory.extract_text_from_html(body.html)
+                if len(text) > 80:  # skip blank/error pages
+                    _memory.get_store().add(
+                        text=text, source='page',
+                        url=body.url, title=body.title,
+                    )
+            except Exception as exc:
+                logger.debug('memory auto-store failed: %s', exc)
+        import threading as _threading
+        _threading.Thread(target=_store_page, daemon=True).start()
 
 
 @app.get('/tab/snapshot')
@@ -2256,3 +2420,744 @@ def workspace_system_prompt(request: Request):
     """
     prompt = _workspace.build_system_prompt(include_tools=True)
     return {'system_prompt': prompt}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canvas  (agent → live HTML panel)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CanvasRenderBody(BaseModel):
+    html:  str
+    title: str = ''
+
+
+@app.post('/canvas/render', status_code=204)
+def canvas_render(body: CanvasRenderBody, request: Request):
+    """Push new HTML to the canvas panel.  Auth required."""
+    _require_admin_token(request)
+    _canvas.render(body.html, body.title)
+
+
+@app.post('/canvas/clear', status_code=204)
+def canvas_clear(request: Request):
+    """Clear the canvas panel.  Auth required."""
+    _require_admin_token(request)
+    _canvas.clear()
+
+
+@app.get('/canvas/snapshot')
+def canvas_snapshot():
+    """Return the current canvas HTML snapshot (no auth — localhost only)."""
+    return {'html': _canvas.get_html(), 'title': ''}
+
+
+@app.get('/canvas/stream')
+async def canvas_stream(token: str = Query('')):
+    """SSE stream of canvas update events.  Accepts token as query param."""
+    import json as _json
+    import asyncio as _asyncio
+
+    # Validate token if provided
+    if token:
+        if not auth.get_user_for_token(token):
+            from fastapi.responses import Response
+            return Response(status_code=401)
+
+    q = _canvas.subscribe()
+
+    async def _gen():
+        try:
+            # Send current snapshot immediately so the panel loads without waiting
+            snap = _canvas.get_html()
+            yield f"data: {_json.dumps({'type': 'render', 'html': snap, 'title': '', 'ts': 0})}\n\n"
+            while True:
+                try:
+                    event = await _asyncio.wait_for(q.get(), timeout=25)
+                    yield f"data: {_json.dumps(event)}\n\n"
+                except _asyncio.TimeoutError:
+                    yield f"data: {_json.dumps({'type': 'ping'})}\n\n"
+        except _asyncio.CancelledError:
+            pass
+        finally:
+            _canvas.unsubscribe(q)
+
+    return StreamingResponse(
+        _gen(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',
+                 'Access-Control-Allow-Origin': '*'},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Session compaction
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CompactRequest(BaseModel):
+    messages: list
+    provider: str
+    model:    str = ''
+
+
+@app.post('/chat/compact')
+def chat_compact(req: CompactRequest, request: Request):
+    """Summarize old messages and return a compacted message list.
+
+    Returns:
+        compacted_messages: shortened list with a summary block prepended
+        summary:            the plain-text summary that was generated
+        tokens_saved:       estimated tokens freed up
+        usage_before:       fraction of context used before compaction
+        usage_after:        fraction after
+    """
+    authh = request.headers.get('authorization', '')
+    parts = authh.split()
+    if len(parts) != 2 or not auth.get_user_for_token(parts[1]):
+        raise HTTPException(status_code=401, detail='unauthorized')
+
+    try:
+        adapter = get_adapter(req.provider)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    usage_before = _compaction.usage_fraction(req.messages, req.model)
+
+    try:
+        compacted, summary, tokens_saved = _compaction.compact_messages(
+            req.messages, adapter, model=req.model
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f'Compaction failed: {exc}')
+
+    usage_after = _compaction.usage_fraction(compacted, req.model)
+
+    return {
+        'compacted_messages': compacted,
+        'summary':            summary,
+        'tokens_saved':       tokens_saved,
+        'usage_before':       round(usage_before, 3),
+        'usage_after':        round(usage_after, 3),
+    }
+
+
+@app.get('/chat/token-usage')
+def chat_token_usage(model: str = '', request: Request = None):
+    """Return context limit info for a model (no auth needed)."""
+    limit = _compaction.context_limit_for(model)
+    return {'model': model, 'context_limit': limit}
+
+
+# ---------------------------------------------------------------------------
+# Failover chain management
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/failover/chain')
+def get_failover_chain(request: Request):
+    """Return the current provider failover chain.  Admin auth required."""
+    _require_admin_token(request)
+    return {
+        'chain':     _failover.get_chain(),
+        'cooldowns': _failover.cooldown_status(),
+    }
+
+
+class FailoverChainEntry(BaseModel):
+    provider: str
+    model:    str | None = None
+
+
+@app.put('/admin/failover/chain')
+def set_failover_chain(entries: list[FailoverChainEntry], request: Request):
+    """Replace the provider failover chain.  Admin auth required.
+
+    Body: [{"provider": "openai"}, {"provider": "anthropic"}, {"provider": "ollama"}]
+    """
+    _require_admin_token(request)
+    _failover.set_chain([{'provider': e.provider, 'model': e.model} for e in entries])
+    return {'ok': True, 'chain': _failover.get_chain()}
+
+
+@app.get('/admin/failover/cooldowns')
+def get_failover_cooldowns(request: Request):
+    """Return which providers are currently on cooldown.  Admin auth required."""
+    _require_admin_token(request)
+    return {'cooldowns': _failover.cooldown_status()}
+
+
+# ---------------------------------------------------------------------------
+# Vector Memory REST API
+# ---------------------------------------------------------------------------
+
+class MemoryAddBody(BaseModel):
+    text:   str
+    source: str = 'manual'
+    url:    str = ''
+    title:  str = ''
+    pinned: bool = False
+
+
+class MemorySearchQuery(BaseModel):
+    q:      str
+    n:      int  = 5
+    source: str  = ''
+
+
+@app.post('/memory/add')
+def memory_add(body: MemoryAddBody, request: Request):
+    """Pin a memory (fact, note, or bookmark).  Bearer token required."""
+    _require_bearer(request)
+    doc_id = _memory.get_store().add(
+        text=body.text, source=body.source,
+        url=body.url, title=body.title, pinned=body.pinned,
+    )
+    return {'ok': True, 'id': doc_id}
+
+
+@app.get('/memory/search')
+def memory_search(q: str, n: int = 5, source: str = '', request: Request = None):
+    """Semantic search over stored memories.  Bearer token required."""
+    _require_bearer(request)
+    results = _memory.get_store().search(
+        query=q, n=n,
+        source_filter=source or None,
+    )
+    return {'results': results, 'total': len(results)}
+
+
+@app.delete('/memory/{doc_id}')
+def memory_delete(doc_id: str, request: Request):
+    """Forget a memory by ID.  Bearer token required."""
+    _require_bearer(request)
+    ok = _memory.get_store().delete(doc_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail='memory not found')
+    return {'ok': True}
+
+
+@app.get('/memory/list')
+def memory_list(n: int = 20, request: Request = None):
+    """List most recent memories.  Bearer token required."""
+    _require_bearer(request)
+    return {'memories': _memory.get_store().list_recent(n)}
+
+
+@app.get('/memory/stats')
+def memory_stats(request: Request = None):
+    """Return memory store statistics."""
+    store = _memory.get_store()
+    return {
+        'count':   store.count(),
+        'backend': store.backend_name,
+        'data_dir': _memory._DATA_DIR,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Coding-agent info
+# ---------------------------------------------------------------------------
+
+@app.get('/coding/info')
+def coding_info(request: Request = None):
+    """Return coding workspace information.  Bearer token required."""
+    _require_bearer(request)
+    try:
+        from tools.coding_tools import code_root, _CODE_ROOT, _SHELL_DISABLED
+        root = code_root()
+        shell_enabled = not _SHELL_DISABLED
+    except Exception:
+        root = str(__import__('pathlib').Path.home() / 'intelli-workspace')
+        shell_enabled = True
+    return {
+        'root':          root,
+        'shell_enabled': shell_enabled,
+        'tools':         ['file_read', 'file_write', 'file_patch', 'file_delete', 'file_list', 'shell_exec'],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Browser automation command queue
+# ---------------------------------------------------------------------------
+
+@app.get('/browser/command-queue')
+def browser_command_queue(request: Request = None):
+    """Poll for pending browser automation commands (called by Electron shell).
+    Bearer token required."""
+    _require_bearer(request)
+    try:
+        from tools.browser_tools import pop_command_queue
+        cmd = pop_command_queue()
+        if cmd:
+            return cmd
+        return {'command': None}
+    except Exception as exc:
+        return {'command': None, 'error': str(exc)}
+
+
+@app.post('/browser/result')
+def browser_command_result(payload: dict, request: Request = None):
+    """Receive browser command execution result from Electron shell.
+    Bearer token required."""
+    _require_bearer(request)
+    try:
+        from tools.browser_tools import post_command_result
+        cmd_id = payload.get('id')
+        result = payload.get('result')
+        if cmd_id:
+            post_command_result(cmd_id, result)
+        return {'ok': True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Personas API
+# ---------------------------------------------------------------------------
+
+class PersonaCreate(BaseModel):
+    name: str
+    soul: str
+    avatar: str = '🤖'
+    model: str = ''
+    provider: str = ''
+
+
+class PersonaUpdate(BaseModel):
+    name: str = ''
+    soul: str = ''
+    avatar: str = ''
+    model: str = ''
+    provider: str = ''
+
+
+@app.get('/personas')
+def personas_list(request: Request):
+    """List all agent personas (built-in + user-created). Auth required."""
+    _require_bearer(request)
+    return _personas.list_personas()
+
+
+@app.get('/personas/{slug}')
+def personas_get(slug: str, request: Request):
+    """Return a single persona by slug. Auth required."""
+    _require_bearer(request)
+    p = _personas.get_persona(slug)
+    if not p:
+        raise HTTPException(status_code=404, detail=f'persona {slug!r} not found')
+    return p
+
+
+@app.post('/personas', status_code=201)
+def personas_create(body: PersonaCreate, request: Request):
+    """Create a new agent persona. Auth required."""
+    _require_bearer(request)
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail='name is required')
+    return _personas.create_persona(
+        name=body.name, soul=body.soul, avatar=body.avatar,
+        model=body.model, provider=body.provider,
+    )
+
+
+@app.put('/personas/{slug}')
+def personas_update(slug: str, body: PersonaUpdate, request: Request):
+    """Update an existing persona. Built-in 'intelli' persona cannot be changed."""
+    _require_bearer(request)
+    kwargs = {k: v for k, v in body.model_dump().items() if v}
+    p = _personas.update_persona(slug, **kwargs)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f'persona {slug!r} not found or is immutable')
+    return p
+
+
+@app.delete('/personas/{slug}')
+def personas_delete(slug: str, request: Request):
+    """Delete a user-created persona. Built-in 'intelli' cannot be deleted."""
+    _require_bearer(request)
+    if not _personas.delete_persona(slug):
+        raise HTTPException(status_code=404, detail=f'persona {slug!r} not found or cannot be deleted')
+    return {'deleted': slug}
+
+
+# ---------------------------------------------------------------------------
+# Session History API
+# ---------------------------------------------------------------------------
+
+@app.get('/sessions')
+def sessions_list(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str = Query('', description='Search query'),
+    request: Request = None,
+):
+    """List chat sessions sorted by most-recently-active. Auth required."""
+    _require_bearer(request)
+    if q:
+        return _sessions.search_sessions(q, limit=limit)
+    return _sessions.list_sessions(limit=limit, offset=offset)
+
+
+@app.get('/sessions/{session_id}')
+def sessions_get(session_id: str, request: Request):
+    """Return all messages in a session in chronological order. Auth required."""
+    _require_bearer(request)
+    msgs = _sessions.get_session(session_id)
+    if not msgs:
+        raise HTTPException(status_code=404, detail=f'session {session_id!r} not found')
+    return {'session_id': session_id, 'messages': msgs, 'count': len(msgs)}
+
+
+@app.get('/sessions/{session_id}/stats')
+def sessions_stats(session_id: str, request: Request):
+    """Return basic stats for a session (message counts, token estimates)."""
+    _require_bearer(request)
+    return _sessions.session_stats(session_id)
+
+
+@app.delete('/sessions/{session_id}')
+def sessions_delete(session_id: str, request: Request):
+    """Permanently delete a session and all its messages. Auth required."""
+    _require_bearer(request)
+    if not _sessions.delete_session(session_id):
+        raise HTTPException(status_code=404, detail=f'session {session_id!r} not found')
+    return {'deleted': session_id}
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Page-diff Watcher API
+# ---------------------------------------------------------------------------
+
+class _WatcherCreate(BaseModel):
+    url:                str
+    label:              str  = ''
+    interval_minutes:   int  = 60
+    notify_threshold:   float = 0.02
+
+
+class _WatcherUpdate(BaseModel):
+    label:              str   | None = None
+    interval_minutes:   int   | None = None
+    notify_threshold:   float | None = None
+    enabled:            bool  | None = None
+
+
+@app.get('/watchers')
+def watchers_list(request: Request):
+    """List all page-diff watchers."""
+    _require_bearer(request)
+    return {'watchers': _watcher.list_watchers()}
+
+
+@app.post('/watchers', status_code=201)
+def watchers_create(body: _WatcherCreate, request: Request):
+    """Create a new page-diff watcher."""
+    _require_bearer(request)
+    try:
+        w = _watcher.add_watcher(
+            url=body.url,
+            label=body.label,
+            interval_minutes=body.interval_minutes,
+            notify_threshold=body.notify_threshold,
+        )
+        return w
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get('/watchers/alerts')
+def watchers_all_alerts(limit: int = Query(50, ge=1, le=500), request: Request = None):
+    """Return recent alerts across all watchers."""
+    _require_bearer(request)
+    return {'alerts': _watcher.get_all_alerts(limit=limit)}
+
+
+@app.get('/watchers/{wid}')
+def watchers_get(wid: str, request: Request):
+    """Return a single watcher by ID."""
+    _require_bearer(request)
+    w = _watcher.get_watcher(wid)
+    if w is None:
+        raise HTTPException(status_code=404, detail=f'watcher {wid!r} not found')
+    return w
+
+
+@app.put('/watchers/{wid}')
+def watchers_update(wid: str, body: _WatcherUpdate, request: Request):
+    """Update watcher fields."""
+    _require_bearer(request)
+    kwargs = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not kwargs:
+        raise HTTPException(status_code=400, detail='No fields to update')
+    w = _watcher.update_watcher(wid, **kwargs)
+    if w is None:
+        raise HTTPException(status_code=404, detail=f'watcher {wid!r} not found')
+    return w
+
+
+@app.delete('/watchers/{wid}', status_code=204)
+def watchers_delete(wid: str, request: Request):
+    """Delete a watcher and its alert history."""
+    _require_bearer(request)
+    if not _watcher.delete_watcher(wid):
+        raise HTTPException(status_code=404, detail=f'watcher {wid!r} not found')
+
+
+@app.get('/watchers/{wid}/alerts')
+def watchers_alerts(wid: str, clear: bool = Query(False), request: Request = None):
+    """Return (and optionally clear) alerts for a watcher."""
+    _require_bearer(request)
+    w = _watcher.get_watcher(wid)
+    if w is None:
+        raise HTTPException(status_code=404, detail=f'watcher {wid!r} not found')
+    return {'wid': wid, 'alerts': _watcher.get_alerts(wid, clear=clear)}
+
+
+@app.post('/watchers/{wid}/trigger')
+def watchers_trigger(wid: str, request: Request):
+    """Force an immediate poll of the watcher URL."""
+    _require_bearer(request)
+    ok = _watcher.trigger_watcher(wid)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f'watcher {wid!r} not found')
+    return {'triggered': wid}
+
+
+# ---------------------------------------------------------------------------
+# Agent Tool Approval API
+# ---------------------------------------------------------------------------
+
+@app.get('/agent/approvals')
+def agent_approvals_list(
+    session_id: str = Query('', description='Filter by session id'),
+    request: Request = None,
+):
+    """Return all pending tool-call approvals (optionally scoped to a session)."""
+    _require_bearer(request)
+    return {'approvals': _approval_gate.list_pending(session_id=session_id)}
+
+
+@app.post('/agent/approvals/{aid}/approve')
+def agent_approvals_approve(aid: str, request: Request):
+    """Approve a pending tool-call. The blocked agent thread then executes the tool."""
+    _require_bearer(request)
+    if not _approval_gate.approve(aid):
+        raise HTTPException(status_code=404, detail=f'approval {aid!r} not found')
+    return {'approved': aid}
+
+
+@app.post('/agent/approvals/{aid}/deny')
+def agent_approvals_deny(aid: str, request: Request):
+    """Deny a pending tool-call. The agent thread receives a [DENIED] message."""
+    _require_bearer(request)
+    if not _approval_gate.deny(aid):
+        raise HTTPException(status_code=404, detail=f'approval {aid!r} not found')
+    return {'denied': aid}
+
+
+# ---------------------------------------------------------------------------
+# Navigation Guard / Security Check
+# ---------------------------------------------------------------------------
+
+@app.get('/security/check_url')
+def security_check_url(url: str = Query(..., description='URL to check')):
+    """Synchronous navigation guard: check whether a URL is safe to visit.
+
+    Used by the Electron shell's ``will-navigate`` handler to block:
+    - Private / loopback IP ranges (SSRF prevention)
+    - Non-http(s)/file:// schemes
+    - Known risky patterns
+
+    Returns ``{"allow": bool, "reason": str}``.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return {'allow': False, 'reason': 'Malformed URL'}
+
+    scheme = (parsed.scheme or '').lower()
+
+    # Block dangerous schemes
+    if scheme in ('javascript', 'data', 'vbscript'):
+        return {'allow': False, 'reason': f'Blocked scheme: {scheme}'}
+
+    # Only check host-based rules for http/https/ftp
+    if scheme not in ('http', 'https', 'ftp', ''):
+        return {'allow': True, 'reason': 'Non-web scheme — allowed'}  # e.g. mailto:
+
+    host = (parsed.hostname or '').lower()
+
+    # Loopback / localhost (except the gateway itself)
+    if host in ('localhost', '::1', '0.0.0.0'):
+        port = parsed.port
+        if host == 'localhost' and port == 8080:
+            return {'allow': True, 'reason': 'Gateway origin'}
+        return {'allow': False, 'reason': f'Blocked: loopback host {host!r}'}
+
+    # Private IP ranges
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback:
+            if host == '127.0.0.1' and parsed.port == 8080:
+                return {'allow': True, 'reason': 'Gateway origin'}
+            return {'allow': False, 'reason': f'Blocked: loopback IP {ip}'}
+        if ip.is_private or ip.is_link_local or ip.is_reserved:
+            return {'allow': False, 'reason': f'Blocked: private/reserved IP {ip}'}
+    except ValueError:
+        pass  # hostname — fine
+
+    # .local / .internal hostnames
+    if host.endswith('.local') or host.endswith('.internal') or host.endswith('.lan'):
+        return {'allow': False, 'reason': f'Blocked: internal hostname {host!r}'}
+
+    return {'allow': True, 'reason': 'OK'}
+
+
+# ---------------------------------------------------------------------------
+# Voice I/O  —  Whisper STT  +  edge-tts TTS
+# ---------------------------------------------------------------------------
+
+import voice as _voice
+
+
+@app.post('/voice/transcribe')
+async def voice_transcribe(
+    file: UploadFile = FastAPIFile(...),
+    request: Request = None,
+):
+    """Transcribe uploaded audio to text using OpenAI Whisper.
+
+    Accepts any format supported by Whisper (WebM, WAV, MP3, MP4, M4A, OGG).
+    Requires a ``Bearer`` token.  Uses the provider's OpenAI API key if set.
+    """
+    _require_bearer(request)
+    audio_bytes = await file.read()
+    # Try to get the provider's OpenAI key for Whisper
+    provider_key: str | None = None
+    try:
+        prov_data = _providers.load_providers()
+        openai_entry = next((p for p in prov_data if p.get('id') == 'openai'), None)
+        if openai_entry:
+            provider_key = openai_entry.get('api_key') or None
+    except Exception:
+        pass
+
+    text = await asyncio.to_thread(
+        _voice.transcribe, audio_bytes, file.filename or 'audio.webm', provider_key
+    )
+    if text.startswith('[ERROR]'):
+        raise HTTPException(status_code=422, detail=text)
+    return {'text': text}
+
+
+@app.post('/voice/speak')
+async def voice_speak(payload: dict, request: Request = None):
+    """Convert text to speech and return streaming MP3 audio.
+
+    Body: ``{ "text": "...", "voice": "en-US-JennyNeural",
+               "rate": "+0%", "pitch": "+0Hz" }``
+    """
+    _require_bearer(request)
+    text  = payload.get('text', '').strip()
+    voice = payload.get('voice', _voice.DEFAULT_VOICE)
+    rate  = payload.get('rate',  _voice.DEFAULT_RATE)
+    pitch = payload.get('pitch', _voice.DEFAULT_PITCH)
+
+    if not text:
+        raise HTTPException(status_code=400, detail='text is required')
+
+    async def _gen():
+        async for chunk in _voice.speak_stream(text, voice=voice, rate=rate, pitch=pitch):
+            yield chunk
+
+    return StreamingResponse(_gen(), media_type='audio/mpeg')
+
+
+@app.get('/voice/voices')
+async def voice_voices(locale: str = '', request: Request = None):
+    """List available edge-tts voices, optionally filtered by locale prefix."""
+    _require_bearer(request)
+    try:
+        voices = await _voice.list_voices(locale_prefix=locale)
+        return {'voices': voices}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# MCP Server Integration
+# ---------------------------------------------------------------------------
+
+class _MCPServerEntry(BaseModel):
+    name: str = Field(..., description='Unique server identifier')
+    command: str = Field(..., description='Executable to run (e.g. npx, uvx, python)')
+    args: list[str] = Field(default_factory=list, description='Command arguments')
+    env: dict[str, str] = Field(default_factory=dict, description='Extra environment variables')
+
+
+@app.get('/mcp/servers')
+async def mcp_list_servers(request: Request = None):
+    """List all configured MCP servers with their status and discovered tools."""
+    _require_bearer(request)
+    return {'servers': _mcp.list_servers()}
+
+
+@app.get('/mcp/servers/{name}')
+async def mcp_get_server(name: str, request: Request = None):
+    """Get detailed info for a single MCP server."""
+    _require_bearer(request)
+    info = _mcp.get_server(name)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f'MCP server {name!r} not found')
+    return info
+
+
+@app.post('/mcp/servers', status_code=201)
+async def mcp_add_server(entry: _MCPServerEntry, request: Request = None):
+    """Add (or replace) an MCP server and start it immediately."""
+    _require_bearer(request)
+    srv = _mcp.add_server(entry.model_dump())
+    return srv.public_info()
+
+
+@app.delete('/mcp/servers/{name}')
+async def mcp_remove_server(name: str, request: Request = None):
+    """Stop and remove an MCP server."""
+    _require_bearer(request)
+    removed = _mcp.remove_server(name)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f'MCP server {name!r} not found')
+    return {'removed': name}
+
+
+@app.post('/mcp/servers/{name}/restart')
+async def mcp_restart_server(name: str, request: Request = None):
+    """Restart an MCP server and re-register its tools."""
+    _require_bearer(request)
+    ok = _mcp.restart_server(name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f'MCP server {name!r} not found')
+    info = _mcp.get_server(name)
+    return info
+
+
+@app.post('/mcp/reload')
+async def mcp_reload(request: Request = None):
+    """Hot-reload MCP config without restarting the gateway."""
+    _require_bearer(request)
+    result = await asyncio.get_event_loop().run_in_executor(None, _mcp.reload)
+    return result
+
+
+@app.get('/mcp/tools')
+async def mcp_list_tools(request: Request = None):
+    """List all tools exposed by running MCP servers."""
+    _require_bearer(request)
+    from tools import tool_runner as _tr
+    mcp_tools = [
+        {'name': k, 'description': v.get('description', '')}
+        for k, v in _tr._REGISTRY.items()
+        if '__' in k and any(k.startswith(s['name'] + '__') for s in _mcp.list_servers())
+    ]
+    return {'tools': mcp_tools, 'count': len(mcp_tools)}

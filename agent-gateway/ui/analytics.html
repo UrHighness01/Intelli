@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Analytics</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --blue:     #60a5fa;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 16px;
+    }
+    header a.back { color: var(--muted); text-decoration: none; font-size: .85rem; }
+    header a.back:hover { color: var(--accent); }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header .sub { color: var(--muted); font-size: .82rem; margin-left: auto; }
+
+    main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+    /* Auth */
+    #auth-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 12px; color: var(--text);
+      font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: .82rem; cursor: pointer; font-weight: 600;
+    }
+    button:hover { opacity: .85; }
+    button.secondary { background: var(--border); color: var(--text); }
+
+    /* Stat cards */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-label { font-size: .75rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+    .stat-val { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-val.green  { color: var(--green); }
+    .stat-val.red    { color: var(--red); }
+    .stat-val.yellow { color: var(--yellow); }
+    .stat-val.blue   { color: var(--blue); }
+    .stat-sub { font-size: .72rem; color: var(--muted); }
+
+    /* Panel card */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .panel-header h3 { font-size: .9rem; font-weight: 600; }
+    .panel-body { padding: 16px; }
+
+    /* Bar chart */
+    .bar-list { display: flex; flex-direction: column; gap: 8px; }
+    .bar-row { display: flex; flex-direction: column; gap: 3px; }
+    .bar-label { display: flex; justify-content: space-between; font-size: .78rem; }
+    .bar-name  { color: var(--text); font-weight: 500; }
+    .bar-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .bar-track { background: var(--surface2); border-radius: 4px; height: 8px; overflow: hidden; }
+    .bar-fill  { height: 100%; border-radius: 4px; background: var(--accent); transition: width .4s ease; }
+    .bar-fill.green  { background: var(--green); }
+    .bar-fill.yellow { background: var(--yellow); }
+    .bar-fill.red    { background: var(--red); }
+
+    /* Provider table */
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th { padding: 8px 12px; text-align: left; color: var(--muted); font-weight: 500;
+         border-bottom: 1px solid var(--border); font-size: .74rem; text-transform: uppercase; }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .pct { color: var(--muted); font-size: .75rem; }
+
+    /* Two-col */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+    #status-bar {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 14px; font-size: .8rem; color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">← Dashboard</a>
+  <h1>📊 Analytics</h1>
+  <span class="sub" id="last-updated">–</span>
+  <button class="secondary" onclick="loadAll()" style="margin-left:8px;padding:4px 12px;font-size:.78rem;">↺ Refresh</button>
+</header>
+
+<main>
+  <div id="auth-panel">
+    <label for="token-input">Bearer Token</label>
+    <input id="token-input" type="password" placeholder="Paste admin token…" autocomplete="off" />
+    <button onclick="loadAll()">Load</button>
+  </div>
+
+  <div id="status-bar">Enter your token and press Load.</div>
+
+  <!-- Summary stats -->
+  <div class="stat-grid" id="stat-grid">
+    <div class="stat-card"><div class="stat-label">Total Tool Calls</div><div class="stat-val blue" id="s-total-calls">–</div></div>
+    <div class="stat-card"><div class="stat-label">Provider Requests</div><div class="stat-val green" id="s-provider-req">–</div></div>
+    <div class="stat-card"><div class="stat-label">Provider Errors</div><div class="stat-val red" id="s-provider-err">–</div></div>
+    <div class="stat-card"><div class="stat-label">Error Rate</div><div class="stat-val yellow" id="s-error-rate">–</div></div>
+    <div class="stat-card"><div class="stat-label">Approvals Queued</div><div class="stat-val" id="s-approvals">–</div></div>
+    <div class="stat-card"><div class="stat-label">Validation Errors</div><div class="stat-val red" id="s-val-err">–</div></div>
+    <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-val green" id="s-uptime">–</div></div>
+  </div>
+
+  <div class="two-col">
+    <!-- Tool usage -->
+    <div class="panel">
+      <div class="panel-header"><h3>🔧 Tool Usage</h3><span id="tools-total" style="font-size:.78rem;color:var(--muted)"></span></div>
+      <div class="panel-body">
+        <div class="bar-list" id="tool-bars"><em style="color:var(--muted);font-size:.82rem">No data yet.</em></div>
+      </div>
+    </div>
+
+    <!-- Provider breakdown -->
+    <div class="panel">
+      <div class="panel-header"><h3>🔑 Provider Breakdown</h3></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>Provider</th><th>Requests</th><th>Errors</th><th>Error %</th></tr></thead>
+          <tbody id="provider-table"><tr><td colspan="4" style="color:var(--muted)">No data yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Latency panel -->
+  <div class="panel">
+    <div class="panel-header"><h3>⏱ Tool Latency (p50 · mean)</h3></div>
+    <div class="panel-body">
+      <div class="bar-list" id="latency-bars"><em style="color:var(--muted);font-size:.82rem">No latency data yet.</em></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const API = '';
+let _token = '';
+
+function tok() {
+  _token = document.getElementById('token-input').value.trim();
+  return _token;
+}
+
+function hdr() { return { 'Authorization': 'Bearer ' + tok() }; }
+
+function setStatus(msg) { document.getElementById('status-bar').textContent = msg; }
+
+// ── Parse Prometheus text format ─────────────────────────────────────────────
+function parsePrometheus(text) {
+  const counters = {};
+  for (const line of text.split('\n')) {
+    if (line.startsWith('#') || !line.trim()) continue;
+    const m = line.match(/^([^\s{]+)(?:\{([^}]*)\})?\s+([\d.e+\-]+)/);
+    if (!m) continue;
+    const name   = m[1];
+    const lstr   = m[2] || '';
+    const value  = parseFloat(m[3]);
+    const labels = {};
+    for (const lm of lstr.matchAll(/(\w+)="([^"]+)"/g)) {
+      labels[lm[1]] = lm[2];
+    }
+    if (!counters[name]) counters[name] = [];
+    counters[name].push({ labels, value });
+  }
+  return counters;
+}
+
+function sumMetric(counters, name) {
+  return (counters[name] || []).reduce((t, r) => t + r.value, 0);
+}
+
+function groupBy(counters, name, label) {
+  const map = {};
+  for (const r of counters[name] || []) {
+    const k = r.labels[label] || '(unknown)';
+    map[k] = (map[k] || 0) + r.value;
+  }
+  return map;
+}
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+function renderBars(containerEl, items, colorFn) {
+  if (!items.length) { containerEl.innerHTML = '<em style="color:var(--muted);font-size:.82rem">No data.</em>'; return; }
+  const max = Math.max(...items.map(i => i.val), 1);
+  containerEl.innerHTML = items.map(item => `
+<div class="bar-row">
+  <div class="bar-label">
+    <span class="bar-name">${esc(item.label)}</span>
+    <span class="bar-count">${item.display || item.val.toLocaleString()}</span>
+  </div>
+  <div class="bar-track">
+    <div class="bar-fill ${colorFn ? colorFn(item) : ''}" style="width:${Math.round(item.val/max*100)}%"></div>
+  </div>
+</div>`).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtUptime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ── Main load ────────────────────────────────────────────────────────────────
+async function loadAll() {
+  try {
+    const [promRes, toolsRes] = await Promise.all([
+      fetch(API + '/metrics', { headers: hdr() }),
+      fetch(API + '/admin/metrics/tools', { headers: hdr() }),
+    ]);
+
+    if (!promRes.ok && promRes.status === 401) {
+      setStatus('Auth failed — check token.'); return;
+    }
+
+    const promText = promRes.ok ? await promRes.text() : '';
+    const toolsData = toolsRes.ok ? await toolsRes.json() : null;
+
+    const c = parsePrometheus(promText);
+
+    // ── Summary stats ────────────────────────────────────────────────────────
+    const totalCalls  = sumMetric(c, 'tool_calls_total');
+    const provReq     = sumMetric(c, 'provider_requests_total');
+    const provErr     = sumMetric(c, 'provider_errors_total');
+    const errRate     = provReq > 0 ? (provErr / provReq * 100).toFixed(1) : '0.0';
+    const approvals   = sumMetric(c, 'approvals_queued_total');
+    const valErr      = sumMetric(c, 'tool_validation_errors_total');
+    const uptime      = sumMetric(c, 'process_uptime_seconds');
+
+    document.getElementById('s-total-calls').textContent = totalCalls.toLocaleString();
+    document.getElementById('s-provider-req').textContent = provReq.toLocaleString();
+    document.getElementById('s-provider-err').textContent = provErr.toLocaleString();
+    document.getElementById('s-error-rate').textContent = errRate + '%';
+    document.getElementById('s-approvals').textContent = approvals.toLocaleString();
+    document.getElementById('s-val-err').textContent = valErr.toLocaleString();
+    document.getElementById('s-uptime').textContent = uptime > 0 ? fmtUptime(uptime) : '–';
+
+    // ── Tool usage bars ──────────────────────────────────────────────────────
+    const toolBarsEl = document.getElementById('tool-bars');
+    if (toolsData && toolsData.tools && toolsData.tools.length) {
+      const tools = [...toolsData.tools].sort((a, b) => b.calls - a.calls).slice(0, 20);
+      document.getElementById('tools-total').textContent =
+        `${toolsData.total?.toLocaleString() ?? 0} total calls`;
+      renderBars(toolBarsEl, tools.map(t => ({ label: t.tool, val: t.calls })));
+    } else {
+      toolBarsEl.innerHTML = '<em style="color:var(--muted);font-size:.82rem">No tool calls recorded yet.</em>';
+    }
+
+    // ── Provider table ───────────────────────────────────────────────────────
+    const reqByProv = groupBy(c, 'provider_requests_total', 'provider');
+    const errByProv = groupBy(c, 'provider_errors_total', 'provider');
+    const provTbody = document.getElementById('provider-table');
+    const providers = [...new Set([...Object.keys(reqByProv), ...Object.keys(errByProv)])];
+    if (providers.length) {
+      provTbody.innerHTML = providers.sort().map(p => {
+        const req = reqByProv[p] || 0;
+        const err = errByProv[p] || 0;
+        const pct = req > 0 ? (err / req * 100).toFixed(1) : '0.0';
+        const pctColor = parseFloat(pct) > 10 ? 'var(--red)' : parseFloat(pct) > 2 ? 'var(--yellow)' : 'var(--muted)';
+        return `<tr>
+          <td style="font-weight:600">${esc(p)}</td>
+          <td>${req.toLocaleString()}</td>
+          <td style="color:${err>0?'var(--red)':'var(--muted)'}">${err.toLocaleString()}</td>
+          <td><span style="color:${pctColor}">${pct}%</span></td>
+        </tr>`;
+      }).join('');
+    } else {
+      provTbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No provider data yet.</td></tr>';
+    }
+
+    // ── Latency bars ─────────────────────────────────────────────────────────
+    const latEl = document.getElementById('latency-bars');
+    if (toolsData && toolsData.tools) {
+      const withLatency = toolsData.tools
+        .filter(t => t.p50_seconds != null)
+        .sort((a, b) => (b.p50_seconds || 0) - (a.p50_seconds || 0))
+        .slice(0, 15);
+      if (withLatency.length) {
+        renderBars(latEl, withLatency.map(t => ({
+          label: t.tool,
+          val: t.p50_seconds,
+          display: `p50: ${(t.p50_seconds * 1000).toFixed(0)}ms  mean: ${t.mean_seconds != null ? (t.mean_seconds * 1000).toFixed(0) + 'ms' : '–'}`,
+        })), item => item.val > 2 ? 'red' : item.val > 0.5 ? 'yellow' : 'green');
+      } else {
+        latEl.innerHTML = '<em style="color:var(--muted);font-size:.82rem">No latency data yet.</em>';
+      }
+    }
+
+    document.getElementById('last-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+    setStatus(`Loaded — ${totalCalls.toLocaleString()} tool calls · ${provReq.toLocaleString()} provider requests.`);
+
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+  }
+}
+
+// Auto-load if token is saved
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('intelli_token');
+  if (saved) {
+    document.getElementById('token-input').value = saved;
+    loadAll();
+  }
+  document.getElementById('token-input').addEventListener('change', () => {
+    sessionStorage.setItem('intelli_token', document.getElementById('token-input').value.trim());
+  });
+});
+</script>
+</body>
+</html>

@@ -306,7 +306,193 @@
       flex-shrink: 0;
     }
     .token-stat { display: flex; gap: 3px; }
-    .token-stat .val { color: var(--text); font-weight: 600; }
+    .token-stat .val { color: var(--text); font-weight: 600; }    /* context-fill bar */
+    #ctx-fill-wrap {
+      display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+    }
+    #ctx-fill-bar {
+      width: 80px; height: 5px; background: var(--surface2);
+      border-radius: 3px; overflow: hidden; border: 1px solid var(--border);
+    }
+    #ctx-fill-inner {
+      height: 100%; width: 0%; background: var(--green);
+      border-radius: 3px; transition: width .4s, background .4s;
+    }
+    #ctx-fill-pct { font-size: .65rem; color: var(--muted); min-width: 28px; }
+    /* ── Tool steps ───────────────────────────────────────────── */
+    .tool-steps {
+      display: flex; flex-direction: column; gap: 4px;
+      margin-bottom: 8px;
+    }
+    .tool-step {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 8px; font-size: .72rem;
+      color: var(--muted);
+    }
+    .tool-step .ts-icon { font-size: .9rem; }
+    .tool-step .ts-name { color: var(--accent2); font-weight: 600; flex-shrink: 0; }
+    .tool-step .ts-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .tool-step.done { border-color: var(--green); color: var(--text); }
+    .tool-step.done .ts-icon { color: var(--green); }
+    .tool-step.error { border-color: var(--red); }
+    .tool-steps-summary {
+      font-size: .7rem; color: var(--muted); cursor: pointer;
+      margin-bottom: 6px; display: flex; align-items: center; gap: 4px;
+    }
+
+    /* Coding-agent: terminal output block */
+    .tool-terminal {
+      font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      background: #0d1117;
+      color: #3ddc84;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: .76rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      overflow-y: auto;
+      max-height: 300px;
+      margin: 6px 0 0;
+    }
+    .tool-terminal.error { color: #f97583; border-color: #f97583; }
+    .tool-file-header {
+      font-size: .72rem;
+      color: var(--muted);
+      font-family: monospace;
+      margin: 6px 0 0;
+      padding: 2px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Image preview bar */
+    #img-preview-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 6px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      display: none;   /* hidden until images are attached */
+    }
+    .img-pill {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .img-pill img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .img-pill .rm-btn {
+      position: absolute;
+      top: 1px; right: 2px;
+      background: rgba(0,0,0,.65);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 16px; height: 16px;
+      font-size: 10px;
+      line-height: 16px;
+      text-align: center;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    /* Drop overlay */
+    #messages.drag-over::after {
+      content: '📎 Drop images here';
+      position: absolute;
+      inset: 0;
+      background: rgba(88,166,255,.15);
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      color: var(--accent);
+      pointer-events: none;
+      z-index: 20;
+    }
+    #messages { position: relative; }  /* needed for ::after overlay */
+
+    /* ── Voice I/O ────────────────────────────────────────────────── */
+    #btn-mic {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 12px;
+      height: 36px;
+      font-size: 1rem;
+      transition: .15s;
+      flex-shrink: 0;
+    }
+    #btn-mic:hover { border-color: var(--accent); color: var(--text); }
+    #btn-mic.recording {
+      border-color: var(--red);
+      color: var(--red);
+      animation: mic-pulse 1s infinite;
+    }
+    @keyframes mic-pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,107,107,.6); }
+      50%      { box-shadow: 0 0 0 6px rgba(255,107,107,0); }
+    }
+    .speak-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .85rem;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity .15s, color .15s;
+    }
+    .msg:hover .speak-btn { opacity: 1; }
+    .speak-btn:hover { color: var(--accent2); }
+    .speak-btn.playing { color: var(--green); opacity: 1; animation: mic-pulse 1s infinite; }
+    #btn-autospeak.active { color: var(--green); }
+
+    /* ── Tool Approval Banner ─────────────────────────────────── */
+    #approval-banner {
+      position: sticky; top: 0; z-index: 100;
+      background: #1a0f1a; border: 1.5px solid var(--red);
+      border-radius: 8px; margin: 8px 12px 0;
+      padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      animation: approval-slide-in .2s ease;
+    }
+    #approval-banner.hidden { display: none; }
+    @keyframes approval-slide-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .approval-header { display: flex; align-items: center; gap: 8px; }
+    .approval-icon { font-size: 1.1rem; }
+    .approval-title { font-weight: 700; color: var(--red); font-size: .88rem; flex: 1; }
+    .approval-timer { font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .approval-body { font-size: .78rem; color: var(--muted); }
+    .approval-tool { color: var(--yellow); font-weight: 600; }
+    .approval-args {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; padding: 6px 8px; font-family: monospace;
+      font-size: .72rem; color: var(--text); max-height: 80px;
+      overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .approval-btns { display: flex; gap: 8px; }
+    .approval-btn {
+      flex: 1; border: none; border-radius: 6px; padding: 6px 0;
+      font-size: .82rem; font-weight: 700; cursor: pointer;
+    }
+    .approval-btn.allow { background: var(--green); color: #000; }
+    .approval-btn.deny  { background: #7f2a2a; color: var(--text); }
+    .approval-btn:hover { opacity: .85; }
+    .approval-btn:disabled { opacity: .4; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -319,6 +505,9 @@
       <button class="header-btn" id="btn-clear" title="Clear conversation" aria-label="Clear conversation">
         &#128465; Clear
       </button>
+      <a href="sessions.html" class="header-btn" title="Session history" aria-label="Session history">
+        &#128196; History
+      </a>
       <a href="index.html" class="header-btn" title="Admin Hub" aria-label="Go to Admin Hub">
         &#9881; Hub
       </a>
@@ -344,6 +533,8 @@
     </select>
     <label for="inp-model">Model</label>
     <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
+    <label for="sel-persona" style="margin-left:4px">Persona</label>
+    <select id="sel-persona" aria-label="Select persona" style="min-width:110px"></select>
     <div class="spacer"></div>
     <span id="status-pill" style="font-size:.72rem;color:var(--muted)" aria-live="polite"></span>
   </div>
@@ -359,14 +550,38 @@
     </button>
     <a href="workspace.html" class="ctx-btn" title="Manage workspace files and skills" style="text-decoration:none">
       ✏️ Edit workspace
-    </a>
-    <span id="page-ctx-pill" class="ctx-pill" style="display:none"></span>
+    </a>    <button class="ctx-btn" id="btn-canvas" title="Open Canvas panel" onclick="openCanvas()">
+      🎨 Canvas
+    </button>
+    <button class="ctx-btn" id="btn-memory" title="Browse vector memory" onclick="openMemory()">
+      🧠 Memory
+    </button>
+    <button class="ctx-btn" id="btn-coderoot" title="Open coding workspace folder" onclick="openCodeRoot()" style="font-family:monospace;font-size:.68rem">
+      💻 Code
+    </button>    <span id="page-ctx-pill" class="ctx-pill" style="display:none"></span>
     <span id="ws-pill" class="ws-pill" style="display:none">🟢 workspace active</span>
     <div class="spacer"></div>
     <span id="ctx-info" style="font-size:.68rem;color:var(--muted)"></span>
   </div>
 
   <!-- ── Messages ───────────────────────────────────────────────── -->
+  <!-- Approval Banner (shows when agent needs permission to run a risky tool) -->
+  <div id="approval-banner" class="hidden" role="alertdialog" aria-label="Tool approval required">
+    <div class="approval-header">
+      <span class="approval-icon">🔐</span>
+      <span class="approval-title">Approval Required</span>
+      <span class="approval-timer" id="approval-timer">60s</span>
+    </div>
+    <div class="approval-body">
+      The agent wants to run <span class="approval-tool" id="approval-tool-name">tool</span>:
+    </div>
+    <div class="approval-args" id="approval-args"></div>
+    <div class="approval-btns">
+      <button class="approval-btn allow" id="approval-allow-btn" onclick="handleApproval(true)">✓ Allow</button>
+      <button class="approval-btn deny"  id="approval-deny-btn"  onclick="handleApproval(false)">✗ Deny</button>
+    </div>
+  </div>
+
   <div id="messages" role="log" aria-live="polite" aria-label="Conversation messages">
     <div id="empty-state">
       <div class="big-icon">&#129302;</div>
@@ -377,9 +592,13 @@
 
   <!-- ── Input area ─────────────────────────────────────────────── -->
   <div id="input-area">
-    <textarea id="msg-input" rows="1" placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
-              aria-label="Message input" aria-multiline="true"></textarea>
-    <button id="btn-send" aria-label="Send message">&#9654; Send</button>
+    <div id="img-preview-bar" aria-label="Attached images"></div>
+    <div style="display:flex;gap:6px;align-items:flex-end">
+      <textarea id="msg-input" rows="1" placeholder="Ask anything… (Enter / drag & drop images)"
+                aria-label="Message input" aria-multiline="true"></textarea>
+      <button id="btn-mic" title="Hold to record voice input (Whisper STT)" aria-label="Record voice"> 🎤 </button>
+      <button id="btn-send" aria-label="Send message">&#9654; Send</button>
+    </div>
   </div>
 
   <!-- ── Token counter ──────────────────────────────────────────── -->
@@ -387,6 +606,17 @@
     <div class="token-stat">Messages: <span class="val" id="stat-msgs">0</span></div>
     <div class="token-stat">Tokens&nbsp;in: <span class="val" id="stat-in">—</span></div>
     <div class="token-stat">Tokens&nbsp;out: <span class="val" id="stat-out">—</span></div>
+    <div id="ctx-fill-wrap" title="Estimated context window usage">
+      <span>Context:</span>
+      <div id="ctx-fill-bar"><div id="ctx-fill-inner"></div></div>
+      <span id="ctx-fill-pct">0%</span>
+    </div>
+    <button class="ctx-btn" id="btn-compact" title="Summarize conversation history to free up context" onclick="compactHistory()" style="font-size:.65rem;padding:2px 7px">
+      🗅 Compact
+    </button>
+    <button class="ctx-btn" id="btn-autospeak" title="Auto-speak AI responses" onclick="toggleAutoSpeak()" style="font-size:.65rem;padding:2px 7px">
+      🔊 Auto-speak
+    </button>
     <div class="spacer"></div>
     <span id="stat-model" style="color:var(--muted)"></span>
   </div>
@@ -406,9 +636,23 @@
     let _busy     = false;
     let _totalIn  = 0;
     let _totalOut = 0;
-    let _usePageCtx  = false;
-    let _useWorkspace = false;
-    let _pageSnapshot = null; // cached tab snapshot
+    let _usePageCtx   = false;
+    let _useWorkspace  = false;
+    let _pageSnapshot  = null; // cached tab snapshot
+    let _attachedImages = []; // [{dataUri, mimeType}] pending attached images
+    let _autoSpeak     = localStorage.getItem('intelli_autospeak') === '1';
+    let _mediaRecorder = null;
+    let _isRecording   = false;
+    let _currentAudio  = null; // currently playing HTMLAudioElement
+    let _persona       = localStorage.getItem('intelli_persona') || 'intelli';
+    let _sessionId     = localStorage.getItem('intelli_session_id') || generateUUID();
+    // Persist session_id across page reloads so history is continuous
+    localStorage.setItem('intelli_session_id', _sessionId);
+
+    function generateUUID() {
+      return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,
+        c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    }
 
     /* ── DOM refs ───────────────────────────────────────────────── */
     const $loginBar   = document.getElementById('login-bar');
@@ -416,11 +660,13 @@
     const $btnLogin   = document.getElementById('btn-login');
     const $messages   = document.getElementById('messages');
     const $emptyState = document.getElementById('empty-state');
-    const $msgInput   = document.getElementById('msg-input');
+    const $msgInput       = document.getElementById('msg-input');
+    const $imgPreviewBar  = document.getElementById('img-preview-bar');
     const $btnSend    = document.getElementById('btn-send');
     const $btnClear   = document.getElementById('btn-clear');
     const $selProv    = document.getElementById('sel-provider');
     const $inpModel   = document.getElementById('inp-model');
+    const $selPersona = document.getElementById('sel-persona');
     const $statusPill = document.getElementById('status-pill');
     const $statMsgs   = document.getElementById('stat-msgs');
     const $statIn     = document.getElementById('stat-in');
@@ -444,6 +690,54 @@
     }
 
     applyToken(_token);
+
+    /* ── Persona selector ────────────────────────────────────────── */
+    async function loadPersonas() {
+      if (!_token) return;
+      try {
+        const r = await fetch(`${GW}/personas`, {
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) return;
+        const list = await r.json();
+        $selPersona.innerHTML = list.map(p =>
+          `<option value="${p.slug}" data-avatar="${p.avatar || '🤖'}"${p.slug === _persona ? ' selected' : ''}>
+            ${p.avatar || '🤖'} ${p.name}
+          </option>`
+        ).join('');
+      } catch (e) {
+        // Persona load is non-critical
+      }
+    }
+    loadPersonas();
+
+    $selPersona.addEventListener('change', () => {
+      _persona = $selPersona.value;
+      localStorage.setItem('intelli_persona', _persona);
+    });
+
+    /* ── Resume session from history page ───────────────────────── */
+    async function tryResumeSession() {
+      const resumeId = localStorage.getItem('intelli_resume_session_id');
+      if (!resumeId || !_token) return;
+      localStorage.removeItem('intelli_resume_session_id');
+      try {
+        const r = await fetch(`${GW}/sessions/${encodeURIComponent(resumeId)}`, {
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
+        if (!msgs.length) return;
+        _msgs = msgs.map(m => ({ role: m.role, content: m.content }));
+        // Render them
+        $emptyState.style.display = 'none';
+        for (const m of _msgs) appendMsg(m.role, m.content);
+        setStatus(`Resumed session (${_msgs.length} messages)`, 'ok');
+      } catch (e) { /* best-effort */ }
+    }
+    // Delay slightly so token is applied first
+    setTimeout(() => tryResumeSession(), 200);
 
     $btnLogin.addEventListener('click', () => {
       applyToken($loginToken.value);
@@ -583,7 +877,10 @@
       if (role === 'assistant') {
         const badge = document.createElement('span');
         badge.className = 'provider-badge';
-        badge.textContent = meta.provider || $selProv.value;
+        // Show persona avatar if set
+        const personaAvatar = ($selPersona && $selPersona.selectedOptions[0])
+          ? ($selPersona.selectedOptions[0].dataset.avatar || '🤖') : '🤖';
+        badge.textContent = `${personaAvatar} ${meta.provider || $selProv.value}`;
         metaDiv.appendChild(badge);
         if (meta.model) {
           const m = document.createElement('span');
@@ -599,6 +896,13 @@
       if (role === 'assistant' && content) {
         body.innerHTML = renderMessageBody(content);
         attachAddonButtons(body, content);
+        // Add speaker button for TTS
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'speak-btn';
+        speakBtn.title = 'Read aloud';
+        speakBtn.textContent = '🔊';
+        speakBtn.onclick = () => speakText(content, speakBtn);
+        metaDiv.appendChild(speakBtn);
       } else {
         body.textContent = content;
       }
@@ -622,6 +926,11 @@
       badge.textContent = $selProv.value;
       metaDiv.appendChild(badge);
 
+      // Tool steps container (populated during streaming)
+      const toolSteps = document.createElement('div');
+      toolSteps.className = 'tool-steps';
+      toolSteps.style.display = 'none';
+
       const body = document.createElement('div');
       body.className = 'msg-body thinking';
       body.textContent = 'Thinking';
@@ -631,16 +940,17 @@
       body.appendChild(cursor);
 
       wrap.appendChild(metaDiv);
+      wrap.appendChild(toolSteps);
       wrap.appendChild(body);
       $messages.appendChild(wrap);
       $messages.scrollTop = $messages.scrollHeight;
-      return { wrap, body };
+      return { wrap, body, toolSteps };
     }
 
     /* ── Send ───────────────────────────────────────────────────── */
     async function sendMessage() {
       const text = $msgInput.value.trim();
-      if (!text || _busy) return;
+      if ((!text && _attachedImages.length === 0) || _busy) return;
       if (!_token) {
         setStatus('⚠ Connect a token first', 'warn');
         $loginBar.classList.remove('hidden');
@@ -652,11 +962,28 @@
       $msgInput.value = '';
       autoResize();
 
-      _msgs.push({ role: 'user', content: text });
-      appendMsg('user', text);
+      // Build user message — vision content array if images attached
+      let userContent;
+      if (_attachedImages.length > 0) {
+        const parts = [];
+        if (text) parts.push({ type: 'text', text });
+        _attachedImages.forEach(img => parts.push({
+          type: 'image_url',
+          image_url: { url: img.dataUri },
+        }));
+        userContent = parts;
+      } else {
+        userContent = text;
+      }
+      const attachCount = _attachedImages.length;
+      _attachedImages = [];
+      _renderImagePreviewBar();
+
+      _msgs.push({ role: 'user', content: userContent });
+      appendMsg('user', attachCount > 0 ? `🖼️×${attachCount}  ${text}` : text);
       updateStats();
 
-      const { wrap: thinkingEl, body: thinkingBody } = appendThinking();
+      const { wrap: thinkingEl, body: thinkingBody, toolSteps: toolStepsEl } = appendThinking();
       setStatus('Streaming…', '');
 
       const provider = $selProv.value;
@@ -677,6 +1004,9 @@
             max_tokens:  2048,
             use_workspace:    _useWorkspace,
             use_page_context: _usePageCtx,
+            use_tools:        true,
+            persona:          _persona,
+            session_id:       _sessionId,
           }),
         });
 
@@ -729,6 +1059,52 @@
               break outer;
             }
 
+            // Tool call / result events
+            if (ev.type === 'tool_call') {
+              toolStepsEl.style.display = 'flex';
+              setStatus(`🔧 Calling ${ev.tool}…`, '');
+              const step = document.createElement('div');
+              step.className = 'tool-step';
+              step.id = `ts-${ev.tool}-${Date.now()}`;
+              const argSummary = ev.args ? Object.entries(ev.args).map(([k,v]) => `${k}: ${String(v).slice(0,60)}`).join(', ') : '';
+              step.innerHTML = `<span class="ts-icon">⏳</span><span class="ts-name">${ev.tool}</span><span class="ts-info">${argSummary}</span>`;
+              toolStepsEl.appendChild(step);
+              $messages.scrollTop = $messages.scrollHeight;
+              continue;
+            }
+
+            if (ev.type === 'tool_result') {
+              // Mark last matching tool-call step as done
+              const _TERMINAL_TOOLS = new Set(['shell_exec', 'file_read', 'file_write', 'file_patch', 'file_delete', 'file_list']);
+              const steps = toolStepsEl.querySelectorAll('.tool-step');
+              for (let i = steps.length - 1; i >= 0; i--) {
+                if (steps[i].querySelector('.ts-name')?.textContent === ev.tool) {
+                  steps[i].classList.add('done');
+                  steps[i].querySelector('.ts-icon').textContent = '✓';
+                  const result = ev.result || '';
+                  const preview = result.replace(/\n/g, ' ').slice(0, 80);
+                  steps[i].querySelector('.ts-info').textContent = preview;
+                  // Render expanded terminal/file block below the step
+                  if (_TERMINAL_TOOLS.has(ev.tool) && result.length > 0) {
+                    const block = document.createElement('div');
+                    block.className = 'tool-terminal' +
+                      (result.startsWith('[ERROR]') || result.startsWith('[TIMEOUT]') || result.startsWith('[BLOCKED]') ? ' error' : '');
+                    block.textContent = result.slice(0, 4000);
+                    steps[i].insertAdjacentElement('afterend', block);
+                  }
+                  break;
+                }
+              }
+              setStatus('Streaming…', '');
+              continue;
+            }
+
+            // Tool approval required — show inline consent banner
+            if (ev.type === 'approval_required') {
+              showApprovalBanner(ev);
+              continue;
+            }
+
             if (!ev.done) {
               // token event
               fullContent += ev.token || '';
@@ -752,6 +1128,20 @@
           attachAddonButtons(thinkingBody, assistantContent);
           _msgs.push({ role: 'assistant', content: assistantContent });
 
+          // Add speaker button to this streamed message
+          const metaDivStreamed = thinkingEl.querySelector('.msg-meta');
+          if (metaDivStreamed) {
+            const speakBtn = document.createElement('button');
+            speakBtn.className = 'speak-btn';
+            speakBtn.title = 'Read aloud';
+            speakBtn.textContent = '🔊';
+            speakBtn.onclick = () => speakText(assistantContent, speakBtn);
+            metaDivStreamed.appendChild(speakBtn);
+          }
+
+          // Auto-speak if enabled
+          if (_autoSpeak) speakText(assistantContent);
+
           // Update provider badge & model
           const badge = thinkingEl.querySelector('.provider-badge');
           if (badge) badge.textContent = finalResult.provider || provider;
@@ -772,6 +1162,20 @@
           if (usage.prompt_tokens)     { _totalIn  += usage.prompt_tokens;     }
           if (usage.completion_tokens) { _totalOut += usage.completion_tokens; }
           updateStats();
+
+          // Failover warning: notify user if provider switched mid-stream
+          if (finalResult.failover_used) {
+            const fo = finalResult;
+            setStatus(
+              `⚠ Switched to ${fo.actual_provider}/${fo.actual_model} — ${(fo.failover_reason || '').slice(0, 80)}`,
+              'warn'
+            );
+            // Also show a subtle note under the message
+            const foNote = document.createElement('div');
+            foNote.style.cssText = 'font-size:.65rem;color:var(--yellow);margin-top:4px;';
+            foNote.textContent = `⚡ Failover: responded via ${fo.actual_provider}`;
+            thinkingBody.appendChild(foNote);
+          }
         }
 
         setStatus('Ready', 'ok');
@@ -800,6 +1204,40 @@
       $statMsgs.textContent = _msgs.filter(m => m.role === 'user').length;
       $statIn.textContent   = _totalIn  || '—';
       $statOut.textContent  = _totalOut || '—';
+      updateContextFill();
+    }
+
+    // Rough token estimate: 4 chars ≈ 1 token
+    function estimateTokens(msgs) {
+      return msgs.reduce((t, m) => t + 4 + Math.ceil((m.content || '').length / 4), 0);
+    }
+
+    const _MODEL_LIMITS = {
+      'gpt-4o': 128000, 'gpt-4o-mini': 128000, 'gpt-4': 8192, 'gpt-4-turbo': 128000,
+      'gpt-4.1': 128000, 'gpt-4.1-mini': 128000, 'o1': 200000, 'o1-mini': 128000, 'o3-mini': 200000,
+      'claude-sonnet-4.5': 200000, 'claude-sonnet-4.6': 200000, 'claude-3-opus-20240229': 200000,
+      'llama3': 8192, 'mistral': 32000, 'gemini-1.5-pro': 1000000,
+    };
+
+    function contextLimit() {
+      const m = ($inpModel.value.trim() || '').toLowerCase();
+      for (const [key, lim] of Object.entries(_MODEL_LIMITS)) {
+        if (m.includes(key) || key.includes(m.split('-')[0])) return lim;
+      }
+      return 32000;
+    }
+
+    function updateContextFill() {
+      const used  = estimateTokens(_msgs);
+      const limit = contextLimit();
+      const pct   = Math.min(100, Math.round((used / limit) * 100));
+      const inner = document.getElementById('ctx-fill-inner');
+      const pctEl = document.getElementById('ctx-fill-pct');
+      if (!inner) return;
+      inner.style.width = pct + '%';
+      inner.style.background = pct >= 85 ? 'var(--red)' : pct >= 65 ? 'var(--yellow)' : 'var(--green)';
+      pctEl.textContent = pct + '%';
+      if (pctEl) pctEl.style.color = pct >= 85 ? 'var(--red)' : pct >= 65 ? 'var(--yellow)' : 'var(--muted)';
     }
 
     function autoResize() {
@@ -819,10 +1257,205 @@
 
     $msgInput.addEventListener('input', autoResize);
 
+    /* ── Image drag-drop & paste ────────────────────────────────── */
+    function _addImages(files) {
+      [...files].forEach(f => {
+        if (!f.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          _attachedImages.push({ dataUri: e.target.result, mimeType: f.type });
+          _renderImagePreviewBar();
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+
+    function _renderImagePreviewBar() {
+      $imgPreviewBar.innerHTML = '';
+      if (_attachedImages.length === 0) {
+        $imgPreviewBar.style.display = 'none';
+        return;
+      }
+      $imgPreviewBar.style.display = 'flex';
+      _attachedImages.forEach((img, idx) => {
+        const pill = document.createElement('div');
+        pill.className = 'img-pill';
+        const im = document.createElement('img');
+        im.src = img.dataUri;
+        im.alt = `attachment ${idx + 1}`;
+        const rm = document.createElement('button');
+        rm.className = 'rm-btn';
+        rm.textContent = '×';
+        rm.title = 'Remove image';
+        rm.onclick = () => {
+          _attachedImages.splice(idx, 1);
+          _renderImagePreviewBar();
+        };
+        pill.appendChild(im);
+        pill.appendChild(rm);
+        $imgPreviewBar.appendChild(pill);
+      });
+    }
+
+    // Drag over messages area
+    $messages.addEventListener('dragover', e => {
+      if ([...e.dataTransfer.items].some(i => i.kind === 'file' && i.type.startsWith('image/'))) {
+        e.preventDefault();
+        $messages.classList.add('drag-over');
+      }
+    });
+    $messages.addEventListener('dragleave', () => $messages.classList.remove('drag-over'));
+    $messages.addEventListener('drop', e => {
+      e.preventDefault();
+      $messages.classList.remove('drag-over');
+      _addImages(e.dataTransfer.files);
+    });
+
+    // Paste images from clipboard
+    document.addEventListener('paste', e => {
+      const items = [...(e.clipboardData?.items || [])].filter(i => i.kind === 'file' && i.type.startsWith('image/'));
+      if (items.length > 0) {
+        e.preventDefault();
+        _addImages(items.map(i => i.getAsFile()));
+      }
+    });
+
+    /* ── Voice I/O ──────────────────────────────────────────────── */
+    const $btnMic       = document.getElementById('btn-mic');
+    const $btnAutoSpeak = document.getElementById('btn-autospeak');
+    if (_autoSpeak) $btnAutoSpeak?.classList.add('active');
+
+    function toggleAutoSpeak() {
+      _autoSpeak = !_autoSpeak;
+      localStorage.setItem('intelli_autospeak', _autoSpeak ? '1' : '0');
+      $btnAutoSpeak?.classList.toggle('active', _autoSpeak);
+      setStatus(_autoSpeak ? '🔊 Auto-speak on' : '🔇 Auto-speak off', '');
+    }
+
+    async function speakText(text, btn = null) {
+      if (!_token) return;
+      // Strip markdown-like syntax from text before speaking
+      const clean = text
+        .replace(/```[\s\S]*?```/g, 'code block')
+        .replace(/`[^`]+`/g, '')
+        .replace(/[*_~#>]/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .trim()
+        .slice(0, 3000);
+      if (!clean) return;
+
+      // Stop any currently playing audio
+      if (_currentAudio) {
+        _currentAudio.pause();
+        _currentAudio = null;
+      }
+
+      if (btn) { btn.classList.add('playing'); btn.textContent = '⏹'; }
+
+      try {
+        const resp = await fetch(`${GW}/voice/speak`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+          body: JSON.stringify({ text: clean }),
+        });
+        if (!resp.ok) {
+          setStatus('TTS failed', 'err');
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+          return;
+        }
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        _currentAudio = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          _currentAudio = null;
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+        };
+        audio.onerror = () => {
+          _currentAudio = null;
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+        };
+        audio.play();
+      } catch (e) {
+        setStatus('TTS error: ' + e.message, 'err');
+        if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+      }
+    }
+
+    // Mic button — hold to record, release to transcribe
+    if ($btnMic) {
+      let _chunks = [];
+      let _stream = null;
+
+      async function startRecording() {
+        if (_isRecording) return;
+        try {
+          _stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          _chunks = [];
+          _mediaRecorder = new MediaRecorder(_stream);
+          _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _chunks.push(e.data); };
+          _mediaRecorder.onstop = async () => {
+            _stream?.getTracks().forEach(t => t.stop());
+            $btnMic.classList.remove('recording');
+            $btnMic.textContent = '🎙';
+            setStatus('Transcribing…', '');
+            const blob = new Blob(_chunks, { type: 'audio/webm' });
+            const form = new FormData();
+            form.append('file', blob, 'recording.webm');
+            try {
+              const r = await fetch(`${GW}/voice/transcribe`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${_token}` },
+                body: form,
+              });
+              if (r.ok) {
+                const d = await r.json();
+                if (d.text) {
+                  $msgInput.value = ($msgInput.value + ' ' + d.text).trim();
+                  autoResize();
+                  setStatus('✓ Transcribed', 'ok');
+                }
+              } else {
+                const e = await r.json().catch(() => ({ detail: r.status }));
+                setStatus('Transcription failed: ' + (e.detail || r.status), 'err');
+              }
+            } catch (err) {
+              setStatus('Transcription error: ' + err.message, 'err');
+            }
+            _isRecording = false;
+            _mediaRecorder = null;
+          };
+          _mediaRecorder.start();
+          _isRecording = true;
+          $btnMic.classList.add('recording');
+          $btnMic.textContent = '⏹';
+          setStatus('🎙 Recording… (click to stop)', '');
+        } catch (e) {
+          setStatus('Mic error: ' + e.message, 'err');
+        }
+      }
+
+      function stopRecording() {
+        if (_mediaRecorder && _isRecording) {
+          _mediaRecorder.stop();
+        }
+      }
+
+      // Toggle on click
+      $btnMic.addEventListener('click', () => {
+        if (_isRecording) stopRecording();
+        else startRecording();
+      });
+    }
+
     $btnClear.addEventListener('click', () => {
       _msgs      = [];
       _totalIn   = 0;
       _totalOut  = 0;
+      // Start a fresh session for the next conversation
+      _sessionId = generateUUID();
+      localStorage.setItem('intelli_session_id', _sessionId);
       $messages.innerHTML = '';
       $messages.appendChild($emptyState);
       $emptyState.style.display = 'flex';
@@ -853,6 +1486,148 @@
     /* ── Init ───────────────────────────────────────────────────── */
     setStatus('Ready', 'ok');
     $msgInput.focus();
+    /* ── Canvas ───────────────────────────────────────────── */
+    function openCanvas() {
+      // Open canvas in a new tab (Electron tab via IPC, or plain window.open fallback)
+      const url = `${GW}/ui/canvas.html`;
+      if (window.intelliAPI?.newTab) {
+        window.intelliAPI.newTab(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    function openMemory() {
+      const url = `${GW}/ui/memory.html`;
+      if (window.intelliAPI?.newTab) {
+        window.intelliAPI.newTab(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    async function openCodeRoot() {
+      // Show the coding workspace path; fetch it from the gateway
+      try {
+        const r = await fetch(`${GW}/coding/info`, {
+          headers: { Authorization: `Bearer ${_token}` },
+        });
+        if (r.ok) {
+          const d = await r.json();
+          setStatus(`💻 Workspace: ${d.root}`, '');
+        } else {
+          setStatus('💻 Coding workspace (path unknown — connect first)', '');
+        }
+      } catch {
+        setStatus('💻 Coding workspace active', '');
+      }
+    }
+
+    /* ── Session compaction ───────────────────────────────── */
+    async function compactHistory() {
+      if (!_token) { setStatus('⚠ Connect first', 'warn'); return; }
+      if (_msgs.length < 4) { setStatus('Not enough history to compact', 'warn'); return; }
+      if (_busy) return;
+
+      const btn = document.getElementById('btn-compact');
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Compacting…';
+      setStatus('Compacting history…', '');
+
+      try {
+        const r = await fetch(`${GW}/chat/compact`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
+          body: JSON.stringify({
+            messages: _msgs,
+            provider: $selProv.value,
+            model:    $inpModel.value.trim() || '',
+          }),
+        });
+        if (!r.ok) {
+          const e = await r.json();
+          setStatus(`Compact failed: ${e.detail || r.status}`, 'err');
+          return;
+        }
+        const d = await r.json();
+        _msgs = d.compacted_messages;
+
+        // Show a system note in the chat UI
+        const note = document.createElement('div');
+        note.style.cssText = 'text-align:center;padding:6px;font-size:.72rem;color:var(--muted);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:4px 0;';
+        note.textContent = `🗅 History compacted — saved ~${d.tokens_saved.toLocaleString()} tokens (${Math.round(d.usage_before*100)}% → ${Math.round(d.usage_after*100)}%)`;
+        $messages.appendChild(note);
+        $messages.scrollTop = $messages.scrollHeight;
+
+        updateStats();
+        setStatus('✓ Compacted', 'ok');
+      } catch (err) {
+        setStatus(`Compact error: ${err.message}`, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    }
+
+    // ── Tool Approval Banner ──────────────────────────────────────
+    let _approvalId   = null;
+    let _approvalTimer = null;
+
+    function showApprovalBanner(ev) {
+      _approvalId = ev.id;
+      const banner    = document.getElementById('approval-banner');
+      const toolName  = document.getElementById('approval-tool-name');
+      const argsEl    = document.getElementById('approval-args');
+      const timerEl   = document.getElementById('approval-timer');
+
+      toolName.textContent = ev.tool || '?';
+      argsEl.textContent   = JSON.stringify(ev.args || {}, null, 2);
+      banner.classList.remove('hidden');
+      banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      // Countdown
+      let remaining = Math.round(ev.expires_in ?? 60);
+      timerEl.textContent = remaining + 's';
+      clearInterval(_approvalTimer);
+      _approvalTimer = setInterval(() => {
+        remaining--;
+        timerEl.textContent = remaining + 's';
+        if (remaining <= 0) {
+          clearInterval(_approvalTimer);
+          dismissApprovalBanner();
+        }
+      }, 1000);
+    }
+
+    function dismissApprovalBanner() {
+      document.getElementById('approval-banner').classList.add('hidden');
+      clearInterval(_approvalTimer);
+      _approvalId = null;
+      // Re-enable buttons
+      document.getElementById('approval-allow-btn').disabled = false;
+      document.getElementById('approval-deny-btn').disabled  = false;
+    }
+
+    async function handleApproval(allow) {
+      if (!_approvalId) return;
+      const aid = _approvalId;
+      document.getElementById('approval-allow-btn').disabled = true;
+      document.getElementById('approval-deny-btn').disabled  = true;
+
+      const action = allow ? 'approve' : 'deny';
+      try {
+        const r = await fetch(`/agent/approvals/${aid}/${action}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) console.warn('Approval request failed:', await r.text());
+      } catch (e) {
+        console.warn('Approval fetch error:', e);
+      } finally {
+        dismissApprovalBanner();
+      }
+    }
   </script>
 </body>
 </html>
