@@ -8,6 +8,24 @@ let _canFwd    = false;
 let _currentUrl = '';
 
 /* ── DOM refs ───────────────────────────────────────────────────── */
+
+/* Chrome-style tab groups — state */
+const CG_COLORS = [
+  { id: 'grey',   hex: '#5f6368' },
+  { id: 'blue',   hex: '#1a73e8' },
+  { id: 'red',    hex: '#d93025' },
+  { id: 'yellow', hex: '#f29900' },
+  { id: 'green',  hex: '#1e8e3e' },
+  { id: 'pink',   hex: '#e52592' },
+  { id: 'purple', hex: '#a142f4' },
+  { id: 'cyan',   hex: '#007b83' },
+];
+let _chromGroups = (() => { try { return JSON.parse(localStorage.getItem('chg') || '[]'); } catch { return []; } })();
+let _cgNextId    = _chromGroups.length ? Math.max(..._chromGroups.map(g => g.id)) + 1 : 1;
+let _cgPanelCtx  = null;   // { action, tabId?, groupId? }
+let _chgSelColor = CG_COLORS[1].hex;
+let _cgCtxId     = null;   // groupId for chip ctx menu
+
 const $tabs    = document.getElementById('tabs');
 const $newTab  = document.getElementById('new-tab-btn');
 const $back    = document.getElementById('btn-back');
@@ -35,6 +53,40 @@ function _makeTabSide(t) {
   return side;
 }
 
+/* ── Chrome-style tab group helpers ─────────────────────────────── */
+function _cgSave()         { localStorage.setItem('chg', JSON.stringify(_chromGroups)); }
+function _cgGroupOf(tabId) { return _chromGroups.find(g => g.tabIds.includes(Number(tabId))) || null; }
+
+function _cgMakeChip(g) {
+  const chip = document.createElement('div');
+  chip.className = 'tab-group-chip' + (g.collapsed ? ' collapsed' : '');
+  chip.dataset.groupId = g.id;
+  chip.style.background = g.color;
+  const dot = document.createElement('span');
+  dot.className = 'tab-group-chip-dot';
+  const lbl = document.createElement('span');
+  lbl.className = 'tab-group-chip-label';
+  lbl.textContent = g.name || '';
+  chip.append(dot, lbl);
+  chip.title = g.name ? `Groupe : ${g.name}` : 'Groupe sans nom';
+  chip.addEventListener('click', e => {
+    e.stopPropagation();
+    g.collapsed = !g.collapsed;
+    _cgSave();
+    renderTabs(_tabs);
+  });
+  chip.addEventListener('dblclick', e => {
+    e.stopPropagation();
+    _cgOpenGroupPanel('rename', { groupId: g.id });
+  });
+  chip.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.electronAPI.showGroupCtx(g.id);
+  });
+  return chip;
+}
+
 function renderTabs(tabs) {
   _tabs = tabs;
   // Cancel any pending/open preview on re-render
@@ -59,8 +111,30 @@ function renderTabs(tabs) {
     if (entry.right) pairedIds.add(entry.right.id);
   }
 
+  // ── Chrome groups cleanup (remove closed tabs, drop empty groups) ──────────
+  const _cgActiveIds = new Set(tabs.map(t => Number(t.id)));
+  const _cgSnap = JSON.stringify(_chromGroups);
+  _chromGroups = _chromGroups
+    .map(g => ({ ...g, tabIds: g.tabIds.filter(id => _cgActiveIds.has(id)) }))
+    .filter(g => g.tabIds.length > 0);  // drop empty groups
+  if (JSON.stringify(_chromGroups) !== _cgSnap) _cgSave();
+
+  // First occurrence of each group in tab-order (where the chip is rendered)
+  const _cgFirstOf = new Map();  // groupId → tabId
+  for (const t of tabs) {
+    const _cg0 = _cgGroupOf(t.id);
+    if (_cg0 && !_cgFirstOf.has(_cg0.id)) _cgFirstOf.set(_cg0.id, t.id);
+  }
+
   for (const t of tabs) {
     if (groupedIds.has(t.id)) continue;
+
+    // ── Chrome-style tab group chip (before the first tab of each group) ──────
+    const _cgg = _cgGroupOf(t.id);
+    if (_cgg && _cgFirstOf.get(_cgg.id) === t.id) {
+      $tabs.appendChild(_cgMakeChip(_cgg));
+    }
+    if (_cgg && _cgg.collapsed) continue;
 
     // ── Merged split pill (render once, at the left tab's position) ──────────
     if (pairedIds.has(t.id)) {
@@ -99,7 +173,7 @@ function renderTabs(tabs) {
       // Right-click → context menu of the left (active) tab
       el.addEventListener('contextmenu', e => {
         e.preventDefault();
-        window.electronAPI.showTabCtx(leftTab.id, leftTab.url || '');
+        window.electronAPI.showTabCtx(leftTab.id, leftTab.url || '', _chromGroups);
       });
 
       // ── Drag-to-swap: glisser un côté vers l'autre pour inverser gauche/droite ──
@@ -137,7 +211,9 @@ function renderTabs(tabs) {
 
     // ── Normal tab ───────────────────────────────────────────────────────────
     const el = document.createElement('div');
-    el.className = 'tab' + (t.id === _activeId ? ' active' : '');
+    const _cggN = _cgGroupOf(t.id);
+    el.className = 'tab' + (t.id === _activeId ? ' active' : '') + (_cggN ? ' in-group' : '');
+    if (_cggN) el.style.setProperty('--tg-color', _cggN.color);
     el.dataset.id = t.id;
 
     const fav = document.createElement('img');
@@ -211,7 +287,7 @@ function renderTabs(tabs) {
     });
     el.addEventListener('contextmenu', e => {
       e.preventDefault();
-      window.electronAPI.showTabCtx(t.id, t.url || '');
+      window.electronAPI.showTabCtx(t.id, t.url || '', _chromGroups);
     });
     if (t.id !== _activeId) {
       el.addEventListener('mouseenter', () => _scheduleTabPreview(el, t));
@@ -601,6 +677,174 @@ function renderBookmarkList(bm) {
 
 $bmSearch?.addEventListener('input', () => window.electronAPI.bookmarksList().then(renderBookmarkList));
 
+/* ─── Bookmarks bar ────────────────────────────────────── */
+const $bookmarksBar    = document.getElementById('bookmarks-bar');
+const $bmBarCtx        = document.getElementById('bm-bar-ctx');
+const $bmBarCtxOverlay = document.getElementById('bm-bar-ctx-overlay');
+let _bmBarVisible      = false;
+let _bmBarCtxBm        = null;  // bookmark under right-click
+
+function _bmBarSetVisible(v) {
+  _bmBarVisible = !!v;
+  // Update --chrome-h on :root so both html + body resize together
+  if (_bmBarVisible) {
+    document.documentElement.style.setProperty('--chrome-h',
+      'calc(var(--tab-h) + var(--addr-h) + var(--bm-bar-h))');
+  } else {
+    document.documentElement.style.removeProperty('--chrome-h');
+  }
+  if ($bookmarksBar) $bookmarksBar.classList.toggle('hidden', !_bmBarVisible);
+}
+
+async function renderBookmarksBar(bm) {
+  if (!$bookmarksBar || !_bmBarVisible) return;
+  if (!bm) bm = await window.electronAPI.bookmarksList();
+  $bookmarksBar.innerHTML = '';
+  if (!bm.length) {
+    const hint = document.createElement('span');
+    hint.className = 'bm-bar-hint';
+    hint.textContent = 'Ajoutez des favoris ici avec Ctrl+D';
+    $bookmarksBar.appendChild(hint);
+    return;
+  }
+  // Groups always on the left, regular bookmarks on the right
+  const sortedBm = [...bm].sort((a, b) => {
+    if (a.type === 'group' && b.type !== 'group') return -1;
+    if (a.type !== 'group' && b.type === 'group') return  1;
+    return 0;
+  });
+  for (const b of sortedBm) {
+    const chip = document.createElement('button');
+    chip.className = 'bm-chip';
+
+    if (b.type === 'group') {
+      // ── Group bookmark: colored dot + group name ──────────────────
+      chip.title = b.name
+        ? `${b.name} (${(b.tabs || []).length} onglets)`
+        : `Groupe (${(b.tabs || []).length} onglets)`;
+      const dot = document.createElement('span');
+      dot.className = 'bm-chip-group-dot';
+      dot.style.background = b.color || '#888';
+      chip.appendChild(dot);
+      const label = document.createElement('span');
+      label.className = 'bm-chip-label';
+      label.textContent = b.name || '';
+      chip.appendChild(label);
+      chip.addEventListener('click', async () => {
+        if (!(b.tabs || []).length) return;
+        // Remove from bookmarks bar first
+        await window.electronAPI.bookmarksRemove(b.url);
+        // Create all tabs then add the group atomically (avoids cleanup race)
+        const tabIds = [];
+        for (const t of (b.tabs || [])) {
+          const id = await window.electronAPI.newTab(t.url);
+          if (id != null) tabIds.push(id);
+        }
+        if (tabIds.length) {
+          _chromGroups.push({ id: Date.now(), name: b.name, color: b.color, collapsed: false, tabIds });
+          _cgSave();
+          // Fetch fresh tab list from main so _cgActiveIds includes the new tabs
+          const freshTabs = await window.electronAPI.getTabs();
+          renderTabs(freshTabs);
+          await window.electronAPI.switchTab(tabIds[0]);
+        }
+      });
+    } else {
+      // ── Regular bookmark ──────────────────────────────────────────
+      chip.title = b.url;
+      if (b.favicon) {
+        const img = document.createElement('img');
+        img.className = 'bm-chip-icon';
+        img.src = b.favicon;
+        img.onerror = () => img.remove();
+        chip.appendChild(img);
+      }
+      const label = document.createElement('span');
+      label.className = 'bm-chip-label';
+      label.textContent = b.title || b.url;
+      chip.appendChild(label);
+      chip.addEventListener('click', () => { window.electronAPI.navigate(b.url); });
+    }
+
+    chip.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      _bmBarCtxBm = b;
+      if ($bmBarCtx) {
+        $bmBarCtx.style.left = Math.min(e.clientX, window.innerWidth  - 210) + 'px';
+        $bmBarCtx.style.top  = Math.min(e.clientY, window.innerHeight - 130) + 'px';
+        $bmBarCtx.classList.remove('hidden');
+      }
+      $bmBarCtxOverlay?.classList.remove('hidden');
+    });
+    $bookmarksBar.appendChild(chip);
+  }
+}
+
+function _bmBarHideCtx() {
+  $bmBarCtx?.classList.add('hidden');
+  $bmBarCtxOverlay?.classList.add('hidden');
+  _bmBarCtxBm = null;
+}
+$bmBarCtxOverlay?.addEventListener('mousedown', _bmBarHideCtx);
+// Escape key closes bm-bar ctx (global Escape handler may already exist; this is harmless)
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && _bmBarCtxBm) _bmBarHideCtx(); });
+
+document.getElementById('bmctx-open')?.addEventListener('click', () => {
+  const b = _bmBarCtxBm; _bmBarHideCtx();
+  if (b) window.electronAPI.navigate(b.url);
+});
+document.getElementById('bmctx-open-tab')?.addEventListener('click', () => {
+  const b = _bmBarCtxBm; _bmBarHideCtx();
+  if (b) window.electronAPI.newTab(b.url);
+});
+document.getElementById('bmctx-edit')?.addEventListener('click', async () => {
+  const b = _bmBarCtxBm; _bmBarHideCtx();
+  if (!b) return;
+  const newTitle = prompt('Renommer le favori :', b.title || b.url);
+  if (newTitle === null) return;
+  await window.electronAPI.bookmarksRemove(b.url);
+  await window.electronAPI.bookmarksAdd(b.url, newTitle.trim() || b.url, b.favicon);
+  refreshBookmarkStar();
+});
+document.getElementById('bmctx-delete')?.addEventListener('click', async () => {
+  const b = _bmBarCtxBm; _bmBarHideCtx();
+  if (b) {
+    await window.electronAPI.bookmarksRemove(b.url);
+    refreshBookmarkStar();
+    await loadBookmarksPanel();
+  }
+});
+
+/** Save all tabs of a group as a single group-bookmark (restores with color circle). */
+async function _cgSaveGroupToBookmarks(groupId) {
+  const g = _chromGroups.find(x => x.id === groupId);
+  if (!g) return;
+  const tabs = [];
+  for (const tabId of (g.tabIds || [])) {
+    const t = _tabs.find(x => x.id === tabId);
+    if (t && t.url && !t.url.startsWith('about:')) {
+      tabs.push({ url: t.url, title: t.title || t.url, favicon: t.favicon || null });
+    }
+  }
+  if (tabs.length) {
+    await window.electronAPI.bookmarkAddGroup({
+      name:  g.name  || '',
+      color: g.color || '#888',
+      tabs
+    });
+  }
+}
+
+// Live re-render bar when bookmarks list changes
+window.electronAPI.onBookmarksChanged(bm => { if (_bmBarVisible) renderBookmarksBar(bm); });
+// Sync when main tells us the bar state changed (e.g. from another trigger)
+window.electronAPI.onBookmarksBarState(v => {
+  _bmBarSetVisible(v);
+  const $t = document.getElementById('setting-bookmarks-bar');
+  if ($t) $t.checked = _bmBarVisible;
+  if (_bmBarVisible) renderBookmarksBar();
+});
+
 /* ─── History panel ─────────────────────────────────────────────── */
 const $histSearch   = document.getElementById('hist-search');
 const $histList     = document.getElementById('hist-list');
@@ -945,6 +1189,14 @@ if ($tgDelay) {
   });
 }
 
+// ── Bookmarks bar toggle ───────────────────────────────────────────
+const $bmBarToggle = document.getElementById('setting-bookmarks-bar');
+if ($bmBarToggle) {
+  $bmBarToggle.addEventListener('change', () => {
+    window.electronAPI.setBookmarksBarVisible($bmBarToggle.checked);
+  });
+}
+
 // Lancer le check toutes les 10 secondes (assez précis pour un délai de 1 min)
 setInterval(_tgCheck, 10_000);
 
@@ -1105,6 +1357,186 @@ setInterval(async () => {
 }, 3000);
 
 /* ── Init ───────────────────────────────────────────────────────── */
+/* Chrome-style tab groups: panel + chip ctx menu + IPC */
+
+// Panel (side-panel) for group create/rename/recolor
+const $chgColorsEl   = document.getElementById('chg-colors');
+const $chgNameInput  = document.getElementById('chg-name-input');
+const $chgPanelTitle = document.getElementById('chg-panel-title');
+const $chgSaveBtn    = document.getElementById('chg-save-btn');
+const $chgCancelBtn  = document.getElementById('chg-cancel-btn');
+
+function _cgBuildSwatches(selHex) {
+  if (!$chgColorsEl) return;
+  $chgColorsEl.innerHTML = '';
+  for (const c of CG_COLORS) {
+    const sw = document.createElement('div');
+    sw.className = 'chg-color-swatch' + (c.hex === selHex ? ' selected' : '');
+    sw.style.background = c.hex;
+    sw.title = c.id;
+    sw.addEventListener('click', () => {
+      $chgColorsEl.querySelectorAll('.chg-color-swatch').forEach(s => s.classList.remove('selected'));
+      sw.classList.add('selected');
+      _chgSelColor = c.hex;
+    });
+    $chgColorsEl.appendChild(sw);
+  }
+}
+
+function _cgOpenGroupPanel(action, ctx) {
+  _cgPanelCtx = { action, ...ctx };
+  if (action === 'new') {
+    if ($chgPanelTitle) $chgPanelTitle.textContent = 'Nouveau groupe';
+    if ($chgNameInput)  $chgNameInput.value = '';
+    _chgSelColor = CG_COLORS[0].hex;
+  } else {
+    const g = _chromGroups.find(x => x.id === ctx.groupId);
+    if (!g) return;
+    if ($chgPanelTitle) $chgPanelTitle.textContent = 'Modifier le groupe';
+    if ($chgNameInput)  $chgNameInput.value = g.name || '';
+    _chgSelColor = g.color;
+  }
+  _cgBuildSwatches(_chgSelColor);
+  openPanel('tab-group');
+  requestAnimationFrame(() => $chgNameInput?.focus());
+}
+
+function _cgSaveGroupPanel() {
+  if (!_cgPanelCtx) return;
+  const name  = ($chgNameInput?.value || '').trim();
+  const color = _chgSelColor;
+  if (_cgPanelCtx.action === 'new') {
+    const tabId = Number(_cgPanelCtx.tabId);
+    _chromGroups = _chromGroups.map(g => ({ ...g, tabIds: g.tabIds.filter(id => id !== tabId) }));
+    _chromGroups.push({ id: _cgNextId++, name, color, collapsed: false, tabIds: [tabId] });
+  } else {
+    const g = _chromGroups.find(x => x.id === _cgPanelCtx.groupId);
+    if (g) { g.name = name; g.color = color; }
+  }
+  _cgSave();
+  closeAllPanels();
+  renderTabs(_tabs);
+}
+
+$chgSaveBtn?.addEventListener('click',   _cgSaveGroupPanel);
+$chgCancelBtn?.addEventListener('click', closeAllPanels);
+document.addEventListener('keydown', e => {
+  const _panel = document.getElementById('panel-tab-group');
+  if (!_panel || _panel.classList.contains('hidden')) return;
+  if (e.key === 'Enter') { e.preventDefault(); _cgSaveGroupPanel(); }
+});
+
+// Chip context menu
+const $chgCtx        = document.getElementById('chg-ctx');
+const $chgCtxOverlay = document.getElementById('chg-ctx-overlay');
+
+function _cgShowCtxMenu(groupId, x, y) {
+  _cgCtxId = groupId;
+  if ($chgCtx) {
+    $chgCtx.style.left = Math.min(x, window.innerWidth  - 210) + 'px';
+    $chgCtx.style.top  = Math.min(y, window.innerHeight - 210) + 'px';
+    $chgCtx.classList.remove('hidden');
+  }
+  $chgCtxOverlay?.classList.remove('hidden');
+}
+
+function _cgHideCtxMenu() {
+  $chgCtx?.classList.add('hidden');
+  $chgCtxOverlay?.classList.add('hidden');
+  _cgCtxId = null;
+}
+
+// Overlay click = dismiss menu (catches clicks anywhere, including BrowserView area)
+$chgCtxOverlay?.addEventListener('mousedown', () => _cgHideCtxMenu());
+// Also dismiss on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _cgHideCtxMenu(); }, true);
+// Also dismiss on window blur (e.g. clicking another app)
+window.addEventListener('blur', _cgHideCtxMenu);
+
+document.getElementById('chgctx-newtab')?.addEventListener('click', () => {
+  _cgHideCtxMenu();
+  window.electronAPI.newTab();
+});
+document.getElementById('chgctx-rename')?.addEventListener('click', () => {
+  const gid = _cgCtxId; _cgHideCtxMenu();
+  _cgOpenGroupPanel('rename', { groupId: gid });
+});
+document.getElementById('chgctx-color')?.addEventListener('click', () => {
+  const gid = _cgCtxId; _cgHideCtxMenu();
+  _cgOpenGroupPanel('editColor', { groupId: gid });
+});
+document.getElementById('chgctx-ungroup')?.addEventListener('click', () => {
+  const gid = _cgCtxId; _cgHideCtxMenu();
+  _chromGroups = _chromGroups.filter(g => g.id !== gid);
+  _cgSave();
+  renderTabs(_tabs);
+});
+document.getElementById('chgctx-close-group')?.addEventListener('click', () => {
+  const gid = _cgCtxId; _cgHideCtxMenu();
+  const g = _chromGroups.find(x => x.id === gid);
+  if (!g) return;
+  const ids = [...g.tabIds];
+  _chromGroups = _chromGroups.filter(x => x.id !== gid);
+  _cgSave();
+  ids.forEach(id => window.electronAPI.closeTab(id));
+});
+
+document.getElementById('chgctx-close-save-bm')?.addEventListener('click', async () => {
+  const gid = _cgCtxId; _cgHideCtxMenu();
+  await _cgSaveGroupToBookmarks(gid);
+  const g = _chromGroups.find(x => x.id === gid);
+  if (!g) return;
+  const ids = [...g.tabIds];
+  _chromGroups = _chromGroups.filter(x => x.id !== gid);
+  _cgSave();
+  ids.forEach(id => window.electronAPI.closeTab(id));
+});
+
+// ── Native group ctx menu action handler (Menu.popup replaces the HTML menu) ──
+window.electronAPI.onGroupCtxAction(async ({ action, groupId }) => {
+  if (action === 'rename') {
+    _cgOpenGroupPanel('rename', { groupId });
+  } else if (action === 'color') {
+    _cgOpenGroupPanel('editColor', { groupId });
+  } else if (action === 'ungroup') {
+    _chromGroups = _chromGroups.filter(g => g.id !== groupId);
+    _cgSave();
+    renderTabs(_tabs);
+  } else if (action === 'close-save-bm') {
+    await _cgSaveGroupToBookmarks(groupId);
+    const g = _chromGroups.find(x => x.id === groupId);
+    if (!g) return;
+    const ids = [...g.tabIds];
+    _chromGroups = _chromGroups.filter(x => x.id !== groupId);
+    _cgSave();
+    ids.forEach(id => window.electronAPI.closeTab(id));
+  } else if (action === 'close-group') {
+    const g = _chromGroups.find(x => x.id === groupId);
+    if (!g) return;
+    const ids = [...g.tabIds];
+    _chromGroups = _chromGroups.filter(x => x.id !== groupId);
+    _cgSave();
+    ids.forEach(id => window.electronAPI.closeTab(id));
+  }
+});
+
+// onTabGroupAction: from native context menu (main.js sends this)
+window.electronAPI.onTabGroupAction(({ action, tabId, groupId }) => {
+  if (action === 'new') {
+    _cgOpenGroupPanel('new', { tabId });
+  } else if (action === 'add') {
+    const numId = Number(tabId);
+    _chromGroups = _chromGroups.map(g => ({ ...g, tabIds: g.tabIds.filter(id => id !== numId) }));
+    const target = _chromGroups.find(g => g.id === groupId);
+    if (target) { target.tabIds.push(numId); _cgSave(); renderTabs(_tabs); }
+  } else if (action === 'remove') {
+    const numId = Number(tabId);
+    _chromGroups = _chromGroups.map(g => ({ ...g, tabIds: g.tabIds.filter(id => id !== numId) }));
+    _cgSave();
+    renderTabs(_tabs);
+  }
+});
+
 async function init() {
   setGwDot('loading');
   setNavState(false, false);
@@ -1157,5 +1589,13 @@ async function init() {
     });
   }
 }
+
+// Initialize bookmarks bar from settings (runs once on page load)
+window.electronAPI.getSettings().then(s => {
+  _bmBarSetVisible(s.bookmarksBar !== false);
+  const $t = document.getElementById('setting-bookmarks-bar');
+  if ($t) $t.checked = _bmBarVisible;
+  if (_bmBarVisible) renderBookmarksBar();
+});
 
 init();

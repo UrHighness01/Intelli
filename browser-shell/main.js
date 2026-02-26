@@ -28,6 +28,7 @@ const GATEWAY_ORIGIN    = `http://${GATEWAY_HOST}:${GATEWAY_PORT}`;
 const GATEWAY_HEALTH    = `${GATEWAY_ORIGIN}/health`;
 const HOME_URL          = `${GATEWAY_ORIGIN}/ui/`;
 const CHROME_HEIGHT     = 88;   // px — tab bar (36) + address bar (52)
+const BOOKMARKS_BAR_H   = 30;   // px — bookmark bar (shown/hidden)
 const SIDEBAR_WIDTH     = 340;  // px — admin hub sidebar panel
 const PANEL_WIDTH       = 360;  // px — right-side overlay panels (bookmarks, history, etc.)
 const GATEWAY_READY_MS  = 15000;
@@ -200,6 +201,7 @@ let sidebarOpen = false;
 // When a panel is open we must shrink the active BrowserView so the panel
 // is not hidden underneath it (BrowserViews render above the chrome DOM).
 let panelVisible = false;
+let bookmarksBarVisible = (_startSettings.bookmarksBar !== false); // default true
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gateway discovery & launch
@@ -329,21 +331,27 @@ function stopGateway() {
 // Tab management helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+function chromeH() {
+  return CHROME_HEIGHT + (bookmarksBarVisible ? BOOKMARKS_BAR_H : 0);
+}
+
 function tabBounds(win) {
   const [w, h] = win.getContentSize();
   const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
   const panelW = panelVisible ? PANEL_WIDTH   : 0;
   const totalW = Math.max(0, w - sideW - panelW);
+  const ch = chromeH();
   if (getActivePair() !== null) {
-    return { x: 0, y: CHROME_HEIGHT, width: Math.floor(totalW / 2) - 1, height: Math.max(0, h - CHROME_HEIGHT) };
+    return { x: 0, y: ch, width: Math.floor(totalW / 2) - 1, height: Math.max(0, h - ch) };
   }
-  return { x: 0, y: CHROME_HEIGHT, width: totalW, height: Math.max(0, h - CHROME_HEIGHT) };
+  return { x: 0, y: ch, width: totalW, height: Math.max(0, h - ch) };
 }
 
 /** Bounds for the admin-hub sidebar BrowserView when open. */
 function sidebarBounds(win) {
   const [w, h] = win.getContentSize();
-  return { x: Math.max(0, w - SIDEBAR_WIDTH), y: CHROME_HEIGHT, width: SIDEBAR_WIDTH, height: Math.max(0, h - CHROME_HEIGHT) };
+  const ch = chromeH();
+  return { x: Math.max(0, w - SIDEBAR_WIDTH), y: ch, width: SIDEBAR_WIDTH, height: Math.max(0, h - ch) };
 }
 
 /** Bounds for the right-hand BrowserView in split mode. */
@@ -353,7 +361,8 @@ function splitRightBounds(win) {
   const panelW = panelVisible ? PANEL_WIDTH   : 0;
   const totalW = Math.max(0, w - sideW - panelW);
   const half   = Math.floor(totalW / 2);
-  return { x: half + 1, y: CHROME_HEIGHT, width: totalW - half - 1, height: Math.max(0, h - CHROME_HEIGHT) };
+  const ch = chromeH();
+  return { x: half + 1, y: ch, width: totalW - half - 1, height: Math.max(0, h - ch) };
 }
 
 // ── Split-pairs helpers ───────────────────────────────────────────────────────
@@ -787,7 +796,7 @@ function registerIPC() {
 
   // Right-click context menu on a tab — shown as a native OS menu so it
   // renders above all BrowserViews (HTML menus would be hidden under them).
-  ipcMain.handle('show-tab-ctx', (_, { tabId, tabUrl }) => {
+  ipcMain.handle('show-tab-ctx', (_, { tabId, tabUrl, groups }) => {
     const wc         = tabs[tabId]?.view.webContents;
     const isMuted    = wc?.isAudioMuted() ?? false;
     const isSplit    = getPairOf(tabId) !== null;
@@ -831,7 +840,53 @@ function registerIPC() {
         },
       }] : []),
       { type: 'separator' },
+      // ── Chrome-style tab groups ──────────────────────────────────────────
+      ...(!isAdminHub ? [{
+        label: '🏷 Ajouter à un groupe',
+        submenu: [
+          { label: '＋ Nouveau groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'new', tabId }) },
+          ...((groups && groups.length > 0) ? [{ type: 'separator' }] : []),
+          ...((groups || []).map(g => ({
+            label: `● ${g.name || '(sans nom)'}`,
+            click: () => mainWin.webContents.send('tab-group-action', { action: 'add', tabId, groupId: g.id }),
+          }))),
+        ],
+      }] : []),
+      ...((groups || []).some(g => g.tabIds && g.tabIds.includes(tabId))
+        ? [{ label: 'Retirer du groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'remove', tabId }) }]
+        : []),
+      { type: 'separator' },
       ...(!isAdminHub ? [{ label: 'Close Tab', click: () => closeTab(tabId) }] : []),
+      // Close all tabs to the right of this one
+      ...(() => {
+        const idx = tabOrder.indexOf(tabId);
+        const toClose = idx >= 0
+          ? tabOrder.slice(idx + 1).filter(id => {
+              const u = tabs[id]?.view?.webContents?.getURL() || '';
+              return !u.startsWith(GATEWAY_ORIGIN + '/ui/');
+            })
+          : [];
+        return toClose.length > 0 ? [{
+          label: 'Fermer les onglets à droite',
+          click: () => toClose.forEach(id => closeTab(id)),
+        }] : [];
+      })(),
+    ];
+    Menu.buildFromTemplate(items).popup({ window: mainWin });
+  });
+
+  // Native context menu for tab group chips
+  ipcMain.handle('show-group-ctx', (_, { groupId }) => {
+    const send = (action) => mainWin?.webContents.send('group-ctx-action', { action, groupId });
+    const items = [
+      { label: 'Nouvel onglet dans le groupe', click: () => createTab() },
+      { type: 'separator' },
+      { label: '\u270F\uFE0F Renommer',            click: () => send('rename')       },
+      { label: '\u25CF Changer la couleur',         click: () => send('color')        },
+      { type: 'separator' },
+      { label: 'D\u00e9grouper',                     click: () => send('ungroup')      },
+      { label: '\uD83D\uDCC1 Fermer le groupe',      click: () => send('close-save-bm') },
+      { label: 'Fermer et supprimer',                click: () => send('close-group')   },
     ];
     Menu.buildFromTemplate(items).popup({ window: mainWin });
   });
@@ -1025,15 +1080,25 @@ function registerIPC() {
     if (bm.find(b => b.url === url)) return bm;        // already saved
     bm.unshift({ id: Date.now(), url, title: title || url, favicon: favicon || null, addedAt: new Date().toISOString() });
     saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
     return bm;
   });
   ipcMain.handle('bookmarks-remove', (_, url) => {
     const bm = loadBookmarks().filter(b => b.url !== url);
     saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
     return bm;
   });
   ipcMain.handle('bookmarks-has', (_, url) => {
     return loadBookmarks().some(b => b.url === url);
+  });
+  ipcMain.handle('bookmarks-add-group', (_, { name, color, tabs }) => {
+    const bm = loadBookmarks();
+    const id = Date.now();
+    bm.unshift({ id, type: 'group', url: 'group:' + id, name: name || '', color: color || '#888', tabs: tabs || [], addedAt: new Date().toISOString() });
+    saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
+    return bm;
   });
 
   // ── History ───────────────────────────────────────────────────────────────
@@ -1067,6 +1132,22 @@ function registerIPC() {
     panelVisible = !!isOpen;
     const tab = tabs[activeTabId];
     if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
+  });
+
+  // ── Bookmarks bar visibility ──────────────────────────────────────────
+  ipcMain.handle('set-bookmarks-bar-visible', (_, v) => {
+    bookmarksBarVisible = !!v;
+    const s = loadSettings(); s.bookmarksBar = bookmarksBarVisible; saveSettingsData(s);
+    notifyChrome('bookmarks-bar-state', bookmarksBarVisible);
+    // Recalculate BrowserView bounds with new chrome height
+    const ap = getActivePair();
+    if (ap) {
+      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(tabBounds(mainWin));
+      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(mainWin));
+    } else {
+      const tab = tabs[activeTabId];
+      if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
+    }
   });
 
   // ── Inactive-tabs popup (custom BrowserWindow — renders above BrowserViews) ───

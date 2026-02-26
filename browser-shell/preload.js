@@ -19,7 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Swap left/right sides of the active split pair (drag-to-swap in tab bar). */
   swapSplitSides: (tabId) => ipcRenderer.invoke('swap-split-sides', tabId),
   /** Show native OS context menu for a tab (renders above BrowserViews). */
-  showTabCtx:    (tabId, tabUrl) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl }),
+  showTabCtx:    (tabId, tabUrl, groups) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl, groups: groups || [] }),
+  /** Show native OS context menu for a tab group chip (renders above BrowserViews). */
+  showGroupCtx:     (groupId) => ipcRenderer.invoke('show-group-ctx', { groupId }),
+  /** IPC from main: an action was selected in the group chip context menu. */
+  onGroupCtxAction: (cb) => ipcRenderer.on('group-ctx-action', (_, data) => cb(data)),
 
   // ── Navigation ────────────────────────────────────────────────────────────
   navigate:      (url)  => ipcRenderer.invoke('navigate', url),
@@ -58,6 +62,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bookmarksAdd:    (url, title, favicon) => ipcRenderer.invoke('bookmarks-add', { url, title, favicon }),
   bookmarksRemove: (url)           => ipcRenderer.invoke('bookmarks-remove', url),
   bookmarksHas:    (url)           => ipcRenderer.invoke('bookmarks-has', url),
+  /** Save a tab-group as a single group-bookmark (colored dot in bar). */
+  bookmarkAddGroup: (data)          => ipcRenderer.invoke('bookmarks-add-group', data),
+  /** Show / hide the bookmarks bar (persisted to settings). */
+  setBookmarksBarVisible: (v)      => ipcRenderer.invoke('set-bookmarks-bar-visible', v),
+  /** IPC from main: full bookmark list changed — re-render bar. */
+  onBookmarksChanged:     (cb) => ipcRenderer.on('bookmarks-changed',  (_, bm) => cb(bm)),
+  /** IPC from main: bookmarks bar visibility changed. */
+  onBookmarksBarState:    (cb) => ipcRenderer.on('bookmarks-bar-state', (_, v)  => cb(v)),
 
   // ── History ───────────────────────────────────────────────────────────────
   historyList:   (limit) => ipcRenderer.invoke('history-list', limit),
@@ -97,6 +109,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMaximizeChange: (cb)  => ipcRenderer.on('win-maximize-changed', (_, v) => cb(v)),  /** Called when the user picks "Mettre en onglet inactif" from the tab context menu.
    *  cb receives { id, url, title, favicon } */
   onGroupTab: (cb) => ipcRenderer.on('group-tab', (_, d) => cb(d)),
+  /** Called when the user picks a chrome group action from the native context menu.
+   *  cb receives { action, tabId, groupId? } */
+  onTabGroupAction: (cb) => ipcRenderer.on('tab-group-action', (_, d) => cb(d)),
   /** Show a native context menu listing inactive tabs. `tabs` is the _groupedTabs array. */
   showInactiveTabsMenu: (tabs) => ipcRenderer.invoke('show-inactive-tabs-menu', tabs),
   /** Show the custom popup listing inactive tabs with hover previews. */

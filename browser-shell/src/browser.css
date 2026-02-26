@@ -10,6 +10,7 @@
   --danger:     #ff5f5f;
   --tab-h:      36px;
   --addr-h:     52px;
+  --bm-bar-h:   30px;
   --chrome-h:   88px;       /* tab-h + addr-h — must match main.js CHROME_HEIGHT */
   --radius:     6px;
   --tab-min:    72px;
@@ -872,3 +873,192 @@ button { cursor: pointer; }
   background: var(--surface2);
   border-radius: 4px;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Chrome-style tab groups
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Group chip in the tab bar ──────────────────────────────────── */
+.tab-group-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: #fff;
+  transition: filter 0.12s, transform 0.1s;
+  user-select: none;
+  align-self: center;
+  -webkit-app-region: no-drag;
+}
+.tab-group-chip:hover  { filter: brightness(1.18); }
+.tab-group-chip:active { transform: scale(0.96); }
+
+/* White dot — only visible when group is collapsed */
+.tab-group-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.80);
+  flex-shrink: 0;
+  display: none;
+}
+.tab-group-chip.collapsed .tab-group-chip-dot  { display: block; }
+.tab-group-chip.collapsed .tab-group-chip-label { display: none; }
+
+/* Tabs belonging to a group: colored top border */
+.tab.in-group {
+  border-top: 3px solid var(--tg-color, #888);
+  border-radius: 0 var(--radius) 0 0;
+}
+
+/* ── Tab group side panel ───────────────────────────────────────── */
+/* (uses existing .side-panel infrastructure)                        */
+.chg-colors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.chg-color-swatch {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.12s, transform 0.12s;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.chg-color-swatch:hover   { transform: scale(1.15); }
+.chg-color-swatch.selected {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+
+/* ── Group chip context-menu dropdown ──────────────────────────── */
+.chg-ctx {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 195px;
+  z-index: 9998;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+}
+.chg-ctx.hidden { display: none; }
+.chg-ctx-item {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chg-ctx-item:hover { background: var(--surface2); }
+.chg-ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.chg-ctx-danger { color: var(--danger); }
+
+/* transparent full-screen overlay — closes the chip ctx menu when clicking anywhere outside */
+.chg-ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;   /* behind chg-ctx (9998) but above everything else */
+  background: transparent;
+}
+.chg-ctx-overlay.hidden { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════
+   BOOKMARKS BAR
+   ═══════════════════════════════════════════════════════════════ */
+#bookmarks-bar {
+  display: flex;
+  align-items: center;
+  height: var(--bm-bar-h);
+  padding: 0 4px;
+  gap: 1px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+#bookmarks-bar.hidden { display: none; }
+
+.bm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  max-width: 160px;
+  padding: 0 7px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+  outline: none;
+}
+.bm-chip:hover { background: var(--surface2); }
+.bm-chip:focus-visible { outline: 1px solid var(--accent); }
+/* colored dot for group bookmarks in the bookmarks bar */
+.bm-chip-group-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 5px;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(0,0,0,.18);
+}
+
+.bm-chip-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.bm-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.bm-bar-hint {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* Bookmarks bar right-click context menu (reuses .chg-ctx styles, fine) */
+#bm-bar-ctx {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 195px;
+  z-index: 9998;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+}
+#bm-bar-ctx.hidden { display: none; }
+.bm-ctx-item {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bm-ctx-item:hover { background: var(--surface2); }
+.bm-ctx-item-danger { color: var(--danger); }
