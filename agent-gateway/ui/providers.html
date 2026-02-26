@@ -184,6 +184,7 @@
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
             <option value="openrouter">OpenRouter</option>
+            <option value="github_copilot">GitHub Copilot</option>
             <option value="ollama">Ollama</option>
           </select>
         </div>
@@ -219,10 +220,11 @@
 'use strict';
 
 const PROVIDERS = [
-  { id: 'openai',     icon: '🤖', label: 'OpenAI' },
-  { id: 'anthropic',  icon: '🔮', label: 'Anthropic' },
-  { id: 'openrouter', icon: '🌐', label: 'OpenRouter' },
-  { id: 'ollama',     icon: '🦙', label: 'Ollama' },
+  { id: 'openai',         icon: '🤖', label: 'OpenAI',          type: 'cloud' },
+  { id: 'anthropic',      icon: '🔮', label: 'Anthropic',       type: 'cloud' },
+  { id: 'openrouter',     icon: '🌐', label: 'OpenRouter',      type: 'cloud' },
+  { id: 'github_copilot', icon: '🪶', label: 'GitHub Copilot',  type: 'cloud', tokenLabel: 'Copilot Token' },
+  { id: 'ollama',         icon: '🦙', label: 'Ollama',          type: 'local' },
 ];
 
 let _token = '';
@@ -248,39 +250,182 @@ function _headers() {
 // ── Initial render ─────────────────────────────────────────────────────────────
 function renderCards() {
   const grid = document.getElementById('providers-grid');
-  grid.innerHTML = PROVIDERS.map(p => `
-    <div class="provider-card" id="card-${p.id}">
-      <div class="card-top">
-        <div class="prov-icon">${p.icon}</div>
-        <div class="prov-name">${p.label}</div>
-        <span class="status-chip chip-unknown" id="chip-${p.id}">—</span>
-      </div>
-      <div id="meta-${p.id}">
-        <div class="meta-row">Configured: <span id="configured-${p.id}">—</span></div>
-        <div class="meta-row">Available: <span id="available-${p.id}">—</span></div>
-        <div class="meta-row" id="expiry-row-${p.id}" style="display:none">
-          Expires: <span id="expiry-${p.id}">—</span>
+  const defaultModelHint = {
+    openai:          'e.g. gpt-4o-mini',
+    anthropic:       'e.g. claude-3-haiku-20240307',
+    openrouter:      'e.g. mistralai/mistral-7b-instruct',
+    github_copilot:  'e.g. gpt-4o  (or claude-sonnet-4.6, o3-mini)',
+    ollama:          'e.g. llama3',
+  };
+  grid.innerHTML = PROVIDERS.map(p => {
+    const hint = defaultModelHint[p.id] || 'e.g. model-name';
+    const keyLabel = p.tokenLabel || 'API key';
+
+    let keySection = '';
+    if (p.type === 'local') {
+      keySection = `<label class="field-label">Endpoint URL</label>
+         <input type="text" id="endpoint-input-${p.id}" placeholder="http://localhost:11434"
+           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+           color:var(--text);padding:6px 10px;font-size:.81rem;margin-bottom:8px;" />`;
+    } else if (p.id === 'github_copilot') {
+      keySection = `
+        <div id="copilot-oauth-area" style="margin-bottom:8px">
+          <button class="primary sm full" onclick="startCopilotOAuth()" id="btn-copilot-auth">
+            🔑 Authenticate with GitHub
+          </button>
+          <div id="copilot-device-block" style="display:none;margin-top:10px;padding:10px;
+            background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:.8rem">
+            <div style="margin-bottom:6px;color:var(--muted)">1. Open this URL in any browser:</div>
+            <a id="copilot-verify-url" href="#" target="_blank" style="color:var(--accent);word-break:break-all"></a>
+            <div style="margin-top:8px;margin-bottom:4px;color:var(--muted)">2. Enter this code:</div>
+            <div id="copilot-user-code" style="font-size:1.3rem;font-weight:800;letter-spacing:.12em;
+              color:var(--green);font-family:monospace"></div>
+            <div id="copilot-poll-status" style="margin-top:8px;font-size:.75rem;color:var(--muted)">Waiting for authorization…</div>
+          </div>
         </div>
-      </div>
-      <div class="card-sep"></div>
-      <label class="field-label">API key</label>
-      <div class="key-row" style="margin-bottom:6px">
-        <input type="password" id="key-input-${p.id}" placeholder="Paste new key…" />
-        <input type="number" id="ttl-input-${p.id}" min="0" max="3650" placeholder="TTL" title="TTL in days (0 = no expiry)" />
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="primary sm" style="flex:1" onclick="storeKey('${p.id}')">Store</button>
-        <button class="sm" onclick="rotateKey('${p.id}')">Rotate</button>
-        <button class="danger sm" onclick="deleteKey('${p.id}')">Delete</button>
-      </div>
-    </div>
-  `).join('');
+        <div class="card-sep" style="margin-bottom:8px"></div>
+        <label class="field-label" style="color:var(--muted);font-size:.7rem">or paste OAuth token manually</label>
+        <div class="key-row" style="margin-bottom:6px">
+          <input type="password" id="key-input-${p.id}" placeholder="ghu_… (OAuth token)" />
+          <input type="number" id="ttl-input-${p.id}" min="0" max="3650" placeholder="TTL" title="TTL in days (0 = no expiry)" />
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="primary sm" style="flex:1" onclick="storeKey('${p.id}')">Store</button>
+          <button class="sm" onclick="rotateKey('${p.id}')">Rotate</button>
+          <button class="danger sm" onclick="deleteKey('${p.id}')">Delete</button>
+        </div>
+        <div class="card-sep"></div>`;
+    } else {
+      keySection = `<label class="field-label">${keyLabel}</label>
+         <div class="key-row" style="margin-bottom:6px">
+           <input type="password" id="key-input-${p.id}" placeholder="Paste ${keyLabel.toLowerCase()}…" />
+           <input type="number" id="ttl-input-${p.id}" min="0" max="3650" placeholder="TTL" title="TTL in days (0 = no expiry)" />
+         </div>
+         <div style="display:flex;gap:6px;margin-bottom:8px">
+           <button class="primary sm" style="flex:1" onclick="storeKey('${p.id}')">Store</button>
+           <button class="sm" onclick="rotateKey('${p.id}')">Rotate</button>
+           <button class="danger sm" onclick="deleteKey('${p.id}')">Delete</button>
+         </div>
+         <div class="card-sep"></div>`;
+    }
+    return `
+      <div class="provider-card" id="card-${p.id}">
+        <div class="card-top">
+          <div class="prov-icon">${p.icon}</div>
+          <div class="prov-name">${p.label}</div>
+          <span class="status-chip chip-unknown" id="chip-${p.id}">—</span>
+        </div>
+        <div id="meta-${p.id}">
+          <div class="meta-row">Configured: <span id="configured-${p.id}">—</span></div>
+          <div class="meta-row">Available: <span id="available-${p.id}">—</span></div>
+          <div class="meta-row" id="expiry-row-${p.id}" style="display:none">
+            Expires: <span id="expiry-${p.id}">—</span>
+          </div>
+        </div>
+        <div class="card-sep"></div>
+        ${keySection}
+        <label class="field-label">Default model ID</label>
+        <input type="text" id="model-input-${p.id}" placeholder="${hint}"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+          color:var(--text);padding:6px 10px;font-size:.81rem;margin-bottom:8px;" />
+        <button class="primary sm full" onclick="saveSettings('${p.id}')">💾 Save settings</button>
+      </div>`;
+  }).join('');
+}
+
+// ── GitHub Copilot OAuth Device Flow ─────────────────────────────────────────
+let _copilotPollTimer = null;
+
+async function startCopilotOAuth() {
+  const btn = document.getElementById('btn-copilot-auth');
+  btn.disabled = true;
+  btn.textContent = '⏳ Requesting code…';
+  clearTimeout(_copilotPollTimer); // cancel any previous poll loop
+  try {
+    const r = await fetch(`/admin/providers/github_copilot/oauth/start`, {
+      method: 'POST', headers: _headers(),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'OAuth start failed', 'err'); btn.disabled = false; btn.textContent = '🔑 Authenticate with GitHub'; return; }
+    const data = await r.json();
+
+    // Show device block
+    document.getElementById('copilot-device-block').style.display = 'block';
+    const verUrl = document.getElementById('copilot-verify-url');
+    verUrl.href = data.verification_uri;
+    verUrl.textContent = data.verification_uri;
+    document.getElementById('copilot-user-code').textContent = data.user_code;
+    document.getElementById('copilot-poll-status').textContent = 'Waiting for authorization…';
+    btn.textContent = '🔄 Waiting…';
+
+    // Start polling — use recursive setTimeout so we can adjust interval on slow_down
+    const expiresAt = Date.now() + data.expires_in * 1000;
+    let currentInterval = Math.max((data.interval || 5) * 1000, 5000);
+    clearTimeout(_copilotPollTimer);
+
+    const doPoll = async () => {
+      const pollStatus = document.getElementById('copilot-poll-status');
+      if (!pollStatus) return; // card was removed
+
+      if (Date.now() > expiresAt) {
+        pollStatus.textContent = '❌ Expired — try again';
+        btn.disabled = false; btn.textContent = '🔑 Authenticate with GitHub';
+        return;
+      }
+
+      let pd;
+      try {
+        const pr = await fetch(`/admin/providers/github_copilot/oauth/poll?device_code=${encodeURIComponent(data.device_code)}`, { headers: _headers() });
+        if (!pr.ok) {
+          let errMsg = `HTTP ${pr.status}`;
+          try { const e = await pr.json(); errMsg = e.detail || errMsg; } catch(_){}
+          pollStatus.textContent = `⚠️ Poll error: ${errMsg} — retrying…`;
+          _copilotPollTimer = setTimeout(doPoll, currentInterval);
+          return;
+        }
+        pd = await pr.json();
+      } catch (fetchErr) {
+        pollStatus.textContent = `⚠️ Network error — retrying…`;
+        _copilotPollTimer = setTimeout(doPoll, currentInterval);
+        return;
+      }
+
+      if (pd.status === 'success') {
+        pollStatus.textContent = '✅ Authenticated successfully!';
+        document.getElementById('copilot-device-block').style.display = 'none';
+        btn.textContent = '✅ Connected to GitHub';
+        btn.disabled = false;
+        btn.style.background = 'var(--green, #3fb950)';
+        toast('GitHub Copilot authenticated ✓', 'ok');
+        loadAll();
+        return; // done — no reschedule
+      } else if (pd.status === 'error') {
+        pollStatus.textContent = `❌ ${pd.error}`;
+        btn.disabled = false; btn.textContent = '🔑 Authenticate with GitHub';
+        return; // done — no reschedule
+      } else {
+        // pending or slow_down
+        if (pd.error === 'slow_down') {
+          currentInterval += 5000; // GitHub spec: add 5 s on slow_down
+          pollStatus.textContent = `⏳ Authorization pending… (polling every ${currentInterval/1000}s)`;
+        } else {
+          pollStatus.textContent = '⏳ Authorization pending…';
+        }
+        _copilotPollTimer = setTimeout(doPoll, currentInterval);
+      }
+    };
+
+    _copilotPollTimer = setTimeout(doPoll, currentInterval);
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false; btn.textContent = '🔑 Authenticate with GitHub';
+  }
 }
 
 // ── Load all ───────────────────────────────────────────────────────────────────
 async function loadAll() {
   if (!_token) return;
   await Promise.allSettled(PROVIDERS.map(p => loadHealth(p.id)));
+  await Promise.allSettled(PROVIDERS.map(p => loadSettings(p.id)));
   loadExpiring();
 }
 
@@ -295,6 +440,19 @@ async function loadHealth(provId) {
     chip.textContent = d.status || '—';
     document.getElementById(`configured-${provId}`).textContent = d.configured ? 'yes' : 'no';
     document.getElementById(`available-${provId}`).textContent  = d.available  ? 'yes' : 'no';
+    // Update Copilot auth button to reflect stored auth state
+    if (provId === 'github_copilot') {
+      const btn = document.getElementById('btn-copilot-auth');
+      if (btn) {
+        if (d.configured && d.status === 'ok') {
+          btn.textContent = '✅ Connected to GitHub';
+          btn.style.background = 'var(--green, #3fb950)';
+        } else {
+          btn.textContent = '🔑 Authenticate with GitHub';
+          btn.style.background = '';
+        }
+      }
+    }
   } catch (_) {}
 
   // Key expiry
@@ -345,6 +503,38 @@ async function loadExpiring() {
       </tr>`;
     }).join('');
   } catch (_) {}
+}
+
+// ── Provider settings ──────────────────────────────────────────────────────────
+async function loadSettings(provId) {
+  if (!_token) return;
+  try {
+    const r = await fetch(`/admin/providers/${provId}/settings`, { headers: _headers() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const s = d.settings || {};
+    const modelEl = document.getElementById(`model-input-${provId}`);
+    if (modelEl && s.model_id) modelEl.value = s.model_id;
+    const endpointEl = document.getElementById(`endpoint-input-${provId}`);
+    if (endpointEl && s.endpoint) endpointEl.value = s.endpoint;
+  } catch (_) {}
+}
+
+async function saveSettings(provId) {
+  if (!_token) { toast('Connect first', 'err'); return; }
+  const body = {};
+  const modelEl = document.getElementById(`model-input-${provId}`);
+  if (modelEl) body.model_id = modelEl.value.trim();
+  const endpointEl = document.getElementById(`endpoint-input-${provId}`);
+  if (endpointEl) body.endpoint = endpointEl.value.trim();
+  try {
+    const r = await fetch(`/admin/providers/${provId}/settings`, {
+      method: 'POST', headers: _headers(), body: JSON.stringify(body),
+    });
+    if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error saving', 'err'); return; }
+    toast(`Settings saved for ${provId}`, 'ok');
+    setTimeout(() => loadHealth(provId), 300);
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // ── Key management ─────────────────────────────────────────────────────────────

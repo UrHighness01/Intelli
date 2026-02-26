@@ -107,6 +107,67 @@
     #inp-model::placeholder { color: var(--muted); }
     .spacer { flex: 1; }
 
+    /* ── Context bar ──────────────────────────────────────────────── */
+    #context-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 4px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .ctx-label { font-size: .68rem; color: var(--muted); white-space: nowrap; }
+    .ctx-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--muted); padding: 3px 8px;
+      font-size: .72rem; cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .ctx-btn:hover { color: var(--text); border-color: var(--accent); }
+    .ctx-btn.active { background: rgba(108,99,255,.18); border-color: var(--accent); color: var(--accent); }
+    .ctx-pill {
+      font-size: .68rem; padding: 2px 7px; border-radius: 10px;
+      background: rgba(108,99,255,.12); color: var(--accent2);
+      border: 1px solid rgba(108,99,255,.3); max-width: 240px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ws-pill {
+      font-size: .68rem; padding: 2px 7px; border-radius: 10px;
+      background: rgba(61,220,132,.1); color: var(--green);
+      border: 1px solid rgba(61,220,132,.3);
+    }
+
+    /* ── Code blocks & addon button ───────────────────────────────── */
+    .msg-body pre {
+      background: #12141e; border: 1px solid var(--border);
+      border-radius: 7px; padding: 10px 12px;
+      font-size: .78rem; overflow-x: auto; margin: 6px 0;
+      white-space: pre; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    }
+    .msg-body code {
+      background: rgba(108,99,255,.13); border-radius: 3px;
+      padding: 1px 4px; font-family: monospace; font-size: .82em;
+    }
+    .msg-body pre code { background: transparent; padding: 0; }
+    .addon-create-bar {
+      margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .addon-create-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 5px; padding: 4px 10px; font-size: .73rem;
+      cursor: pointer; font-weight: 600; transition: background .15s;
+    }
+    .addon-create-btn:hover { background: var(--accent2); }
+    .addon-name-inp {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 5px; padding: 3px 7px;
+      font-size: .73rem; width: 130px;
+    }
+    .addon-name-inp:focus { outline: none; border-color: var(--accent); }
+
     /* ── Messages area ────────────────────────────────────────────── */
     #messages {
       flex: 1;
@@ -278,12 +339,31 @@
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="openrouter">OpenRouter</option>
+      <option value="github_copilot">GitHub Copilot</option>
       <option value="ollama">Ollama</option>
     </select>
     <label for="inp-model">Model</label>
     <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
     <div class="spacer"></div>
     <span id="status-pill" style="font-size:.72rem;color:var(--muted)" aria-live="polite"></span>
+  </div>
+
+  <!-- ── Context bar ───────────────────────────────────────────────── -->
+  <div id="context-bar" aria-label="Context controls">
+    <span class="ctx-label">Context:</span>
+    <button class="ctx-btn" id="btn-page-ctx" title="Attach active tab HTML source to this message">
+      📄 Page
+    </button>
+    <button class="ctx-btn" id="btn-workspace" title="Inject agent workspace (AGENTS.md + SOUL.md) as system prompt">
+      🗂️ Workspace
+    </button>
+    <a href="workspace.html" class="ctx-btn" title="Manage workspace files and skills" style="text-decoration:none">
+      ✏️ Edit workspace
+    </a>
+    <span id="page-ctx-pill" class="ctx-pill" style="display:none"></span>
+    <span id="ws-pill" class="ws-pill" style="display:none">🟢 workspace active</span>
+    <div class="spacer"></div>
+    <span id="ctx-info" style="font-size:.68rem;color:var(--muted)"></span>
   </div>
 
   <!-- ── Messages ───────────────────────────────────────────────── -->
@@ -326,6 +406,9 @@
     let _busy     = false;
     let _totalIn  = 0;
     let _totalOut = 0;
+    let _usePageCtx  = false;
+    let _useWorkspace = false;
+    let _pageSnapshot = null; // cached tab snapshot
 
     /* ── DOM refs ───────────────────────────────────────────────── */
     const $loginBar   = document.getElementById('login-bar');
@@ -343,6 +426,11 @@
     const $statIn     = document.getElementById('stat-in');
     const $statOut    = document.getElementById('stat-out');
     const $statModel  = document.getElementById('stat-model');
+    const $btnPageCtx  = document.getElementById('btn-page-ctx');
+    const $btnWorkspace = document.getElementById('btn-workspace');
+    const $pageCtxPill = document.getElementById('page-ctx-pill');
+    const $wsPill      = document.getElementById('ws-pill');
+    const $ctxInfo     = document.getElementById('ctx-info');
 
     /* ── Auth ───────────────────────────────────────────────────── */
     function applyToken(tok) {
@@ -363,6 +451,122 @@
     $loginToken.addEventListener('keydown', e => {
       if (e.key === 'Enter') applyToken($loginToken.value);
     });
+
+    /* ── Page context toggle ─────────────────────────────────────── */
+    async function togglePageCtx() {
+      _usePageCtx = !_usePageCtx;
+      $btnPageCtx.classList.toggle('active', _usePageCtx);
+      if (_usePageCtx) {
+        await refreshPageSnapshot();
+      } else {
+        _pageSnapshot = null;
+        $pageCtxPill.style.display = 'none';
+        updateCtxInfo();
+      }
+    }
+
+    async function refreshPageSnapshot() {
+      try {
+        const r = await fetch(`${GW}/tab/snapshot`);
+        if (r.status === 204) {
+          $pageCtxPill.textContent = '⚠ no snapshot yet';
+          $pageCtxPill.style.display = 'inline';
+          _pageSnapshot = null;
+        } else if (r.ok) {
+          _pageSnapshot = await r.json();
+          const title = _pageSnapshot.title || _pageSnapshot.url || 'Current page';
+          $pageCtxPill.textContent = `📄 ${title.slice(0, 50)}`;
+          $pageCtxPill.style.display = 'inline';
+        }
+      } catch (e) {
+        $pageCtxPill.textContent = '⚠ fetch error';
+        $pageCtxPill.style.display = 'inline';
+      }
+      updateCtxInfo();
+    }
+
+    /* ── Workspace toggle ────────────────────────────────────────── */
+    function toggleWorkspace() {
+      _useWorkspace = !_useWorkspace;
+      $btnWorkspace.classList.toggle('active', _useWorkspace);
+      $wsPill.style.display = _useWorkspace ? 'inline' : 'none';
+      updateCtxInfo();
+    }
+
+    function updateCtxInfo() {
+      const parts = [];
+      if (_useWorkspace) parts.push('workspace');
+      if (_usePageCtx && _pageSnapshot) parts.push('page HTML');
+      $ctxInfo.textContent = parts.length ? `Injecting: ${parts.join(', ')}` : '';
+    }
+
+    $btnPageCtx.addEventListener('click', togglePageCtx);
+    $btnWorkspace.addEventListener('click', toggleWorkspace);
+
+    /* ── Code block detection & addon creation ───────────────────── */
+    function parseCodeBlocks(text) {
+      // Returns array of {lang, code} from ```lang\n...\n``` blocks
+      const blocks = [];
+      const re = /```(\w*)\n([\s\S]*?)```/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        blocks.push({ lang: m[1] || 'text', code: m[2] });
+      }
+      return blocks;
+    }
+
+    function renderMessageBody(text) {
+      // Render markdown-ish: code fences, inline code, newlines
+      const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return escaped
+        .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+          `<pre><code class="lang-${lang || 'text'}">${code}</code></pre>`)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br/>');
+    }
+
+    async function createAddonFromCode(code, name, descr) {
+      if (!name) { toast('Enter an addon name', 'err'); return; }
+      try {
+        const r = await fetch(`${GW}/admin/addons`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description: descr || 'Generated by AI chat', code_js: code }),
+        });
+        if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error creating addon', 'err'); return; }
+        toast(`Addon "${name}" created ✓`, 'ok');
+        // Optionally auto-activate
+        await fetch(`${GW}/admin/addons/${encodeURIComponent(name)}/activate`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        toast(`Addon "${name}" activated ✓`, 'ok');
+      } catch (e) { toast(e.message, 'err'); }
+    }
+
+    function attachAddonButtons(bodyEl, assistantText) {
+      const blocks = parseCodeBlocks(assistantText);
+      const jsBlocks = blocks.filter(b => b.lang === 'js' || b.lang === 'javascript');
+      if (!jsBlocks.length) return;
+      jsBlocks.forEach((b, i) => {
+        const bar = document.createElement('div');
+        bar.className = 'addon-create-bar';
+        const nameInp = document.createElement('input');
+        nameInp.className = 'addon-name-inp';
+        nameInp.placeholder = `addon-name-${i + 1}`;
+        nameInp.type = 'text';
+        const btn = document.createElement('button');
+        btn.className = 'addon-create-btn';
+        btn.textContent = '⚡ Create & Activate Addon';
+        btn.onclick = () => createAddonFromCode(b.code, nameInp.value.trim(), '');
+        bar.appendChild(nameInp);
+        bar.appendChild(btn);
+        bodyEl.appendChild(bar);
+      });
+    }
 
     /* ── Message rendering ──────────────────────────────────────── */
     function renderEmpty() {
@@ -392,7 +596,12 @@
 
       const body = document.createElement('div');
       body.className = 'msg-body';
-      body.textContent = content;
+      if (role === 'assistant' && content) {
+        body.innerHTML = renderMessageBody(content);
+        attachAddonButtons(body, content);
+      } else {
+        body.textContent = content;
+      }
 
       wrap.appendChild(metaDiv);
       wrap.appendChild(body);
@@ -466,6 +675,8 @@
             model:       model || '',
             temperature: 0.7,
             max_tokens:  2048,
+            use_workspace:    _useWorkspace,
+            use_page_context: _usePageCtx,
           }),
         });
 
@@ -537,7 +748,8 @@
         cursor.remove();
         if (finalResult && !finalResult.error) {
           const assistantContent = finalResult.content || fullContent;
-          thinkingBody.textContent = assistantContent;
+          thinkingBody.innerHTML = renderMessageBody(assistantContent);
+          attachAddonButtons(thinkingBody, assistantContent);
           _msgs.push({ role: 'assistant', content: assistantContent });
 
           // Update provider badge & model

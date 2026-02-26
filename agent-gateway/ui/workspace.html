@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli · Workspace</title>
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --surface2:#21253a;
+      --border:  #2d3145;
+      --accent:  #6c63ff;
+      --accent2: #a78bfa;
+      --green:   #3ddc84;
+      --red:     #ff6b6b;
+      --yellow:  #ffd166;
+      --text:    #e2e4f0;
+      --muted:   #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px; display: flex; flex-direction: column; height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 8px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    }
+    .logo { font-size: 1.05rem; font-weight: 800; color: var(--accent); letter-spacing: -.02em; }
+    .logo span { color: var(--accent2); }
+    header h1 { font-size: .85rem; font-weight: 600; flex: 1; }
+    .back-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); border-radius: 5px; padding: 4px 10px; font-size: .75rem;
+      cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .back-btn:hover { color: var(--text); }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
+    aside {
+      width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+    }
+    .sidebar-section {
+      padding: 8px 0; flex-shrink: 0;
+    }
+    .sidebar-title {
+      font-size: .68rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .08em; padding: 6px 14px 4px;
+    }
+    .file-item {
+      padding: 5px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+      color: var(--text); font-size: .8rem; border-left: 2px solid transparent;
+    }
+    .file-item:hover { background: var(--surface2); }
+    .file-item.active { border-left-color: var(--accent); background: rgba(108,99,255,.08); color: var(--accent2); }
+    .file-icon { font-size: .9rem; }
+    .sidebar-sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+    .skill-item {
+      padding: 5px 14px 5px 22px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+      color: var(--muted); font-size: .78rem; border-left: 2px solid transparent;
+    }
+    .skill-item:hover { background: var(--surface2); color: var(--text); }
+    .skill-item.active { border-left-color: var(--green); background: rgba(61,220,132,.05); color: var(--green); }
+    .skill-del { margin-left: auto; color: var(--muted); font-size: .7rem; opacity: 0; padding: 1px 4px; border-radius: 3px; }
+    .skill-del:hover { background: rgba(255,107,107,.2); color: var(--red); }
+    .skill-item:hover .skill-del { opacity: 1; }
+
+    .add-skill-row {
+      padding: 6px 10px; display: flex; gap: 5px;
+    }
+    .add-skill-row input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px; padding: 4px 7px; font-size: .75rem;
+    }
+    .add-skill-row input:focus { outline: none; border-color: var(--accent); }
+    .add-btn {
+      background: var(--accent); color: #fff; border: none; border-radius: 4px;
+      padding: 4px 8px; font-size: .75rem; cursor: pointer; font-weight: 600;
+    }
+    .add-btn:hover { background: var(--accent2); }
+
+    /* ── Editor panel ────────────────────────────────────────────── */
+    .editor-panel {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--bg);
+    }
+    .editor-header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 7px 14px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .editor-path {
+      font-size: .78rem; color: var(--muted); font-family: monospace; flex: 1;
+    }
+    .editor-path span { color: var(--accent2); font-weight: 600; }
+    .save-btn {
+      background: var(--green); color: #111; border: none; border-radius: 5px;
+      padding: 4px 12px; font-size: .78rem; font-weight: 700; cursor: pointer;
+    }
+    .save-btn:hover { opacity: .85; }
+    .save-btn:disabled { opacity: .4; cursor: default; }
+    .editor-hint { font-size: .68rem; color: var(--muted); }
+    textarea#editor {
+      flex: 1; background: #12141e; color: var(--text); border: none; outline: none;
+      padding: 14px 18px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: .82rem; line-height: 1.6; resize: none; tab-size: 2;
+    }
+    .empty-hint {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: .88rem;
+    }
+
+    /* ── Toast ───────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 18px; right: 18px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; padding: 8px 14px; font-size: .8rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      opacity: 0; pointer-events: none; transition: opacity .2s;
+      max-width: 280px; z-index: 99;
+    }
+    #toast.show { opacity: 1; }
+    #toast.ok   { border-color: var(--green); color: var(--green); }
+    #toast.err  { border-color: var(--red);   color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Intelli<span>·</span></div>
+  <h1>Agent Workspace</h1>
+  <a href="chat.html" class="back-btn">← Chat</a>
+  <a href="index.html" class="back-btn">⌂ Hub</a>
+</header>
+
+<div class="main">
+
+  <!-- ── Sidebar ─────────────────────────────────────────── -->
+  <aside>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Core files</div>
+      <div class="file-item" onclick="openFile('AGENTS.md')">
+        <span class="file-icon">🤖</span> AGENTS.md
+      </div>
+      <div class="file-item" onclick="openFile('SOUL.md')">
+        <span class="file-icon">✨</span> SOUL.md
+      </div>
+      <div class="file-item" onclick="openFile('TOOLS.md')">
+        <span class="file-icon">🔧</span> TOOLS.md
+      </div>
+    </div>
+
+    <hr class="sidebar-sep" />
+
+    <div class="sidebar-section" style="flex:1;overflow-y:auto">
+      <div class="sidebar-title">Skills</div>
+      <div id="skill-list"><!-- filled by JS --></div>
+      <div class="add-skill-row">
+        <input id="new-skill-name" type="text" placeholder="skill-name" maxlength="40" />
+        <button class="add-btn" onclick="createSkill()">+</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Editor area ─────────────────────────────────────── -->
+  <div class="editor-panel" id="editor-panel">
+    <div class="empty-hint" id="empty-hint">Select a file or skill on the left to edit.</div>
+    <div id="editor-area" style="display:none;flex-direction:column;flex:1">
+      <div class="editor-header">
+        <div class="editor-path">📁 workspace / <span id="editor-filename">—</span></div>
+        <span class="editor-hint" id="editor-hint"></span>
+        <button class="save-btn" id="save-btn" onclick="saveFile()">💾 Save</button>
+      </div>
+      <textarea id="editor" spellcheck="false" placeholder="// Start typing…"></textarea>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const GW = 'http://127.0.0.1:8080';
+  let _token = localStorage.getItem('gw_token') || '';
+  let _currentFile = null;   // path relative to workspace root
+  let _dirty = false;
+
+  // ── Toast ─────────────────────────────────────────────────────────
+  let _toastTimer;
+  function toast(msg, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  }
+
+  // ── Auth helper ───────────────────────────────────────────────────
+  function authHdr() {
+    return { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' };
+  }
+
+  // ── Sidebar: mark active ──────────────────────────────────────────
+  function setActive(path) {
+    document.querySelectorAll('.file-item, .skill-item').forEach(el => el.classList.remove('active'));
+    const items = document.querySelectorAll('.file-item, .skill-item');
+    items.forEach(el => {
+      if (el.dataset.path === path) el.classList.add('active');
+    });
+  }
+
+  // ── Open & display file ───────────────────────────────────────────
+  async function openFile(relPath) {
+    if (_dirty && !confirm('Unsaved changes — discard?')) return;
+    try {
+      const r = await fetch(`${GW}/workspace/file?path=${encodeURIComponent(relPath)}`, {
+        headers: authHdr(),
+      });
+      if (!r.ok) { toast(`Cannot open ${relPath}: ${r.status}`, 'err'); return; }
+      const data = await r.json();
+      showEditor(relPath, data.content ?? '');
+      setActive(relPath);
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  function showEditor(relPath, content) {
+    _currentFile = relPath;
+    _dirty = false;
+    document.getElementById('empty-hint').style.display = 'none';
+    const area = document.getElementById('editor-area');
+    area.style.display = 'flex';
+    document.getElementById('editor-filename').textContent = relPath;
+    const ed = document.getElementById('editor');
+    ed.value = content;
+    ed.focus();
+
+    // Hint by file
+    const hints = {
+      'AGENTS.md':  'System prompt injected into every chat message',
+      'SOUL.md':    'Agent personality & values',
+      'TOOLS.md':   'Capability catalog / reference for the agent',
+    };
+    const base = relPath.split('/').pop();
+    document.getElementById('editor-hint').textContent = hints[base] || (relPath.startsWith('skills/') ? '⚡ Skill — Markdown + JS code blocks' : '');
+  }
+
+  // ── Save file ─────────────────────────────────────────────────────
+  async function saveFile() {
+    if (!_currentFile) return;
+    const content = document.getElementById('editor').value;
+    const btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch(`${GW}/workspace/file?path=${encodeURIComponent(_currentFile)}`, {
+        method: 'POST',
+        headers: authHdr(),
+        body: JSON.stringify({ content }),
+      });
+      if (!r.ok) { toast(`Save failed: ${r.status}`, 'err'); btn.disabled = false; return; }
+      _dirty = false;
+      toast(`Saved ${_currentFile} ✓`, 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    btn.disabled = false;
+  }
+
+  // ── Keyboard shortcut: Ctrl/Cmd+S ────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+  });
+  document.getElementById('editor').addEventListener('input', () => { _dirty = true; });
+
+  // ── Sidebar core-file data-path attributes ─────────────────────────
+  document.querySelectorAll('.file-item').forEach(el => {
+    const match = el.getAttribute('onclick').match(/'([^']+)'/);
+    if (match) el.dataset.path = match[1];
+  });
+
+  // ── Skills ────────────────────────────────────────────────────────
+  async function loadSkills() {
+    try {
+      const r = await fetch(`${GW}/workspace/skills`, { headers: authHdr() });
+      if (!r.ok) return;
+      const data = await r.json();
+      renderSkills(data.skills || []);
+    } catch { /* ignore, gateway may not be running */ }
+  }
+
+  function renderSkills(skills) {
+    const list = document.getElementById('skill-list');
+    list.innerHTML = '';
+    skills.forEach(sk => {
+      const skillPath = `skills/${sk.slug}/SKILL.md`;
+      const div = document.createElement('div');
+      div.className = 'skill-item';
+      div.dataset.path = skillPath;
+      div.innerHTML = `<span>⚡</span> ${sk.name || sk.slug} <span class="skill-del" data-slug="${sk.slug}">✕</span>`;
+      div.addEventListener('click', e => {
+        if (e.target.closest('.skill-del')) return;
+        openFile(skillPath);
+      });
+      div.querySelector('.skill-del').addEventListener('click', e => {
+        e.stopPropagation();
+        deleteSkill(sk.slug);
+      });
+      list.appendChild(div);
+    });
+  }
+
+  async function createSkill() {
+    const inp = document.getElementById('new-skill-name');
+    const raw = inp.value.trim();
+    if (!raw) { toast('Enter a skill name', 'err'); return; }
+    // Generate slug: lowercase, replace spaces/special with "-"
+    const slug = raw.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+    const name = raw;
+    if (!slug) { toast('Invalid skill name', 'err'); return; }
+    try {
+      const r = await fetch(`${GW}/workspace/skills`, {
+        method: 'POST',
+        headers: authHdr(),
+        body: JSON.stringify({ slug, name, description: '', content: '' }),
+      });
+      if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error creating skill', 'err'); return; }
+      inp.value = '';
+      toast(`Skill "${name}" created ✓`, 'ok');
+      await loadSkills();
+      openFile(`skills/${slug}/SKILL.md`);
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  async function deleteSkill(slug) {
+    if (!confirm(`Delete skill "${slug}"?`)) return;
+    try {
+      const r = await fetch(`${GW}/workspace/skills/${encodeURIComponent(slug)}`, {
+        method: 'DELETE', headers: authHdr(),
+      });
+      if (!r.ok) { toast('Delete failed', 'err'); return; }
+      toast(`Skill "${slug}" deleted`, 'ok');
+      if (_currentFile && _currentFile.startsWith(`skills/${slug}/`)) {
+        _currentFile = null;
+        _dirty = false;
+        document.getElementById('editor-area').style.display = 'none';
+        document.getElementById('empty-hint').style.display = 'flex';
+      }
+      await loadSkills();
+    } catch (e) { toast(e.message, 'err'); }
+  }
+
+  // Allow pressing Enter in skill name field
+  document.getElementById('new-skill-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') createSkill();
+  });
+
+  // ── Boot ──────────────────────────────────────────────────────────
+  loadSkills();
+</script>
+</body>
+</html>

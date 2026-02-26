@@ -19,7 +19,7 @@ import asyncio
 import threading
 import collections
 from rate_limit import rate_limiter, check_user_rate_limit
-from providers.adapters import get_adapter, available_providers
+from providers.adapters import get_adapter, available_providers, ProviderSettingsStore
 from providers.provider_adapter import ProviderKeyStore
 from providers.key_rotation import store_key_with_ttl, rotate_key, get_key_metadata, list_expiring
 from tools.capability import CapabilityVerifier, _MANIFEST_DIR, ToolManifest
@@ -31,6 +31,7 @@ import webhooks as _webhooks
 import scheduler as _scheduler
 import tab_snapshot as _tab_snapshot
 import addons as _addons
+import workspace_manager as _workspace
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
 
@@ -933,6 +934,105 @@ def delete_provider_key(provider: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Provider settings
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/providers/{provider}/settings')
+def get_provider_settings(provider: str, request: Request):
+    """Get persisted settings (model_id, endpoint) for a provider.  Admin auth required."""
+    _require_admin_token(request)
+    settings = ProviderSettingsStore.get(provider)
+    return {'provider': provider, 'settings': settings}
+
+
+@app.post('/admin/providers/{provider}/settings')
+def set_provider_settings(provider: str, payload: dict, request: Request):
+    """Save settings (model_id, endpoint) for a provider.  Admin auth required."""
+    token = _require_admin_token(request)
+    allowed_keys = {'model_id', 'endpoint'}
+    filtered = {k: str(v).strip() for k, v in payload.items() if k in allowed_keys and v is not None}
+    ProviderSettingsStore.set(provider, filtered)
+    _audit('set_provider_settings', {'provider': provider, 'settings': filtered}, actor=_actor(token))
+    return {'provider': provider, 'settings': ProviderSettingsStore.get(provider)}
+
+
+# ---------------------------------------------------------------------------
+# GitHub Copilot — OAuth Device Code Flow
+# ---------------------------------------------------------------------------
+# GitHub Copilot requires an OAuth token (not a PAT) obtained through the
+# device code flow with GitHub's public Copilot OAuth client.
+# Client ID below is the same one used by VS Code, gh CLI, and other editors.
+_GH_COPILOT_CLIENT_ID = 'Iv1.b507a08c87ecfe98'
+_GH_DEVICE_CODE_URL   = 'https://github.com/login/device/code'
+_GH_ACCESS_TOKEN_URL  = 'https://github.com/login/oauth/access_token'
+
+
+@app.post('/admin/providers/github_copilot/oauth/start')
+def gh_copilot_oauth_start(request: Request):
+    """Initiate the GitHub Device Code OAuth flow for Copilot.
+
+    Returns device_code, user_code, verification_uri and interval so the
+    frontend can display the code and start polling.
+    """
+    import requests as _req_lib
+    _require_admin_token(request)
+    resp = _req_lib.post(
+        _GH_DEVICE_CODE_URL,
+        headers={'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'},
+        data={'client_id': _GH_COPILOT_CLIENT_ID, 'scope': 'read:user'},
+        timeout=15,
+    )
+    if not resp.ok:
+        raise HTTPException(status_code=502, detail=f'GitHub device code request failed: {resp.status_code}')
+    data = resp.json()
+    if 'device_code' not in data:
+        raise HTTPException(status_code=502, detail=f'Unexpected GitHub response: {data}')
+    return {
+        'device_code':      data['device_code'],
+        'user_code':        data['user_code'],
+        'verification_uri': data['verification_uri'],
+        'expires_in':       data.get('expires_in', 900),
+        'interval':         data.get('interval', 5),
+    }
+
+
+@app.get('/admin/providers/github_copilot/oauth/poll')
+def gh_copilot_oauth_poll(device_code: str, request: Request):
+    """Poll GitHub for the access token after the user has authorized.
+
+    Returns status: 'pending' | 'success' | 'error'.
+    On success, the OAuth token is automatically stored as the Copilot key.
+    """
+    import requests as _req_lib
+    token = _require_admin_token(request)
+    resp = _req_lib.post(
+        _GH_ACCESS_TOKEN_URL,
+        headers={'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'},
+        data={
+            'client_id':   _GH_COPILOT_CLIENT_ID,
+            'device_code': device_code,
+            'grant_type':  'urn:ietf:params:oauth:grant-type:device_code',
+        },
+        timeout=15,
+    )
+    if not resp.ok:
+        raise HTTPException(status_code=502, detail=f'GitHub token poll failed: {resp.status_code}')
+    data = resp.json()
+    error = data.get('error', '')
+    if error == 'authorization_pending' or error == 'slow_down':
+        return {'status': 'pending', 'error': error}
+    if error:
+        return {'status': 'error', 'error': data.get('error_description', error)}
+    access_token = data.get('access_token', '')
+    if not access_token:
+        return {'status': 'error', 'error': 'No access_token in response'}
+    # Store the OAuth token as the Copilot provider key
+    ProviderKeyStore.set_key('github_copilot', access_token)
+    _audit('gh_copilot_oauth_success', {}, actor=_actor(token))
+    return {'status': 'success'}
+
+
+# ---------------------------------------------------------------------------
 # Provider health checks
 # ---------------------------------------------------------------------------
 
@@ -950,8 +1050,9 @@ def provider_health(provider: str, request: Request):
         adapter = get_adapter(provider)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f'unknown provider: {provider}') from exc
+    requires_key = getattr(adapter, 'requires_key', True)
     key = ProviderKeyStore.get_key(provider)
-    configured = bool(key)
+    configured = (not requires_key) or bool(key)
     available = adapter.is_available()
     if not configured:
         status = 'no_key'
@@ -964,6 +1065,7 @@ def provider_health(provider: str, request: Request):
         'status': status,
         'configured': configured,
         'available': available,
+        'requires_key': requires_key,
     }
 
 
@@ -1214,6 +1316,10 @@ class ChatRequest(BaseModel):
     model: str = ''
     temperature: float = 0.7
     max_tokens: int = 1024
+    # Context injection flags
+    use_workspace: bool = False    # prepend AGENTS.md + SOUL.md as system prompt
+    use_page_context: bool = False # prepend active tab snapshot to system prompt
+    system_prompt: str = ''        # extra system prompt injected by caller
 
 
 @app.post('/chat/complete')
@@ -1265,6 +1371,28 @@ def chat_complete(
     if req.model:
         kwargs['model'] = req.model
 
+    # ---- Build system prompt ----------------------------------------
+    system_parts: list[str] = []
+    if req.use_workspace:
+        ws_prompt = _workspace.build_system_prompt(include_tools=True)
+        if ws_prompt:
+            system_parts.append(ws_prompt)
+    if req.use_page_context:
+        snap = _tab_snapshot.get_snapshot()
+        if snap:
+            system_parts.append(_workspace.build_page_context_block(snap))
+    if req.system_prompt:
+        system_parts.append(req.system_prompt)
+    if system_parts:
+        combined_system = '\n\n---\n\n'.join(system_parts)
+        # Inject as a leading system message if the provider supports it
+        # (OpenAI/Ollama: role=system; Anthropic: top-level system field)
+        kwargs['system'] = combined_system
+        # Also prepend as system message for adapters that use messages-only mode
+        messages_with_sys = [{'role': 'system', 'content': combined_system}] + list(req.messages)
+    else:
+        messages_with_sys = list(req.messages)
+
     if stream:
         # SSE streaming: run the blocking adapter call synchronously inside a
         # generator that emits word-by-word token events followed by a final
@@ -1273,7 +1401,7 @@ def chat_complete(
             import json as _json
             try:
                 result = adapter.chat_complete(
-                    messages=req.messages,
+                    messages=messages_with_sys,
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
                     **kwargs,
@@ -1303,7 +1431,7 @@ def chat_complete(
 
     try:
         result = adapter.chat_complete(
-            messages=req.messages,
+            messages=messages_with_sys,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
             **kwargs,
@@ -2026,3 +2154,105 @@ def addons_deactivate(name: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail='addon not found')
     return {'deactivated': True, 'addon': addon}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workspace API  (agent persistent workspace — inspired by OpenClaw)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WorkspaceWriteBody(BaseModel):
+    content: str
+
+
+@app.get('/workspace/files')
+def workspace_list_files(request: Request):
+    """List all files in the agent workspace.  Admin auth required."""
+    _require_admin_token(request)
+    return {'files': _workspace.list_files()}
+
+
+@app.get('/workspace/file')
+def workspace_read_file(path: str, request: Request):
+    """Read a workspace file by relative path.  Admin auth required."""
+    _require_admin_token(request)
+    try:
+        content = _workspace.read_file(path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'path': path, 'content': content}
+
+
+@app.post('/workspace/file')
+def workspace_write_file(path: str, body: WorkspaceWriteBody, request: Request):
+    """Create or overwrite a workspace file.  Admin auth required."""
+    token = _require_admin_token(request)
+    try:
+        meta = _workspace.write_file(path, body.content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _audit('workspace_write_file', {'path': path}, actor=_actor(token))
+    return meta
+
+
+@app.delete('/workspace/file')
+def workspace_delete_file(path: str, request: Request):
+    """Delete a workspace file.  Admin auth required."""
+    token = _require_admin_token(request)
+    try:
+        _workspace.delete_file(path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _audit('workspace_delete_file', {'path': path}, actor=_actor(token))
+    return {'deleted': True, 'path': path}
+
+
+@app.get('/workspace/skills')
+def workspace_list_skills(request: Request):
+    """List installed workspace skills.  Admin auth required."""
+    _require_admin_token(request)
+    return {'skills': _workspace.list_skills()}
+
+
+class WorkspaceSkillCreate(BaseModel):
+    slug: str
+    name: str
+    description: str = ''
+    content: str = ''
+
+
+@app.post('/workspace/skills')
+def workspace_create_skill(body: WorkspaceSkillCreate, request: Request):
+    """Create a new workspace skill.  Admin auth required."""
+    token = _require_admin_token(request)
+    try:
+        skill = _workspace.create_skill(body.slug, body.name, body.description, body.content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _audit('workspace_create_skill', {'slug': body.slug}, actor=_actor(token))
+    return skill
+
+
+@app.delete('/workspace/skills/{slug}')
+def workspace_delete_skill(slug: str, request: Request):
+    """Delete a workspace skill.  Admin auth required."""
+    token = _require_admin_token(request)
+    try:
+        _workspace.delete_skill(slug)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    _audit('workspace_delete_skill', {'slug': slug}, actor=_actor(token))
+    return {'deleted': True, 'slug': slug}
+
+
+@app.get('/workspace/system-prompt')
+def workspace_system_prompt(request: Request):
+    """Return the assembled system prompt (AGENTS.md + SOUL.md + TOOLS.md).
+
+    Unauthenticated — only accessible from localhost so the chat UI can load it.
+    """
+    prompt = _workspace.build_system_prompt(include_tools=True)
+    return {'system_prompt': prompt}

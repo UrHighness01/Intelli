@@ -357,6 +357,33 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
     `).catch(() => {});
   });
 
+  // Auto-push a tab snapshot to the gateway after every real page load so
+  // the AI chat always has fresh page context when the user enables "Page" context.
+  view.webContents.on('did-finish-load', async () => {
+    const url = view.webContents.getURL();
+    // Skip blank, new-tab, and gateway admin pages
+    if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+    // Only push for the currently active tab
+    if (view !== tabs[activeTabId]?.view) return;
+    try {
+      const html  = await view.webContents.executeJavaScript('document.documentElement.outerHTML').catch(() => '');
+      const title = view.webContents.getTitle();
+      const payload = JSON.stringify({ url, title, html });
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/tab/snapshot',
+        method:   'PUT',
+        headers:  {
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      });
+      req.on('error', () => {}); // silently ignore if gateway not yet up
+      req.end(payload);
+    } catch (_) {}
+  });
+
   tabs[id] = { id, view };
   switchTab(id, win);
   return id;
