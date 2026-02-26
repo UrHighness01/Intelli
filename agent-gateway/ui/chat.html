@@ -493,6 +493,21 @@
     .approval-btn.deny  { background: #7f2a2a; color: var(--text); }
     .approval-btn:hover { opacity: .85; }
     .approval-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Skill-Created Toast ──────────────────────────────────── */
+    .skill-toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 200;
+      background: #122b1f; border: 1.5px solid var(--green);
+      border-radius: 10px; padding: 12px 18px;
+      font-size: .85rem; color: var(--text); max-width: 340px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.5);
+      animation: toast-in .25s ease;
+    }
+    .skill-toast a { color: var(--green); text-decoration: underline; }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -1105,6 +1120,12 @@
               continue;
             }
 
+            // Skill created by agent — show toast notification
+            if (ev.type === 'skill_created') {
+              showSkillToast(ev.name, ev.slug);
+              continue;
+            }
+
             if (!ev.done) {
               // token event
               fullContent += ev.token || '';
@@ -1628,6 +1649,18 @@
         dismissApprovalBanner();
       }
     }
-  </script>
+
+    // ── Skill-Created Toast ───────────────────────────────────────
+    function showSkillToast(name, slug) {
+      const toast = document.createElement('div');
+      toast.className = 'skill-toast';
+      const workspaceUrl = `/ui/workspace.html`;
+      toast.innerHTML = `🛠 New skill created: <strong>${name || slug}</strong>&nbsp;&nbsp;<a href="${workspaceUrl}" target="_blank">Open workspace →</a>`;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'toast-in .25s ease reverse';
+        setTimeout(() => toast.remove(), 250);
+      }, 7000);
+    }
 </body>
 </html>

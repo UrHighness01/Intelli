@@ -73,6 +73,13 @@ def _seed_defaults() -> None:
     _seed_skill('web-search', _SKILL_WEB_SEARCH)
     _seed_skill('translate', _SKILL_TRANSLATE)
 
+    # Patch existing AGENTS.md with skill-creator guide if not already present
+    agents_md = _WORKSPACE_ROOT / 'AGENTS.md'
+    if agents_md.exists():
+        current = agents_md.read_text(encoding='utf-8')
+        if '## Skill Creator' not in current:
+            agents_md.write_text(current.rstrip() + '\n\n' + _SKILL_CREATOR_SECTION, encoding='utf-8')
+
 
 def _seed_skill(slug: str, content: str) -> None:
     skill_dir = _WORKSPACE_ROOT / 'skills' / slug
@@ -144,6 +151,47 @@ When the user types `/translate <text>` or asks you to translate something:
 4. If the text is from the active page, reference the page title.
 
 Keep translations natural, not word-for-word literal.
+"""
+
+
+_SKILL_CREATOR_SECTION = """\
+## Skill Creator
+
+You can create, read, and update workspace skills on demand using these tools:
+
+- `skill_list` — list all installed skills
+- `skill_read(slug)` — read a skill's full SKILL.md content
+- `skill_create(slug, name, description, content)` — install a new skill
+- `skill_update(slug, content)` — update an existing skill's instructions
+
+### SKILL.md format
+
+Every skill is a Markdown file with a YAML frontmatter block:
+
+```
+---
+name: my-skill
+description: One-line description of what this skill does
+user-invokable: true
+---
+
+# Skill Title
+
+Instructions for the agent describing what to do when this skill is active...
+```
+
+Supported frontmatter fields: `name`, `description`, `user-invokable`,
+`compatibility`, `argument-hint`, `disable-model-invocation`, `license`, `metadata`.
+
+### Workflow for creating a skill
+
+1. Ask the user what capability they want.
+2. Draft the SKILL.md content with clear, concise agent instructions.
+3. Call `skill_create(slug, name, description, content)`.
+4. Tell the user the skill is ready and how to activate it.
+
+Always use a descriptive, URL-safe slug (lowercase, hyphens only).
+If the skill already exists, use `skill_update` instead.
 """
 
 
@@ -370,6 +418,78 @@ def delete_skill(slug: str) -> None:
         raise FileNotFoundError(f"Skill '{slug}' not found")
     import shutil
     shutil.rmtree(skill_dir)
+
+
+def get_skill(slug: str) -> dict:
+    """Return metadata + full SKILL.md content for a single skill."""
+    root = _ensure_root()
+    skill_dir = root / 'skills' / slug
+    if not skill_dir.exists():
+        raise FileNotFoundError(f"Skill '{slug}' not found")
+    skill_md = skill_dir / 'SKILL.md'
+    content = skill_md.read_text(encoding='utf-8') if skill_md.exists() else ''
+    meta = _parse_skill_frontmatter(content)
+    return {
+        'slug':        slug,
+        'name':        meta.get('name', slug),
+        'description': meta.get('description', ''),
+        'content':     content,
+        'path':        str(skill_md.relative_to(root)) if skill_md.exists() else f'skills/{slug}/SKILL.md',
+        'modified':    datetime.fromtimestamp(
+            skill_dir.stat().st_mtime, tz=timezone.utc
+        ).isoformat(),
+    }
+
+
+def update_skill(slug: str, content: str) -> dict:
+    """Overwrite the SKILL.md of an existing skill."""
+    root = _ensure_root()
+    skill_dir = root / 'skills' / slug
+    if not skill_dir.exists():
+        raise FileNotFoundError(f"Skill '{slug}' not found")
+    skill_md = skill_dir / 'SKILL.md'
+    skill_md.write_text(content, encoding='utf-8')
+    meta = _parse_skill_frontmatter(content)
+    return {
+        'slug':        slug,
+        'name':        meta.get('name', slug),
+        'description': meta.get('description', ''),
+        'path':        str(skill_md.relative_to(root)),
+        'modified':    datetime.now(timezone.utc).isoformat(),
+    }
+
+
+_SUPPORTED_ATTRS = frozenset({
+    'name', 'description', 'user-invokable', 'compatibility',
+    'argument-hint', 'disable-model-invocation', 'license', 'metadata',
+})
+
+
+def validate_skill(content: str) -> dict:
+    """Validate SKILL.md content.  Returns {valid, errors, warnings, meta}."""
+    errors: list[str]   = []
+    warnings: list[str] = []
+    meta = _parse_skill_frontmatter(content)
+
+    if not meta.get('name'):
+        errors.append('Missing required frontmatter field: name')
+    if not meta.get('description'):
+        warnings.append('Missing recommended frontmatter field: description')
+    for key in meta:
+        if key not in _SUPPORTED_ATTRS:
+            warnings.append(f'Unsupported frontmatter attribute {key!r} — will be ignored')
+
+    # Check that a body exists beyond frontmatter
+    stripped = re.sub(r'^---.*?---', '', content, flags=re.DOTALL).strip()
+    if not stripped:
+        warnings.append('Skill body is empty — add agent instructions below the frontmatter')
+
+    return {
+        'valid':    len(errors) == 0,
+        'errors':   errors,
+        'warnings': warnings,
+        'meta':     meta,
+    }
 
 
 # ---------------------------------------------------------------------------

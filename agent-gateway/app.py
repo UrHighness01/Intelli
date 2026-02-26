@@ -43,6 +43,11 @@ import personas as _personas
 import sessions as _sessions
 import watcher as _watcher
 import mcp_client as _mcp
+import notifier as _notifier
+import notes as _notes
+import credential_store as _cred
+import a2a as _a2a
+import plugin_loader as _plugins
 _canvas = _canvas_mgr.get_canvas()
 
 app = FastAPI(title="Intelli Agent Gateway (prototype)")
@@ -274,6 +279,12 @@ try:
     _mcp.start_all()
 except Exception as _mcp_err:
     import logging as _l; _l.getLogger(__name__).warning('MCP start_all: %s', _mcp_err)
+
+# Plugin system — load all enabled plugins
+try:
+    _plugins.load_all()
+except Exception as _plugins_err:
+    import logging as _l; _l.getLogger(__name__).warning('plugin load_all: %s', _plugins_err)
 
 # startup time for basic metrics
 _start_time = datetime.now(timezone.utc)
@@ -2412,6 +2423,44 @@ def workspace_delete_skill(slug: str, request: Request):
     return {'deleted': True, 'slug': slug}
 
 
+@app.get('/workspace/skills/{slug}')
+def workspace_get_skill(slug: str, request: Request):
+    """Return full content + metadata for a single skill.  Admin auth required."""
+    _require_admin_token(request)
+    try:
+        return _workspace.get_skill(slug)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+class WorkspaceSkillUpdate(BaseModel):
+    content: str
+
+
+@app.put('/workspace/skills/{slug}')
+def workspace_update_skill(slug: str, body: WorkspaceSkillUpdate, request: Request):
+    """Overwrite the SKILL.md of an existing skill.  Admin auth required."""
+    token = _require_admin_token(request)
+    try:
+        result = _workspace.update_skill(slug, body.content)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    _audit('workspace_update_skill', {'slug': slug}, actor=_actor(token))
+    return result
+
+
+@app.post('/workspace/skills/{slug}/test')
+def workspace_test_skill(slug: str, request: Request):
+    """Validate a skill's SKILL.md and return a lint report.  Admin auth required."""
+    _require_admin_token(request)
+    try:
+        skill = _workspace.get_skill(slug)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    report = _workspace.validate_skill(skill['content'])
+    return {**report, 'slug': slug, 'name': skill['name']}
+
+
 @app.get('/workspace/system-prompt')
 def workspace_system_prompt(request: Request):
     """Return the assembled system prompt (AGENTS.md + SOUL.md + TOOLS.md).
@@ -3161,3 +3210,357 @@ async def mcp_list_tools(request: Request = None):
         if '__' in k and any(k.startswith(s['name'] + '__') for s in _mcp.list_servers())
     ]
     return {'tools': mcp_tools, 'count': len(mcp_tools)}
+
+
+# ---------------------------------------------------------------------------
+# #22  Notification & Webhook Push  (/notify/*)
+# ---------------------------------------------------------------------------
+
+@app.get('/notify/channels')
+async def notify_list_channels(request: Request = None):
+    """List all supported notification channels and their configured state."""
+    _require_bearer(request)
+    return {'channels': _notifier.list_channels()}
+
+
+@app.post('/notify/{channel}')
+async def notify_send(channel: str, request: Request = None):
+    """Send a notification via *channel* (telegram | discord | slack).
+
+    Body JSON: ``{message, title?, image_url?}``
+    """
+    _require_bearer(request)
+    body = await request.json()
+    message = body.get('message', '').strip()
+    if not message:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='message is required')
+    result = _notifier.send(
+        channel=channel,
+        message=message,
+        title=body.get('title', ''),
+        image_url=body.get('image_url', ''),
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# #19  Knowledge Base / Notes  (/notes/*)
+# ---------------------------------------------------------------------------
+
+@app.post('/notes/save')
+async def notes_save(request: Request = None):
+    """Append a note to today's knowledge-base file.
+
+    Body JSON: ``{content, url?, title?, tags?}``
+    """
+    _require_bearer(request)
+    body = await request.json()
+    content = body.get('content', '').strip()
+    if not content:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='content is required')
+    result = _notes.save(
+        content=content,
+        url=body.get('url', ''),
+        title=body.get('title', ''),
+        tags=body.get('tags', []),
+    )
+    return result
+
+
+@app.get('/notes')
+async def notes_list(max_days: int = 7, request: Request = None):
+    """List recent note files (metadata only)."""
+    _require_bearer(request)
+    return {'notes': _notes.list_notes(max_days=max(1, min(int(max_days), 90)))}
+
+
+@app.get('/notes/search')
+async def notes_search(q: str = '', request: Request = None):
+    """Full-text search across all note files."""
+    _require_bearer(request)
+    if not q.strip():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='q query parameter is required')
+    return {'query': q, 'results': _notes.search(q)}
+
+
+@app.get('/notes/file')
+async def notes_get_file(date: str = '', request: Request = None):
+    """Return raw Markdown content of a note file (YYYY-MM-DD, default today)."""
+    _require_bearer(request)
+    return {'content': _notes.get_note_file(date)}
+
+
+# ---------------------------------------------------------------------------
+# #27  Video Frame Analysis  (/tools/video/*)
+# ---------------------------------------------------------------------------
+
+@app.post('/tools/video/frames')
+async def video_extract_frames(request: Request = None):
+    """Extract evenly-spaced frames from a video URL or local path.
+
+    Body JSON: ``{url, n_frames?: int, quality?: int}``
+
+    Returns ``{frames: [{frame, timestamp_s, b64}]}`` — base-64 JPEG frames.
+    """
+    _require_bearer(request)
+    body = await request.json()
+    url = body.get('url', '').strip()
+    if not url:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='url is required')
+
+    from tools.video_frames import extract_frames, ffmpeg_available
+    if not ffmpeg_available():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail='ffmpeg is not installed on the server')
+
+    n_frames = int(body.get('n_frames', 5))
+    quality = int(body.get('quality', 3))
+
+    loop = asyncio.get_event_loop()
+    try:
+        frames = await loop.run_in_executor(None, lambda: extract_frames(url, n_frames, quality))
+    except Exception as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {'frames': frames, 'count': len(frames)}
+
+
+@app.post('/tools/video/describe')
+async def video_describe(request: Request = None):
+    """Extract frames and describe the video using a vision-capable LLM.
+
+    Body JSON: ``{url, n_frames?: int, provider?: str, model?: str, prompt?: str}``
+    """
+    _require_bearer(request)
+    body = await request.json()
+    url = body.get('url', '').strip()
+    if not url:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='url is required')
+
+    from tools.video_frames import describe_video
+    loop = asyncio.get_event_loop()
+    description = await loop.run_in_executor(
+        None,
+        lambda: describe_video(
+            source=url,
+            n_frames=int(body.get('n_frames', 5)),
+            provider=body.get('provider', ''),
+            model=body.get('model', ''),
+            prompt=body.get('prompt', ''),
+        ),
+    )
+    return {'description': description}
+
+
+# ---------------------------------------------------------------------------
+# #20  Secure Credential Store  (/credentials/*)
+# ---------------------------------------------------------------------------
+
+@app.get('/credentials')
+async def credentials_list(request: Request = None):
+    """List stored credential names (never the secrets)."""
+    _require_bearer(request)
+    return {'names': _cred.list_names()}
+
+
+@app.post('/credentials')
+async def credentials_store(request: Request = None):
+    """Store a credential.
+
+    Body JSON: ``{name, secret}``
+    """
+    _require_bearer(request)
+    body = await request.json()
+    name = body.get('name', '').strip()
+    secret = body.get('secret', '')
+    if not name or not secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='name and secret are required')
+    _cred.store(name, secret)
+    return {'ok': True, 'name': name}
+
+
+@app.get('/credentials/{name}')
+async def credentials_retrieve(name: str, request: Request = None):
+    """Retrieve a stored credential value."""
+    _require_bearer(request)
+    try:
+        value = _cred.retrieve(name)
+    except PermissionError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=423, detail=str(exc))  # 423 = Locked
+    if value is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f'Credential "{name}" not found')
+    return {'name': name, 'secret': value}
+
+
+@app.delete('/credentials/{name}')
+async def credentials_delete(name: str, request: Request = None):
+    """Delete a stored credential."""
+    _require_bearer(request)
+    deleted = _cred.delete(name)
+    if not deleted:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f'Credential "{name}" not found')
+    return {'ok': True, 'name': name}
+
+
+@app.post('/credentials/lock')
+async def credentials_lock(request: Request = None):
+    """Manually lock the credential store (clears idle timer)."""
+    _require_bearer(request)
+    _cred.lock()
+    return {'ok': True, 'locked': True}
+
+
+# ---------------------------------------------------------------------------
+# #26  A2A — Agent-to-Agent Sessions  (/a2a/*)
+# ---------------------------------------------------------------------------
+
+@app.post('/a2a/send')
+async def a2a_send(request: Request = None):
+    """Dispatch a task to another persona's agent session.
+
+    Body JSON: ``{from_persona, to_persona, task, context?}``
+
+    Returns immediately with a task record (status='pending').  Poll
+    ``GET /a2a/tasks/{id}`` for the result.
+    """
+    _require_bearer(request)
+    body = await request.json()
+    to_persona = body.get('to_persona', '').strip()
+    task = body.get('task', '').strip()
+    if not to_persona or not task:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail='to_persona and task are required')
+    record = _a2a.submit(
+        from_persona=body.get('from_persona', 'user'),
+        to_persona=to_persona,
+        task=task,
+        context=body.get('context', ''),
+    )
+    return record
+
+
+@app.get('/a2a/tasks')
+async def a2a_list_tasks(limit: int = 20, request: Request = None):
+    """List recent A2A tasks, newest first."""
+    _require_bearer(request)
+    return {'tasks': _a2a.list_tasks(limit=min(limit, 100))}
+
+
+@app.get('/a2a/tasks/{task_id}')
+async def a2a_get_task(task_id: str, request: Request = None):
+    """Get the status and result of a specific A2A task."""
+    _require_bearer(request)
+    record = _a2a.get_task(task_id)
+    if record is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f'Task {task_id!r} not found')
+    return record
+
+
+@app.delete('/a2a/tasks/{task_id}')
+async def a2a_cancel_task(task_id: str, request: Request = None):
+    """Request cancellation of a pending or running A2A task."""
+    _require_bearer(request)
+    cancelled = _a2a.cancel(task_id)
+    if not cancelled:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f'Task {task_id!r} not found or already finished')
+    return {'ok': True, 'task_id': task_id}
+
+
+# ---------------------------------------------------------------------------
+# #21  Extension / Plugin System  (/admin/plugins/*)
+# ---------------------------------------------------------------------------
+
+@app.get('/admin/plugins')
+async def plugins_list(request: Request = None):
+    """List all installed plugins and their status."""
+    _require_bearer(request)
+    return {'plugins': _plugins.list_plugins()}
+
+
+@app.get('/admin/plugins/{slug}')
+async def plugins_get(slug: str, request: Request = None):
+    """Get details for a single installed plugin."""
+    _require_bearer(request)
+    plugin = _plugins.get_plugin(slug)
+    if plugin is None:
+        raise HTTPException(status_code=404, detail=f'Plugin "{slug}" not found')
+    return plugin
+
+
+@app.post('/admin/plugins/install')
+async def plugins_install(request: Request = None):
+    """Install a plugin from a source.
+
+    Body JSON: ``{source}``
+
+    *source* can be:
+    - A local directory path
+    - An HTTP/HTTPS URL to a ``.zip`` archive
+    - A GitHub shorthand ``owner/repo`` or ``owner/repo@branch``
+    """
+    _require_bearer(request)
+    body = await request.json()
+    source = body.get('source', '').strip()
+    if not source:
+        raise HTTPException(status_code=422, detail='source is required')
+    loop = asyncio.get_event_loop()
+    try:
+        manifest = await loop.run_in_executor(None, lambda: _plugins.install(source))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return manifest
+
+
+@app.delete('/admin/plugins/{slug}')
+async def plugins_uninstall(slug: str, request: Request = None):
+    """Uninstall a plugin and remove its tools from the registry."""
+    _require_bearer(request)
+    removed = _plugins.uninstall(slug)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f'Plugin "{slug}" not found')
+    return {'ok': True, 'slug': slug}
+
+
+@app.post('/admin/plugins/{slug}/enable')
+async def plugins_enable(slug: str, request: Request = None):
+    """Enable a previously disabled plugin."""
+    _require_bearer(request)
+    ok = _plugins.enable(slug)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f'Plugin "{slug}" not found')
+    return {'ok': True, 'slug': slug, 'enabled': True}
+
+
+@app.post('/admin/plugins/{slug}/disable')
+async def plugins_disable(slug: str, request: Request = None):
+    """Disable a plugin (keeps it installed but unregisters its tools)."""
+    _require_bearer(request)
+    ok = _plugins.disable(slug)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f'Plugin "{slug}" not installed or already disabled')
+    return {'ok': True, 'slug': slug, 'enabled': False}
+
+
+@app.post('/admin/plugins/{slug}/reload')
+async def plugins_reload(slug: str, request: Request = None):
+    """Hot-reload a plugin without restarting the gateway."""
+    _require_bearer(request)
+    try:
+        result = _plugins.reload_plugin(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return result

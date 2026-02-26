@@ -14,8 +14,10 @@ eggs/
 *.egg-info/
 *.egg
 
-# VSCode
-.vscode/
+# VSCode — allow project settings (interpreter path uses ${workspaceFolder}, safe)
+# but ignore per-user workspace state
+.vscode/*.code-workspace
+.vscode/ipynb_checkpoints/
 
 # PyTest / coverage
 .pytest_cache/
@@ -92,6 +94,14 @@ agent-gateway/audit.jsonl
 agent-gateway/audit_*.jsonl
 # Rate-limit state
 agent-gateway/rate_limit_state.json
+# Webhook registrations (contains HMAC signing secrets)
+agent-gateway/webhooks.json
+# Scheduled task state (runtime: created when first task is added)
+agent-gateway/schedule.json
+# Content-filter rules (user-configured, may reveal policy details)
+agent-gateway/content_filter_rules.json
+# Addon state (installed/uninstalled addon records)
+agent-gateway/addons.json
 # Workspace (user's personal agent workspace — not part of the repo)
 .intelli/
 

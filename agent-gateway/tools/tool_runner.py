@@ -266,6 +266,101 @@ _REGISTRY['pdf_read'] = {
 
 
 # ---------------------------------------------------------------------------
+# Skill Creator tools
+# ---------------------------------------------------------------------------
+
+def _wm():
+    """Lazy import of workspace_manager (avoids circular-import at module load)."""
+    import os as _os, sys as _sys
+    _gw = _os.path.dirname(_os.path.dirname(__file__))
+    if _gw not in _sys.path:
+        _sys.path.insert(0, _gw)
+    import workspace_manager
+    return workspace_manager
+
+
+def _skill_list_fn() -> str:
+    skills = _wm().list_skills()
+    if not skills:
+        return 'No skills installed yet.'
+    return '\n'.join(
+        f"- {s['slug']}: {s['name']} — {s['description']}" for s in skills
+    )
+
+
+_REGISTRY['skill_list'] = {
+    'fn': _skill_list_fn,
+    'description': 'List all installed workspace skills with their slug, name, and description.',
+    'args': {},
+}
+
+
+def _skill_read_fn(slug: str) -> str:
+    try:
+        return _wm().get_skill(slug)['content']
+    except FileNotFoundError as exc:
+        return f'[ERROR] {exc}'
+
+
+_REGISTRY['skill_read'] = {
+    'fn': _skill_read_fn,
+    'description': 'Read the full SKILL.md content of an installed skill.',
+    'args': {
+        'slug': {'type': 'string', 'required': True, 'description': 'Skill slug (e.g. web-search)'},
+    },
+}
+
+
+def _skill_create_fn(slug: str, name: str, description: str, content: str) -> str:
+    try:
+        skill = _wm().create_skill(slug, name, description, content)
+        # Emit skill_created SSE event so chat.html can show a toast
+        if getattr(_CTX, 'event_queue', None):
+            _CTX.event_queue.put({'type': 'skill_created', 'slug': slug, 'name': name})
+        return (
+            f"Skill '{name}' created at {skill['path']}. "
+            f"It is now listed in the workspace and can be activated by the user."
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return f'[ERROR] skill_create: {exc}'
+
+
+_REGISTRY['skill_create'] = {
+    'fn': _skill_create_fn,
+    'description': (
+        'Create and install a new workspace skill. '
+        'The content must be a complete SKILL.md with frontmatter (name, description) '
+        'and agent instructions in the body. '
+        'Use a descriptive lowercase-hyphen slug like "hacker-news-digest".'
+    ),
+    'args': {
+        'slug':        {'type': 'string', 'required': True,  'description': 'URL-safe identifier (lowercase, hyphens)'},
+        'name':        {'type': 'string', 'required': True,  'description': 'Human-readable skill name'},
+        'description': {'type': 'string', 'required': True,  'description': 'One-line description of what the skill does'},
+        'content':     {'type': 'string', 'required': True,  'description': 'Full SKILL.md text including frontmatter and body'},
+    },
+}
+
+
+def _skill_update_fn(slug: str, content: str) -> str:
+    try:
+        result = _wm().update_skill(slug, content)
+        return f"Skill '{result['name']}' updated at {result['path']}."
+    except FileNotFoundError as exc:
+        return f'[ERROR] skill_update: {exc}'
+
+
+_REGISTRY['skill_update'] = {
+    'fn': _skill_update_fn,
+    'description': 'Update (overwrite) the SKILL.md of an existing skill. Use this to fix or improve a skill after creation.',
+    'args': {
+        'slug':    {'type': 'string', 'required': True, 'description': 'Slug of the skill to update'},
+        'content': {'type': 'string', 'required': True, 'description': 'New complete SKILL.md content'},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Sub-agent spawner
 # ---------------------------------------------------------------------------
 
@@ -347,6 +442,248 @@ _REGISTRY['spawn_agent'] = {
 def register_tool(name: str, fn, description: str, args: dict) -> None:
     """Dynamically register an additional tool."""
     _REGISTRY[name] = {'fn': fn, 'description': description, 'args': args}
+
+
+# ---------------------------------------------------------------------------
+# #22  Notification Push  — notify
+# ---------------------------------------------------------------------------
+
+def _notify_fn(message: str, channel: str = 'telegram', title: str = '') -> str:
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import notifier as _notifier
+        result = _notifier.send(channel=channel, message=message, title=title)
+        if result.get('ok'):
+            return f'Notification sent via {channel}.'
+        return f'[ERROR] notify: {result.get("error", "unknown error")}'
+    except Exception as exc:
+        return f'[ERROR] notify: {exc}'
+
+
+_REGISTRY['notify'] = {
+    'fn': _notify_fn,
+    'description': (
+        'Send a notification message to the user via an external channel. '
+        'Channels: telegram, discord, slack. '
+        'Use this to alert the user about completed tasks, errors, or important events.'
+    ),
+    'args': {
+        'message': {'type': 'string', 'required': True,  'description': 'Notification body text'},
+        'channel': {'type': 'string', 'required': False, 'description': 'Channel name: telegram | discord | slack (default: telegram)'},
+        'title':   {'type': 'string', 'required': False, 'description': 'Optional short title'},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# #19  Knowledge Base / Notes  — notes_save, notes_search
+# ---------------------------------------------------------------------------
+
+def _notes_save_fn(content: str, url: str = '', title: str = '', tags: str = '') -> str:
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import notes as _notes
+        tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
+        result = _notes.save(content=content, url=url, title=title, tags=tag_list)
+        return f"Note saved to {result['path']}."
+    except Exception as exc:
+        return f'[ERROR] notes_save: {exc}'
+
+
+_REGISTRY['notes_save'] = {
+    'fn': _notes_save_fn,
+    'description': (
+        'Save information to the local knowledge base. '
+        'Use this to remember important facts, URLs, research findings, or any text the user wants to retain across sessions.'
+    ),
+    'args': {
+        'content': {'type': 'string', 'required': True,  'description': 'Markdown content to save'},
+        'title':   {'type': 'string', 'required': False, 'description': 'Short descriptive title for the note'},
+        'url':     {'type': 'string', 'required': False, 'description': 'Source URL this note relates to'},
+        'tags':    {'type': 'string', 'required': False, 'description': 'Comma-separated list of tags'},
+    },
+}
+
+
+def _notes_search_fn(query: str) -> str:
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import notes as _notes
+        return _notes.search(query)
+    except Exception as exc:
+        return f'[ERROR] notes_search: {exc}'
+
+
+_REGISTRY['notes_search'] = {
+    'fn': _notes_search_fn,
+    'description': 'Search the local knowledge base / notes for information matching the query.',
+    'args': {
+        'query': {'type': 'string', 'required': True, 'description': 'Search terms — all words must appear in the matching line'},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# #27  Video Frame Analysis  — video_describe
+# ---------------------------------------------------------------------------
+
+def _video_describe_fn(url: str, n_frames: int = 5, prompt: str = '') -> str:
+    try:
+        from tools.video_frames import describe_video, ffmpeg_available
+        if not ffmpeg_available():
+            return '[ERROR] video_describe: ffmpeg is not installed. Install it to use video analysis.'
+        return describe_video(source=url, n_frames=n_frames, prompt=prompt)
+    except Exception as exc:
+        return f'[ERROR] video_describe: {exc}'
+
+
+_REGISTRY['video_describe'] = {
+    'fn': _video_describe_fn,
+    'description': (
+        'Analyse a video by extracting sample frames and describing them with a vision model. '
+        'Accepts an HTTP/HTTPS video URL or a local file path. '
+        'Returns a textual description of the video content.'
+    ),
+    'args': {
+        'url':      {'type': 'string',  'required': True,  'description': 'HTTP/HTTPS URL or local path to the video file'},
+        'n_frames': {'type': 'integer', 'required': False, 'description': 'Number of frames to sample (1-20, default 5)'},
+        'prompt':   {'type': 'string',  'required': False, 'description': 'Custom analysis instruction appended to the vision model request'},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# #20  Secure Credential Store  — credential_get, credential_set
+# ---------------------------------------------------------------------------
+
+def _credential_get_fn(name: str) -> str:
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import credential_store as _cs
+        value = _cs.retrieve(name)
+        if value is None:
+            return f'[ERROR] credential_get: no credential named "{name}"'
+        return value
+    except PermissionError:
+        return '[ERROR] credential_get: credential store is locked. Please unlock via the admin UI.'
+    except Exception as exc:
+        return f'[ERROR] credential_get: {exc}'
+
+
+_REGISTRY['credential_get'] = {
+    'fn': _credential_get_fn,
+    'description': (
+        'Retrieve a stored secret from the secure credential store. '
+        'Use this to obtain API tokens, passwords, or other secrets that the user has stored. '
+        'Never expose the retrieved value to the user unless they explicitly requested it.'
+    ),
+    'args': {
+        'name': {'type': 'string', 'required': True, 'description': 'Credential name, e.g. "github_token"'},
+    },
+}
+
+
+def _credential_set_fn(name: str, secret: str) -> str:
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import credential_store as _cs
+        _cs.store(name, secret)
+        return f'Credential "{name}" stored securely.'
+    except Exception as exc:
+        return f'[ERROR] credential_set: {exc}'
+
+
+_REGISTRY['credential_set'] = {
+    'fn': _credential_set_fn,
+    'description': (
+        'Store a new secret in the OS keychain under a given name. '
+        'Use this when the user provides a token, password, or API key to save for future use.'
+    ),
+    'args': {
+        'name':   {'type': 'string', 'required': True, 'description': 'Credential name, e.g. "openai_api_key"'},
+        'secret': {'type': 'string', 'required': True, 'description': 'The secret value to store'},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# #26  A2A Agent-to-Agent Sessions  — message_agent
+# ---------------------------------------------------------------------------
+
+def _message_agent_fn(
+    persona: str,
+    task: str,
+    context: str = '',
+    wait: bool = False,
+) -> str:
+    """Send a task to another persona's agent session."""
+    try:
+        import sys as _sys, os as _os
+        _gw = _os.path.dirname(_os.path.dirname(__file__))
+        if _gw not in _sys.path:
+            _sys.path.insert(0, _gw)
+        import a2a
+        import threading as _threading
+
+        # Determine calling persona from context local
+        from_persona = getattr(_CTX, 'persona', 'agent')
+        record = a2a.submit(from_persona=from_persona, to_persona=persona, task=task, context=context)
+        task_id = record['id']
+
+        if wait:
+            # Poll up to 90 s
+            import time as _time
+            deadline = _time.monotonic() + 90
+            while _time.monotonic() < deadline:
+                _time.sleep(2)
+                rec = a2a.get_task(task_id)
+                if rec and rec['status'] in ('done', 'error', 'cancelled'):
+                    if rec['status'] == 'done':
+                        return f'[{persona}] {rec["result"]}'
+                    return f'[{persona} error] {rec.get("error", "unknown")}'
+            return f'[{persona}] Task {task_id} is still running. Check /a2a/tasks/{task_id} for results.'
+
+        return (
+            f'Task dispatched to persona "{persona}" (id={task_id}). '
+            f'Status: pending. Poll GET /a2a/tasks/{task_id} for result, '
+            f'or call message_agent again with wait=true to block until done.'
+        )
+    except Exception as exc:
+        return f'[ERROR] message_agent: {exc}'
+
+
+_REGISTRY['message_agent'] = {
+    'fn': _message_agent_fn,
+    'description': (
+        'Send a task to a different AI persona for specialised processing. '
+        'The target persona runs its own full tool-loop and returns a result. '
+        'Useful for multi-agent workflows: e.g. have a "Researcher" persona gather data, '
+        'then a "Writer" persona draft a report. '
+        'Set wait=true to block until the task finishes (up to 90 s); '
+        'otherwise returns immediately with a task ID.'
+    ),
+    'args': {
+        'persona': {'type': 'string',  'required': True,  'description': 'Target persona name as defined in AGENTS.md'},
+        'task':    {'type': 'string',  'required': True,  'description': 'Full task description for the target persona'},
+        'context': {'type': 'string',  'required': False, 'description': 'Optional background context to provide before the task'},
+        'wait':    {'type': 'boolean', 'required': False, 'description': 'If true, block until the task completes (default false)'},
+    },
+}
 
 
 def list_tools() -> list[dict]:

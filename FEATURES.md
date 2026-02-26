@@ -21,18 +21,18 @@
 13. [Coding Agent Mode](#13-coding-agent-mode) ✅
 14. [Agent Personas & Identity](#14-agent-personas--identity) ✅
 15. [MCP Server Integration](#15-mcp-server-integration) ✅
-16. [Skill Creator (AI Self-Extending)](#16-skill-creator-ai-self-extending)
+16. [Skill Creator (AI Self-Extending)](#16-skill-creator-ai-self-extending) ✅
 17. [Page Diff Watcher](#17-page-diff-watcher) ✅
 18. [PDF / Document Analysis](#18-pdf--document-analysis) ✅
-19. [Knowledge Base Connectors](#19-knowledge-base-connectors)
-20. [Secure Credential Store](#20-secure-credential-store)
-21. [Extension / Plugin System](#21-extension--plugin-system)
-22. [Notification & Webhook Push](#22-notification--webhook-push)
+19. [Knowledge Base Connectors](#19-knowledge-base-connectors) ✅
+20. [Secure Credential Store](#20-secure-credential-store) ✅
+21. [Extension / Plugin System](#21-extension--plugin-system) ✅
+22. [Notification & Webhook Push](#22-notification--webhook-push) ✅
 23. [Session History & Repair](#23-session-history--repair) ✅
 24. [Sandbox Code Execution](#24-sandbox-code-execution) ✅
 25. [Navigation Guard & Security Layer](#25-navigation-guard--security-layer) ✅
-26. [A2A — Agent-to-Agent Sessions](#26-a2a--agent-to-agent-sessions)
-27. [Video Frame Analysis](#27-video-frame-analysis)
+26. [A2A — Agent-to-Agent Sessions](#26-a2a--agent-to-agent-sessions) ✅
+27. [Video Frame Analysis](#27-video-frame-analysis) ✅
 28. [Usage Analytics & Observability](#28-usage-analytics--observability) ✅
 
 ---
@@ -330,9 +330,7 @@ Run an MCP client inside the gateway, connecting to any local or remote MCP serv
 
 ---
 
-## 16. Skill Creator (AI Self-Extending)
-
-**What OpenClaw does:**  
+## 16. Skill Creator (AI Self-Extending) ✅  
 `skills/skill-creator/` — The agent writes, tests, and installs new skills on demand. User says "make me a skill that tracks Hacker News top posts every morning" — the agent generates the SKILL.md, tests it, and installs it.
 
 **What Intelli can do:**  
@@ -387,7 +385,7 @@ The browser already renders PDFs natively. Expose them to the agent for Q&A, sum
 
 ---
 
-## 19. Knowledge Base Connectors
+## 19. Knowledge Base Connectors ✅
 
 **What OpenClaw does:**  
 `skills/obsidian/` + `skills/notion/` + `skills/bear-notes/` + `skills/apple-notes/` — Read/write to external knowledge bases. Clip pages to Obsidian, create Notion pages, append to Bear notes.
@@ -407,7 +405,7 @@ Save browsing research directly to knowledge bases without leaving the browser.
 
 ---
 
-## 20. Secure Credential Store
+## 20. Secure Credential Store ✅
 
 **What OpenClaw does:**  
 `skills/1password/` — Agent can retrieve credentials from 1Password CLI to use in automated tasks (form fill, API calls).
@@ -427,7 +425,7 @@ Securely store login credentials for automated tasks (form autofill, scheduled l
 
 ---
 
-## 21. Extension / Plugin System
+## 21. Extension / Plugin System ✅
 
 **What OpenClaw does:**  
 Extensions under `extensions/*` as standalone workspace packages (npm). Community publishes on ClawHub. Plugin SDK in `src/plugin-sdk/`. Optional deps stay in plugin package, not core.
@@ -448,7 +446,7 @@ Let the community publish "Intelli plugins" — Python packages that register ne
 
 ---
 
-## 22. Notification & Webhook Push
+## 22. Notification & Webhook Push ✅
 
 **What OpenClaw does:**  
 Full multi-channel messaging: WhatsApp, Telegram, Slack, Discord, iMessage, Signal, Teams. Agent proactively sends results to any channel.
@@ -528,7 +526,7 @@ Intercept navigation events in the Electron `BrowserView` and run them through a
 
 ---
 
-## 26. A2A — Agent-to-Agent Sessions
+## 26. A2A — Agent-to-Agent Sessions ✅
 
 **What OpenClaw does:**  
 `src/agents/tools/sessions-send-tool.a2a.ts` — Agents send messages to other agent sessions (different personas, different tools, different models). Enables specialized micro-agents: "Researcher" + "Writer" + "Critic" working in chain.
@@ -547,7 +545,7 @@ Chained agent workflows: user gives a high-level goal; an orchestrator persona d
 
 ---
 
-## 27. Video Frame Analysis
+## 27. Video Frame Analysis ✅
 
 **What OpenClaw does:**  
 `skills/video-frames/` — Extracts frames from video files or streams and sends them to vision models for analysis. Enables "describe what's happening in this video" workflows.
