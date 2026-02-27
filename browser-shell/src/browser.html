@@ -149,12 +149,32 @@
       </select>
     </div>
     <div class="settings-row">
+      <span>Browser language</span>
+      <select id="setting-language" class="panel-select">
+        <option value="en" selected>English</option>
+        <option value="fr">Français</option>
+        <option value="es">Español</option>
+        <option value="de">Deutsch</option>
+        <option value="it">Italiano</option>
+        <option value="pt">Português (BR)</option>
+        <option value="nl">Nederlands</option>
+        <option value="pl">Polski</option>
+        <option value="ru">Русский</option>
+        <option value="tr">Türkçe</option>
+        <option value="ar">العربية</option>
+        <option value="ja">日本語</option>
+        <option value="ko">한국어</option>
+        <option value="zh-CN">中文 (简体)</option>
+        <option value="zh-TW">中文 (繁體)</option>
+      </select>
+    </div>
+    <div class="settings-row">
       <span>New tab page</span>
       <select id="setting-newtab" class="panel-select">
         <option value="duckduckgo" selected>DuckDuckGo</option>
         <option value="google">Google</option>
         <option value="brave">Brave Search</option>
-        <option value="custom">URL personnalisée…</option>
+        <option value="custom">Custom URL…</option>
       </select>
     </div>
     <div class="settings-row" id="setting-newtab-custom-row" style="display:none">
@@ -185,37 +205,37 @@
       <button class="btn-primary" id="setting-devtools-chrome">Open</button>
     </div>
 
-    <!-- ── Barre de favoris ────────────────────────────────────── -->
-    <div class="panel-section-label" style="margin-top:16px">Barre de favoris</div>
+    <!-- ── Bookmarks bar ──────────────────────────────────────── -->
+    <div class="panel-section-label" style="margin-top:16px">Bookmarks bar</div>
     <div class="settings-row">
-      <span>Afficher la barre de favoris</span>
+      <span>Show bookmarks bar</span>
       <label class="tg-switch">
         <input type="checkbox" id="setting-bookmarks-bar" />
         <span class="tg-slider"></span>
       </label>
     </div>
 
-    <!-- ── Onglets groupés ──────────────────────────────────── -->
-    <div class="panel-section-label" style="margin-top:16px">Onglets groupés</div>
+    <!-- ── Tab groups ──────────────────────────────────────── -->
+    <div class="panel-section-label" style="margin-top:16px">Tab groups</div>
     <div class="settings-row">
-      <span>Activer le regroupement</span>
+      <span>Enable tab grouping</span>
       <label class="tg-switch">
         <input type="checkbox" id="setting-tab-group-enabled" />
         <span class="tg-slider"></span>
       </label>
     </div>
     <div class="settings-row">
-      <span>Regrouper après</span>
+      <span>Group after</span>
       <select id="setting-tab-group-delay" class="panel-select">
         <option value="1">1 minute</option>
         <option value="5" selected>5 minutes</option>
         <option value="15">15 minutes</option>
         <option value="30">30 minutes</option>
-        <option value="60">1 heure</option>
-        <option value="120">2 heures</option>
-        <option value="720">12 heures</option>
-        <option value="1440">24 heures</option>
-        <option value="2880">48 heures</option>
+        <option value="60">1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="720">12 hours</option>
+        <option value="1440">24 hours</option>
+        <option value="2880">48 hours</option>
       </select>
     </div>
 

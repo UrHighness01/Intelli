@@ -663,6 +663,9 @@
     <div class="logo">I<span>n</span></div>
     <h1>AI Chat</h1>
     <div class="header-actions">
+      <button class="header-btn" id="btn-new-chat" title="Save current chat to history and start a new conversation" aria-label="New chat" onclick="newChat()">
+        &#43; New Chat
+      </button>
       <button class="header-btn" id="btn-clear" title="Clear conversation" aria-label="Clear conversation">
         &#128465; Clear
       </button>
@@ -1846,6 +1849,24 @@
         if (_isRecording) stopRecording();
         else startRecording();
       });
+    }
+
+    function newChat() {
+      // Current session is already persisted server-side — just rotate the
+      // session ID so the next message starts a brand-new conversation.
+      // The old session stays accessible via the History button.
+      _msgs      = [];
+      _totalIn   = 0;
+      _totalOut  = 0;
+      _sessionId = generateUUID();
+      localStorage.setItem('intelli_session_id', _sessionId);
+      $messages.innerHTML = '';
+      $messages.appendChild($emptyState);
+      $emptyState.style.display = 'flex';
+      $statModel.textContent    = '';
+      updateStats();
+      setStatus('', '');
+      $msgInput.focus();
     }
 
     $btnClear.addEventListener('click', () => {

@@ -38,6 +38,28 @@ const _startSettings = loadSettings();
 let NEW_TAB_URL = _newtabToUrl(_startSettings);
 const SETUP_URL         = `${GATEWAY_ORIGIN}/ui/setup.html`;
 
+// ─── Browser language → Accept-Language header map ───────────────────────────
+// Changing any entry live (via save-settings IPC) takes effect on the next
+// request — no restart required.
+const LANG_HEADERS = {
+  'en':    'en-US,en;q=0.9',
+  'fr':    'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+  'es':    'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+  'de':    'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+  'it':    'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+  'pt':    'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  'nl':    'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+  'pl':    'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
+  'ru':    'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+  'ja':    'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+  'ko':    'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+  'zh-CN': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+  'zh-TW': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+  'ar':    'ar;q=0.9,en-US;q=0.8,en;q=0.7',
+  'tr':    'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+};
+let _acceptLanguage = LANG_HEADERS[_startSettings.language] || LANG_HEADERS['en'];
+
 // ─── Anti-fingerprint — must be set before app is ready ─────────────────────
 // Removes the flags that tell Google reCAPTCHA / bot-detection we are Electron.
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
@@ -1273,6 +1295,8 @@ function registerIPC() {
     saveSettingsData(s);
     // Update NEW_TAB_URL live so next Ctrl+T uses the new value immediately
     NEW_TAB_URL = _newtabToUrl(s);
+    // Update Accept-Language header live — takes effect on the next request
+    _acceptLanguage = LANG_HEADERS[s.language] || LANG_HEADERS['en'];
   });
 
   // ── Bookmarks ────────────────────────────────────────────────────────────
@@ -1959,7 +1983,7 @@ app.whenReady().then(async () => {
     h['Sec-CH-UA']           = '"Not A(Brand";v="99", "Chromium";v="122", "Google Chrome";v="122"';
     h['Sec-CH-UA-Mobile']    = '?0';
     h['Sec-CH-UA-Platform']  = '"Windows"';
-    h['Accept-Language']     = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7';
+    h['Accept-Language']     = _acceptLanguage;
     delete h['X-Electron-Version'];
     delete h['X-Electron-App-Version'];
     callback({ cancel: false, requestHeaders: h });

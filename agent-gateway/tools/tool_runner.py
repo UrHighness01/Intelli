@@ -762,22 +762,79 @@ Rules:
 
 ### JavaScript Addon Rules (for addon_create_and_activate / addon_create)
 
-When writing the code_js argument, you MUST follow these rules:
-1. Always wrap code in an IIFE: (function(){{ ... }})();
-2. Inject CSS with style.textContent = "..." — NEVER use style.innerHTML.
-3. Do NOT check window.location.href — the code already runs in the user's active tab.
-4. Guard against double-injection: if (document.getElementById('MY-UNIQUE-ID')) return;
-5. Strings inside style.textContent must use escaped quotes or single quotes.
+When writing the code_js argument:
+1. Write plain JS statements. The runtime wraps your code automatically — do NOT add your own IIFE.
+2. CRITICAL — UPDATES MUST ALWAYS TAKE EFFECT:
+   NEVER guard with `if(!document.getElementById(id)){{ ... }}` — when an addon is re-injected
+   after an edit, the old element is still in the DOM and the guard silently blocks ALL new code.
+   Instead, ALWAYS remove the old element first, then recreate it:
+     var _old=document.getElementById("MY-STYLE-ID"); if(_old)_old.parentNode.removeChild(_old);
+   Use a window flag only for observers/intervals to prevent stacking:
+     if(!window.__intelliMyAddonObs){{ window.__intelliMyAddonObs=true; new MutationObserver(...).observe(...); }}
+3. Inject CSS via style.textContent = "..." — NEVER style.innerHTML.
+4. Do NOT check window.location.href — code already runs in the user's active tab.
 
-Correct example (pink logo on x.com):
-    (function(){{
-      var id='intelli-pink-x';
-      if(document.getElementById(id))return;
-      var s=document.createElement('style');
-      s.id=id;
-      s.textContent='header svg,a[href="/"] svg{{color:#ff69b4!important;fill:currentColor!important}}';
-      document.head.appendChild(s);
-    }})();
+SVG LOGO COLORING — THREE strategies, use ALL THREE every time:
+  A) CSS "color" on ancestor + fill:currentColor (used by X.com, GitHub, YouTube)
+  B) CSS "fill:COLOR !important" on svg,svg * (overrides class-based fills)
+  C) el.setAttribute("fill","COLOR") on each SVG child (overrides inline fill="" attributes)
+  + PATH FINGERPRINT: find logos by their unique SVG path d="" data — most reliable selector,
+    works even when class names and data-testid change.
+
+MANDATORY TEMPLATE — use this exact structure for every addon (remove-then-replace, NOT if-guard):
+  var _sid="intelli-ADDONNAME-style";
+  var _old=document.getElementById(_sid);if(_old)_old.parentNode.removeChild(_old);
+  var s=document.createElement("style");s.id=_sid;
+  s.textContent="SELECTOR,SELECTOR *{{color:COLOR!important;fill:COLOR!important;stroke:none!important}}";
+  document.head.appendChild(s);
+  var _p=function(){{
+    document.querySelectorAll("SELECTOR").forEach(function(el){{
+      el.style.color="COLOR";el.style.fill="COLOR";
+    }});
+    document.querySelectorAll("SELECTOR svg *").forEach(function(el){{
+      el.setAttribute("fill","COLOR");
+    }});
+    document.querySelectorAll("svg path").forEach(function(p){{
+      var d=p.getAttribute("d")||"";
+      if(d.indexOf("PATH_FINGERPRINT")!==-1){{
+        p.setAttribute("fill","COLOR");
+        var sv=p.closest("svg");if(sv){{sv.style.color="COLOR";sv.style.fill="COLOR";}}
+      }}
+    }});
+  }};
+  _p();
+  if(!window.__intelliADDONNAMEObs){{
+    window.__intelliADDONNAMEObs=true;
+    new MutationObserver(_p).observe(document.documentElement,{{childList:true,subtree:true}});
+    var _t=setInterval(_p,500);setTimeout(function(){{clearInterval(_t);}},20000);
+  }}
+
+X.com logo example (path fingerprint = "18.244", selector = a[href='/home']):
+  var _sid="intelli-pink-x-style";
+  var _old=document.getElementById(_sid);if(_old)_old.parentNode.removeChild(_old);
+  var s=document.createElement("style");s.id=_sid;
+  s.textContent="a[href='/home'],a[href='/home'] *,[data-testid='TopNav_Logo_Link'],[data-testid='TopNav_Logo_Link'] *{{color:#ff69b4!important;fill:#ff69b4!important;stroke:none!important}}";
+  document.head.appendChild(s);
+  var _p=function(){{
+    document.querySelectorAll("a[href='/home'],[data-testid='TopNav_Logo_Link']").forEach(function(el){{
+      el.style.color="#ff69b4";el.style.fill="#ff69b4";
+    }});
+    document.querySelectorAll("a[href='/home'] svg *,[data-testid='TopNav_Logo_Link'] svg *").forEach(function(el){{
+      el.setAttribute("fill","#ff69b4");
+    }});
+    document.querySelectorAll("svg path").forEach(function(p){{
+      if((p.getAttribute("d")||"").indexOf("18.244")!==-1){{
+        p.setAttribute("fill","#ff69b4");
+        var sv=p.closest("svg");if(sv){{sv.style.color="#ff69b4";sv.style.fill="#ff69b4";}}
+      }}
+    }});
+  }};
+  _p();
+  if(!window.__intelliPinkXObs){{
+    window.__intelliPinkXObs=true;
+    new MutationObserver(_p).observe(document.documentElement,{{childList:true,subtree:true}});
+    var _t=setInterval(_p,500);setTimeout(function(){{clearInterval(_t);}},20000);
+  }}
 
 ### Tools
 

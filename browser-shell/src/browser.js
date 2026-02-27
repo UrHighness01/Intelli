@@ -1230,6 +1230,8 @@ window.electronAPI.onGroupTab(({ id: rawId, url, title, favicon }) => {
 /* ─── Settings panel ────────────────────────────────────────────── */
 async function loadSettingsPanel() {
   const s = await window.electronAPI.getSettings();
+  const $lang = document.getElementById('setting-language');
+  if ($lang) $lang.value = s.language || 'en';
   const $sel  = document.getElementById('setting-newtab');
   const $row  = document.getElementById('setting-newtab-custom-row');
   const $inp  = document.getElementById('setting-newtab-custom-url');
@@ -1254,6 +1256,12 @@ async function _saveNewtabSetting() {
   s.customUrl = $inp?.value.trim() || '';
   await window.electronAPI.saveSettings(s);
 }
+
+document.getElementById('setting-language')?.addEventListener('change', async () => {
+  const s = await window.electronAPI.getSettings();
+  s.language = document.getElementById('setting-language').value;
+  await window.electronAPI.saveSettings(s);
+});
 
 document.getElementById('setting-newtab')?.addEventListener('change', () => {
   const val  = document.getElementById('setting-newtab').value;

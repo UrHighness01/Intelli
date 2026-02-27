@@ -112,7 +112,7 @@
   <div id="history-drawer">
     <div class="drawer-title" style="display:flex;align-items:center;justify-content:space-between">
       <span>Canvas History</span>
-      <button class="tb-btn" style="font-size:.66rem;padding:2px 7px" onclick="_history.length&&(_history.length=0,renderHistory())" title="Clear all history">Clear all</button>
+      <button class="tb-btn" style="font-size:.66rem;padding:2px 7px" onclick="_history.length&&(_history.length=0,_saveHistory(),renderHistory())" title="Clear all history">Clear all</button>
     </div>
     <div id="history-list"></div>
   </div>
@@ -125,12 +125,27 @@
     const token = localStorage.getItem('gw_token') || '';
 
     // ── History ───────────────────────────────────────────────────
-    const _history = []; // [{html, title, ts}]
+    const _HIST_KEY = 'canvas_history_v1';
+    // Load persisted history; entries with oversized html are stripped to
+    // keep localStorage usage reasonable (cap per-entry at 2 MB).
+    let _history = (() => {
+      try {
+        const raw = JSON.parse(localStorage.getItem(_HIST_KEY) || '[]');
+        return Array.isArray(raw)
+          ? raw.filter(e => e && typeof e.html === 'string' && e.html.length < 2_000_000)
+          : [];
+      } catch { return []; }
+    })();
     let _drawerOpen = false;
+
+    function _saveHistory() {
+      try { localStorage.setItem(_HIST_KEY, JSON.stringify(_history)); } catch {}
+    }
 
     function pushHistory(html, t) {
       _history.unshift({ html, title: t || 'Canvas', ts: Date.now() });
       if (_history.length > 50) _history.pop();
+      _saveHistory();
       renderHistory();
     }
 
@@ -164,6 +179,7 @@
 
     function deleteHistory(i) {
       _history.splice(i, 1);
+      _saveHistory();
       renderHistory();
     }
 
@@ -247,11 +263,19 @@
         if (d && d.html) {
           frame.srcdoc = d.html;
           title.textContent = d.title || 'Canvas';
-          if (d.html) pushHistory(d.html, d.title);
+          // Only add to history if this exact html isn't already present
+          // anywhere in history. Checking only [0] caused a sliding re-insertion
+          // bug: deleting the top entry made the snapshot no longer match [0],
+          // so it got re-added on the next reload.
+          if (!_history.some(e => e.html === d.html)) {
+            pushHistory(d.html, d.title);
+          }
         }
       })
       .catch(() => {});
 
+    // Populate history drawer from persisted localStorage entries on load
+    renderHistory();
     connect();
   </script>
 </body>
