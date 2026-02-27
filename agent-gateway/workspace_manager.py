@@ -285,9 +285,29 @@ def _safe_path(rel: str) -> Path:
     """Resolve *rel* inside the workspace root, raising ValueError if it escapes."""
     root = _ensure_root()
     resolved = (root / rel).resolve()
-    if not str(resolved).startswith(str(root.resolve())):
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError:
         raise ValueError(f'Path {rel!r} escapes workspace root')
     return resolved
+
+
+def _safe_skill_dir(slug: str) -> Path:
+    """Validate *slug* and return the resolved skill directory path.
+
+    Raises ValueError if the slug is syntactically invalid or the resolved path
+    would escape the skills sub-directory (prevents path-traversal attacks).
+    """
+    if not _SLUG_RE.match(slug):
+        raise ValueError(f'Invalid skill slug {slug!r} — use lowercase letters, digits, _ or -')
+    root = _ensure_root()
+    skills_root = (root / 'skills').resolve()
+    candidate = (root / 'skills' / slug).resolve()
+    try:
+        candidate.relative_to(skills_root)
+    except ValueError:
+        raise ValueError(f'Skill slug {slug!r} escapes skills directory')
+    return candidate
 
 
 # ---------------------------------------------------------------------------
@@ -391,10 +411,8 @@ def list_skills() -> list[dict]:
 
 def create_skill(slug: str, name: str, description: str, content: str) -> dict:
     """Create a new skill directory with a SKILL.md."""
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f'Invalid skill slug {slug!r} — use lowercase letters, digits, _ or -')
+    skill_dir = _safe_skill_dir(slug)
     root = _ensure_root()
-    skill_dir = root / 'skills' / slug
     if skill_dir.exists():
         raise ValueError(f"Skill '{slug}' already exists")
     skill_dir.mkdir(parents=True)
@@ -411,8 +429,7 @@ def create_skill(slug: str, name: str, description: str, content: str) -> dict:
 
 def delete_skill(slug: str) -> None:
     """Remove a skill directory entirely."""
-    root = _ensure_root()
-    skill_dir = root / 'skills' / slug
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     import shutil
@@ -422,7 +439,7 @@ def delete_skill(slug: str) -> None:
 def get_skill(slug: str) -> dict:
     """Return metadata + full SKILL.md content for a single skill."""
     root = _ensure_root()
-    skill_dir = root / 'skills' / slug
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     skill_md = skill_dir / 'SKILL.md'
@@ -443,7 +460,7 @@ def get_skill(slug: str) -> dict:
 def update_skill(slug: str, content: str) -> dict:
     """Overwrite the SKILL.md of an existing skill."""
     root = _ensure_root()
-    skill_dir = root / 'skills' / slug
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     skill_md = skill_dir / 'SKILL.md'

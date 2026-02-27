@@ -61,6 +61,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -125,6 +126,26 @@ def _read_manifest(plugin_dir: Path) -> Optional[Dict[str, Any]]:
 
 def _slug(manifest: Dict[str, Any]) -> str:
     return manifest.get('name', '').strip().lower().replace(' ', '-')
+
+
+_PLUGIN_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
+
+
+def _safe_plugin_slug(slug: str) -> str:
+    """Validate *slug* and verify it stays inside PLUGINS_DIR.
+
+    Raises ValueError if the slug is syntactically invalid or the resolved path
+    would escape the plugins directory (prevents path-traversal attacks).
+    """
+    clean = slug.strip().lower()
+    if not _PLUGIN_SLUG_RE.match(clean):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
+    candidate = (PLUGINS_DIR / clean).resolve()
+    try:
+        candidate.relative_to(PLUGINS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f'Plugin slug {slug!r} escapes plugins directory')
+    return clean
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +360,7 @@ def install(source: str) -> Dict[str, Any]:
 
 def uninstall(slug: str) -> bool:
     """Remove a plugin completely.  Returns True if it existed."""
-    slug = slug.lower()
+    slug = _safe_plugin_slug(slug)
     dest = PLUGINS_DIR / slug
     if not dest.exists():
         return False
@@ -355,7 +376,7 @@ def uninstall(slug: str) -> bool:
 
 def enable(slug: str) -> bool:
     """Enable a plugin and register its tools.  Returns True on success."""
-    slug = slug.lower()
+    slug = _safe_plugin_slug(slug)
     dest = PLUGINS_DIR / slug
     manifest = _read_manifest(dest)
     if manifest is None:
@@ -371,7 +392,7 @@ def enable(slug: str) -> bool:
 
 def disable(slug: str) -> bool:
     """Disable a plugin and unregister its tools.  Returns True if it was enabled."""
-    slug = slug.lower()
+    slug = _safe_plugin_slug(slug)
     with _lock:
         _unregister_tools(slug)
         _registry_snapshot.pop(slug, None)
@@ -385,7 +406,7 @@ def disable(slug: str) -> bool:
 
 def reload_plugin(slug: str) -> Dict[str, Any]:
     """Disable then re-enable a plugin (picks up code changes)."""
-    slug = slug.lower()
+    slug = _safe_plugin_slug(slug)
     disable(slug)
     if not enable(slug):
         raise FileNotFoundError(f'Plugin "{slug}" not found in {PLUGINS_DIR}')
