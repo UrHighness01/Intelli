@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="browser-shell/assets/icon.png" alt="Intelli" width="120" />
+</p>
+
 # Intelli — AI-native browser
 
 Intelli is a privacy-first browser with native AI/agent integration.
