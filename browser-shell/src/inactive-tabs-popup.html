@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
@@ -144,14 +144,14 @@ body {
 <body>
 <div id="list"></div>
 <div class="footer">
-  <button class="footer-btn" id="btn-restore-all">↩ Tout restaurer</button>
+  <button class="footer-btn" id="btn-restore-all">↩ Restore all</button>
   <button class="footer-btn" id="btn-clear">🗑 Clear</button>
 </div>
 
 <!-- Floating preview card (positioned via JS) -->
 <div id="preview-card">
   <img id="preview-img" src="" alt="" style="display:none"/>
-  <div id="preview-no-img" style="display:none">Aucun aperçu disponible</div>
+  <div id="preview-no-img" style="display:none">No preview available</div>
 </div>
 
 <script>
@@ -186,7 +186,7 @@ function buildList() {
     titleEl.className = 'tab-title';
     let host = '';
     try { host = new URL(g.url || '').hostname.replace(/^www\./, ''); } catch {}
-    titleEl.textContent = (g.title && g.title !== g.url) ? g.title : (host || g.url || 'Onglet');
+    titleEl.textContent = (g.title && g.title !== g.url) ? g.title : (host || g.url || 'Tab');
     info.appendChild(titleEl);
     if (host) {
       const domEl = document.createElement('div');
@@ -200,7 +200,7 @@ function buildList() {
     const rm = document.createElement('button');
     rm.className = 'tab-remove';
     rm.textContent = '✕';
-    rm.title = 'Retirer';
+    rm.title = 'Remove';
     rm.addEventListener('click', e => {
       e.stopPropagation();
       ipcRenderer.send('popup-remove', g.id);

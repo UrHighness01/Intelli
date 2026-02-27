@@ -1023,7 +1023,7 @@ function registerIPC() {
       ...(!isAdminHub ? [{ label: 'Duplicate Tab', click: () => createTab(wc?.getURL() || tabUrl || NEW_TAB_URL) }] : []),
       { type: 'separator' },
       ...(!isAdminHub ? [{
-        label: isMuted ? '🔊 Réactiver le son' : '🔇 Couper le son',
+        label: isMuted ? '🔊 Unmute' : '🔇 Mute',
         click: () => {
           if (!wc) return;
           wc.setAudioMuted(!isMuted);
@@ -1033,13 +1033,13 @@ function registerIPC() {
       }] : []),
       // Split: close the pair this tab belongs to; show "fractionner" for any unpaired inactive tab
       ...(getPairOf(tabId)
-        ? [{ label: '⊟ Fermer la vue fractionnée', click: () => exitSplitForTab(tabId) }]
+        ? [{ label: '⊟ Close Split View', click: () => exitSplitForTab(tabId) }]
         : (!isActive
-            ? [{ label: '⊟ Vue fractionnée', click: () => enterSplit(tabId) }]
+            ? [{ label: '⊟ Split View', click: () => enterSplit(tabId) }]
             : [])),
       { type: 'separator' },
       ...(!isAdminHub ? [{
-        label: 'Mettre en onglet inactif',
+        label: 'Move to Inactive Tabs',
         click: () => {
           const tab = tabs[tabId];
           if (!tab) return;
@@ -1058,18 +1058,19 @@ function registerIPC() {
       { type: 'separator' },
       // ── Chrome-style tab groups ──────────────────────────────────────────
       ...(!isAdminHub ? [{
-        label: '🏷 Ajouter à un groupe',
+        label: '🏷 Add to Group',
         submenu: [
-          { label: '＋ Nouveau groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'new', tabId }) },
+          { label: '＋ New Group', click: () => mainWin.webContents.send('tab-group-action', { action: 'new', tabId }) },
           ...((groups && groups.length > 0) ? [{ type: 'separator' }] : []),
           ...((groups || []).map(g => ({
-            label: `● ${g.name || '(sans nom)'}`,
+            label: `● ${g.name || '(no name)'}`,
+
             click: () => mainWin.webContents.send('tab-group-action', { action: 'add', tabId, groupId: g.id }),
           }))),
         ],
       }] : []),
       ...((groups || []).some(g => g.tabIds && g.tabIds.includes(tabId))
-        ? [{ label: 'Retirer du groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'remove', tabId }) }]
+        ? [{ label: 'Remove from Group', click: () => mainWin.webContents.send('tab-group-action', { action: 'remove', tabId }) }]
         : []),
       { type: 'separator' },
       ...(!isAdminHub ? [{ label: 'Close Tab', click: () => closeTab(tabId) }] : []),
@@ -1083,7 +1084,7 @@ function registerIPC() {
             })
           : [];
         return toClose.length > 0 ? [{
-          label: 'Fermer les onglets à droite',
+          label: 'Close Tabs to the Right',
           click: () => toClose.forEach(id => closeTab(id)),
         }] : [];
       })(),
@@ -1095,14 +1096,14 @@ function registerIPC() {
   ipcMain.handle('show-group-ctx', (_, { groupId }) => {
     const send = (action) => mainWin?.webContents.send('group-ctx-action', { action, groupId });
     const items = [
-      { label: 'Nouvel onglet dans le groupe', click: () => createTab() },
+      { label: 'New Tab in Group', click: () => createTab() },
       { type: 'separator' },
-      { label: '\u270F\uFE0F Renommer',            click: () => send('rename')       },
-      { label: '\u25CF Changer la couleur',         click: () => send('color')        },
+      { label: '\u270F\uFE0F Rename',               click: () => send('rename')       },
+      { label: '\u25CF Change Color',               click: () => send('color')        },
       { type: 'separator' },
-      { label: 'D\u00e9grouper',                     click: () => send('ungroup')      },
-      { label: '\uD83D\uDCC1 Fermer le groupe',      click: () => send('close-save-bm') },
-      { label: 'Fermer et supprimer',                click: () => send('close-group')   },
+      { label: 'Ungroup',                            click: () => send('ungroup')      },
+      { label: '\uD83D\uDCC1 Close Group',           click: () => send('close-save-bm') },
+      { label: 'Close and Delete',                   click: () => send('close-group')   },
     ];
     Menu.buildFromTemplate(items).popup({ window: mainWin });
   });

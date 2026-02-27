@@ -68,7 +68,7 @@ function _cgMakeChip(g) {
   lbl.className = 'tab-group-chip-label';
   lbl.textContent = g.name || '';
   chip.append(dot, lbl);
-  chip.title = g.name ? `Groupe : ${g.name}` : 'Groupe sans nom';
+  chip.title = g.name ? `Group: ${g.name}` : 'Unnamed group';
   chip.addEventListener('click', e => {
     e.stopPropagation();
     g.collapsed = !g.collapsed;
@@ -242,7 +242,7 @@ function renderTabs(tabs) {
     if (t.muted) {
       muteIcon.className = 'tab-audio-icon';
       muteIcon.textContent = '🔇';
-      muteIcon.title = 'Son coupé';
+      muteIcon.title = 'Muted';
     } else if (t.audible) {
       muteIcon.className = 'tab-audio-icon';
       muteIcon.textContent = '🔊';
@@ -716,8 +716,8 @@ async function renderBookmarksBar(bm) {
     if (b.type === 'group') {
       // ── Group bookmark: colored dot + group name ──────────────────
       chip.title = b.name
-        ? `${b.name} (${(b.tabs || []).length} onglets)`
-        : `Groupe (${(b.tabs || []).length} onglets)`;
+        ? `${b.name} (${(b.tabs || []).length} tabs)`
+        : `Group (${(b.tabs || []).length} tabs)`;
       const dot = document.createElement('span');
       dot.className = 'bm-chip-group-dot';
       dot.style.background = b.color || '#888';
@@ -1028,7 +1028,7 @@ function _tgBuildRow(g) {
   info.className = 'tg-item-info';
   const titleEl = document.createElement('div');
   titleEl.className = 'tg-item-title';
-  titleEl.textContent = g.title || g.url || 'Onglet';
+  titleEl.textContent = g.title || g.url || 'Tab';
   titleEl.title = g.title || '';
   const urlEl = document.createElement('div');
   urlEl.className = 'tg-item-url';
@@ -1045,7 +1045,7 @@ function _tgBuildRow(g) {
   const closeBtn = document.createElement('button');
   closeBtn.className = 'tg-item-close';
   closeBtn.textContent = '×';
-  closeBtn.title = 'Supprimer de la liste';
+  closeBtn.title = 'Remove from list';
   closeBtn.addEventListener('click', e => {
     e.stopPropagation();
     _groupedTabs = _groupedTabs.filter(t => t.id !== g.id);
@@ -1140,7 +1140,7 @@ function _tgCheck() {
       _groupedTabs.push({
         id:        tab.id,
         url:       tab.url   || '',
-        title:     tab.title || tab.url || 'Onglet',
+        title:     tab.title || tab.url || 'Tab',
         favicon:   tab.favicon || null,
         groupedAt: now,
       });
@@ -1390,7 +1390,7 @@ function _cgBuildSwatches(selHex) {
 function _cgOpenGroupPanel(action, ctx) {
   _cgPanelCtx = { action, ...ctx };
   if (action === 'new') {
-    if ($chgPanelTitle) $chgPanelTitle.textContent = 'Nouveau groupe';
+    if ($chgPanelTitle) $chgPanelTitle.textContent = 'New Group';
     if ($chgNameInput)  $chgNameInput.value = '';
     _chgSelColor = CG_COLORS[0].hex;
   } else {

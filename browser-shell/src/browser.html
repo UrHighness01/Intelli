@@ -55,7 +55,7 @@
     <button class="nav-btn" id="btn-forward" title="Forward (Alt+Right)">&#8594;</button>
     <button class="nav-btn" id="btn-reload"  title="Reload (Ctrl+R)">&#8635;</button>
     <button class="nav-btn" id="btn-home"    title="Home">&#8962;</button>
-    <button class="nav-btn" id="new-tab-btn" title="Nouvel onglet (Ctrl+T)">&#43;</button>
+    <button class="nav-btn" id="new-tab-btn" title="New tab (Ctrl+T)">&#43;</button>
 
     <div id="url-wrap">
       <div id="gw-dot" class="loading" title="Gateway status"></div>
@@ -290,17 +290,17 @@
   <!-- ── Tab group: create / rename / recolor ─────────────────── -->
   <div id="panel-tab-group" class="side-panel hidden">
     <div class="panel-header">
-      <span class="panel-title" id="chg-panel-title">Nouveau groupe</span>
+      <span class="panel-title" id="chg-panel-title">New Group</span>
       <button class="panel-close" id="chg-panel-close">&#10005;</button>
     </div>
-    <div class="panel-section-label">Couleur</div>
+    <div class="panel-section-label">Color</div>
     <div class="chg-colors" id="chg-colors"></div>
-    <div class="panel-section-label" style="margin-top:12px">Nom du groupe</div>
+    <div class="panel-section-label" style="margin-top:12px">Group name</div>
     <input id="chg-name-input" class="panel-input" type="text"
-           placeholder="(optionnel)" maxlength="32" />
+           placeholder="(optional)" maxlength="32" />
     <div class="panel-row" style="margin-top:14px">
-      <button id="chg-cancel-btn" class="btn-secondary">Annuler</button>
-      <button id="chg-save-btn"   class="btn-primary">Enregistrer</button>
+      <button id="chg-cancel-btn" class="btn-secondary">Cancel</button>
+      <button id="chg-save-btn"   class="btn-primary">Save</button>
     </div>
   </div>
 
@@ -309,23 +309,23 @@
 
   <!-- ── Tab group chip context menu (HTML dropdown) ─────────── -->
   <div id="chg-ctx" class="chg-ctx hidden">
-    <div class="chg-ctx-item" id="chgctx-newtab">Nouvel onglet dans le groupe</div>
-    <div class="chg-ctx-item" id="chgctx-rename">&#9998;&nbsp; Renommer</div>
-    <div class="chg-ctx-item" id="chgctx-color">&#9679;&nbsp; Changer la couleur</div>
+    <div class="chg-ctx-item" id="chgctx-newtab">New Tab in Group</div>
+    <div class="chg-ctx-item" id="chgctx-rename">&#9998;&nbsp; Rename</div>
+    <div class="chg-ctx-item" id="chgctx-color">&#9679;&nbsp; Change Color</div>
     <div class="chg-ctx-sep"></div>
-    <div class="chg-ctx-item" id="chgctx-ungroup">Dégrouper</div>
-    <div class="chg-ctx-item" id="chgctx-close-save-bm">&#128193;&nbsp; Fermer le groupe</div>
-    <div class="chg-ctx-item chg-ctx-danger" id="chgctx-close-group">Fermer et supprimer</div>
+    <div class="chg-ctx-item" id="chgctx-ungroup">Ungroup</div>
+    <div class="chg-ctx-item" id="chgctx-close-save-bm">&#128193;&nbsp; Close Group</div>
+    <div class="chg-ctx-item chg-ctx-danger" id="chgctx-close-group">Close and Delete</div>
   </div>
 
   <!-- ── Bookmarks bar context menu ──────────────────────────────── -->
   <div id="bm-bar-ctx-overlay" class="chg-ctx-overlay hidden"></div>
   <div id="bm-bar-ctx" class="chg-ctx hidden">
-    <div class="bm-ctx-item" id="bmctx-open">Ouvrir</div>
-    <div class="bm-ctx-item" id="bmctx-open-tab">Ouvrir dans un nouvel onglet</div>
+    <div class="bm-ctx-item" id="bmctx-open">Open</div>
+    <div class="bm-ctx-item" id="bmctx-open-tab">Open in New Tab</div>
     <div class="chg-ctx-sep"></div>
-    <div class="bm-ctx-item" id="bmctx-edit">&#9998;&nbsp; Renommer</div>
-    <div class="bm-ctx-item bm-ctx-item-danger" id="bmctx-delete">&#128465;&nbsp; Supprimer</div>
+    <div class="bm-ctx-item" id="bmctx-edit">&#9998;&nbsp; Rename</div>
+    <div class="bm-ctx-item bm-ctx-item-danger" id="bmctx-delete">&#128465;&nbsp; Delete</div>
   </div>
 
   <script src="browser.js"></script>

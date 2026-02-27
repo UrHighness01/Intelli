@@ -535,7 +535,7 @@ button { cursor: pointer; }
   border-bottom-color: #3a3f5c;
 }
 #panel-inactive-tabs .tg-list:empty::after {
-  content: 'Aucun onglet inactif';
+  content: 'No inactive tabs';
   display: block;
   padding: 24px 14px;
   color: var(--muted);
@@ -580,7 +580,7 @@ button { cursor: pointer; }
   overflow-y: auto;
 }
 .tg-list:empty::after {
-  content: 'Aucun onglet inactif pour l\'instant.';
+  content: 'No inactive tabs yet.';
   display: block;
   padding: 12px 14px;
   color: var(--muted);
