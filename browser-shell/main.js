@@ -1216,13 +1216,10 @@ function registerIPC() {
   // Navigate to the Intelli admin hub index.
   // Looks for an existing index tab first; if none, opens a new one.
   ipcMain.handle('go-home', () => {
-    const indexTab = Object.values(tabs).find(t => {
-      if (t.view.webContents.isDestroyed()) return false;
-      const u = t.view.webContents.getURL() || '';
-      return /\/ui\/?(?:index\.html)?(?:[?#]|$)/.test(u);
-    });
-    if (indexTab) {
-      switchTab(indexTab.id);
+    // Navigate the active tab to the admin hub, or create it if none is open.
+    const tab = tabs[activeTabId];
+    if (tab && !tab.view.webContents.isDestroyed()) {
+      tab.view.webContents.loadURL(HOME_URL);
     } else {
       createTab(HOME_URL);
     }

@@ -699,7 +699,7 @@ async function renderBookmarksBar(bm) {
   if (!bm.length) {
     const hint = document.createElement('span');
     hint.className = 'bm-bar-hint';
-    hint.textContent = 'Ajoutez des favoris ici avec Ctrl+D';
+    hint.textContent = 'Add bookmarks here with Ctrl+D';
     $bookmarksBar.appendChild(hint);
     return;
   }
@@ -796,7 +796,7 @@ document.getElementById('bmctx-open-tab')?.addEventListener('click', () => {
 document.getElementById('bmctx-edit')?.addEventListener('click', async () => {
   const b = _bmBarCtxBm; _bmBarHideCtx();
   if (!b) return;
-  const newTitle = prompt('Renommer le favori :', b.title || b.url);
+  const newTitle = prompt('Rename bookmark:', b.title || b.url);
   if (newTitle === null) return;
   await window.electronAPI.bookmarksRemove(b.url);
   await window.electronAPI.bookmarksAdd(b.url, newTitle.trim() || b.url, b.favicon);
@@ -1010,7 +1010,7 @@ function _tgBuildRow(g) {
   const row = document.createElement('div');
   row.className = 'tg-item';
   row.dataset.id = g.id;
-  row.title = 'Cliquer pour rouvrir';
+  row.title = 'Click to reopen';
 
   // Favicon
   if (g.favicon) {
