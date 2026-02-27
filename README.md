@@ -1,5 +1,7 @@
 <p align="center">
   <img src="browser-shell/assets/icon.png" alt="Intelli" width="120" />
+  <br/><br/>
+  <img src="https://img.shields.io/badge/⚠%20UNDER%20DEVELOPMENT-Constantly%20Improving-red?style=for-the-badge" alt="Under Development" />
 </p>
 
 # Intelli — AI-native browser
