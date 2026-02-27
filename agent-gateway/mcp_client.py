@@ -94,12 +94,15 @@ class _MCPServer:
             )
         except FileNotFoundError as exc:
             self.status = 'error'
+            # Keep a stable, non-sensitive client-visible error; log has full details.
             self.error = f'command not found: {self.command!r}'
             log.error('[MCP:%s] %s', self.name, self.error)
             return False
         except Exception as exc:
             self.status = 'error'
-            self.error = str(exc)
+            # Avoid exposing raw exception text (which may contain stack trace info)
+            # in public_info(); log the detailed exception server-side instead.
+            self.error = 'failed to start MCP server process'
             log.error('[MCP:%s] start failed: %s', self.name, exc)
             return False
 
@@ -123,8 +126,9 @@ class _MCPServer:
             self.started_at = time.time()
         except Exception as exc:
             self.status = 'error'
-            self.error = f'init failed: {exc}'
-            log.error('[MCP:%s] %s', self.name, self.error)
+            # Use a generic error string for clients; keep full details in logs.
+            self.error = 'init failed'
+            log.error('[MCP:%s] init failed: %s', self.name, exc)
             return False
 
         # Discover tools
