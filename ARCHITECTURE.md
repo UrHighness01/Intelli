@@ -184,6 +184,187 @@ flowchart TD
 
 ---
 
+## Chrome API Shim Bridge
+
+Intelli implements a retro-engineered Chrome Extension Runtime layer that intercepts
+broken or missing `chrome.*` APIs in Electron's built-in extension system and
+routes them to native Intelli equivalents.
+
+### Problem
+
+Electron's MV3 extension support has several gaps:
+- `chrome.tabs.create()` opens a standalone `BrowserWindow` instead of an Intelli tab
+- `chrome.contextMenus.getAll()` always returns `[]` (menus stored in C++ registry, invisible from JS)
+- `chrome.windows.create()` opens standalone windows
+- `chrome.notifications.create()` may silently fail
+- No way to read registered menus from JS in the SW context
+
+### Solution — Two-way CDP Binding Bridge
+
+```mermaid
+sequenceDiagram
+    participant SW as Extension SW (e.g. MaxAI)
+    participant Shim as chrome-api-shim.js<br/>(injected via CDP Runtime.evaluate)
+    participant Binding as intelliApi() binding<br/>(Runtime.addBinding)
+    participant Main as main.js _handleChromeApiCall
+    participant UI as Intelli Tab Bar / UI
+
+    SW->>Shim: chrome.tabs.create({url:'https://maxai.co'})
+    Shim->>Binding: intelliApi(JSON.stringify({id, api:'tabs.create', args}))
+    Binding->>Main: Runtime.bindingCalled event
+    Main->>UI: createTab('https://maxai.co')
+    Main->>Binding: Runtime.evaluate → self.intelliApiReply(id, result)
+    Binding->>Shim: resolve(result)
+    Shim->>SW: callback / Promise resolved
+
+    SW->>Shim: chrome.contextMenus.create({id, title})
+    Shim->>Binding: intelliApi({api:'contextMenus.create',...})
+    Main->>Main: _extContextMenuCache.set(extId, item)
+    Main->>Binding: intelliApiReply(id, itemId)
+```
+
+### Shim Injection Flow
+
+```mermaid
+flowchart TD
+    Start["App Startup"] --> CDP["_initServiceWorkerCDP()"]
+    CDP --> Attach["Target.attachToTarget\n(flatten: true)"]
+    Attach --> Bind["Runtime.addBinding\n(name: 'intelliApi')"]
+    Bind --> Inject["Runtime.evaluate\n(_CHROME_API_SHIM_SRC)"]
+    Inject --> Ready["Shim active in SW scope"]
+
+    Ready --> Call["SW calls chrome.*"]
+    Call --> Override{"Is API\nshimmed?"}
+    Override -- Yes --> Bridge["intelliApi() → bindingCalled\n→ _handleChromeApiCall"]
+    Override -- No --> Native["Falls through to\nElectron native (may break)"]
+
+    Bridge --> Dispatch["Route to Intelli:\ncreateTab / cache update /\nElectron Notification / ..."]
+    Dispatch --> Reply["intelliApiReply(id, result)\nback to SW"]
+```
+
+### Shimmed APIs
+
+The full `_SHIMMED_APIS` set defined in `main.js` (source of truth for the audit scanner):
+
+| Namespace | Shimmed methods / events |
+|---|---|
+| `runtime` | `sendMessage`, `connect`, `getURL`, `getManifest`, `id`, `lastError`, `onMessage`, `onConnect`, `onInstalled`, `onStartup`, `onSuspend` |
+| `storage.local` | `get`, `set`, `remove`, `clear` |
+| `storage.sync` | `get`, `set`, `remove`, `clear` |
+| `storage` | `onChanged` |
+| `tabs` | `query`, `get`, `create`, `update`, `remove`, `sendMessage`, `onUpdated`, `onActivated`, `onRemoved`, `captureVisibleTab`, `executeScript`, `insertCSS` |
+| `windows` | `getAll`, `getCurrent`, `create`, `update`, `onFocusChanged` |
+| `alarms` | `create`, `get`, `getAll`, `clear`, `clearAll`, `onAlarm` |
+| `contextMenus` | `create`, `update`, `remove`, `removeAll`, `onClicked` |
+| `notifications` | `create`, `update`, `clear`, `onClicked`, `onClosed` |
+| `scripting` | `executeScript`, `insertCSS`, `removeCSS`, `registerContentScripts`, `unregisterContentScripts` |
+| `declarativeNetRequest` | `updateDynamicRules`, `getDynamicRules` |
+| `webRequest` | `onBeforeRequest`, `onBeforeSendHeaders`, `onHeadersReceived` |
+| `identity` | `getAuthToken`, `launchWebAuthFlow` |
+| `cookies` | `get`, `getAll`, `set`, `remove` |
+| `history` | `addUrl`, `deleteUrl`, `search` |
+| `bookmarks` | `get`, `search`, `create`, `remove` |
+| `action` / `browserAction` | `setIcon`, `setTitle`, `setBadgeText`, `setBadgeBackgroundColor` |
+| `sidePanel` | `open`, `setOptions` |
+| `i18n` | `getMessage`, `getUILanguage` |
+
+### Extension API Audit Agent
+
+An always-on background agent that statically analyzes installed Chrome extension
+JS files and surfaces any `chrome.*` API calls that Intelli has **not** shimmed.
+This makes it easy to prioritize which APIs to implement next.
+
+#### How it works
+
+1. **Startup load** — `_initExtApiAuditAgent()` (called immediately after
+   `createMainWindow()`) reads any previously persisted entries from
+   `<userData>/ext-api-audit.jsonl` into the in-memory `_apiAuditEntries` array.
+2. **Static scan** — 12 seconds after startup (to avoid competing with tab
+   rendering), a `worker_threads` Worker walks every installed extension's JS files
+   with the regex `/chrome\.([a-zA-Z]+(?:\.[a-zA-Z]+)+)\s*(?:\(|;|\.)/g` and logs
+   any captured API name that is absent from `_SHIMMED_APIS`.
+3. **Deduplication** — `_logUnknownApi` skips any `(extId, api)` pair that already
+   exists in `_apiAuditEntries`, so re-scans on subsequent launches only record
+   newly discovered APIs.
+4. **Persistence** — each new finding is `appendFile`'d to
+   `<userData>/ext-api-audit.jsonl` in JSONL format
+   `{ts, extId, extName, api, source}`.
+5. **Live push** — findings are pushed to the renderer via
+   `mainWin.webContents.send('ext-api-audit-new', entry)`.
+6. **Panel** — "Extension API Audit" side panel accessible from
+   **☰ → Extensions / Addons → Extension API Audit**; shows a grouped-by-extension
+   table with Refresh and Clear buttons.
+
+> **Note — no `fs.watch`**: watching the extensions directory was explicitly removed
+> because Chromium's own write activity inside `chrome-extensions/` caused an
+> inotify storm that saturated file-descriptor limits. Re-scan on extension install
+> is planned via the `ext-load-unpacked` / `ext-load-crx` IPC handlers instead.
+
+```mermaid
+flowchart LR
+    subgraph Main["main.js (Main Process)"]
+        Init["_initExtApiAuditAgent()\n(called after createMainWindow)"]
+        Worker["_startScanWorker()\nworker_threads — 12 s delay"]
+        Log["_logUnknownApi()\ndedup + appendFile + IPC push"]
+        JSONL["ext-api-audit.jsonl\n(userData — JSONL)"]
+        IPC["ext-api-audit-new\nIPC event → mainWin"]
+        IPCHandle["IPC handlers\nget-ext-api-audit\nclear-ext-api-audit"]
+    end
+    subgraph Renderer["browser.js (Renderer)"]
+        Panel["panel-ext-audit\n(side panel)"]
+        Loader["loadExtApiAuditPanel()"]
+        Live["onExtApiAuditNew(cb)\nreal-time push"]
+    end
+
+    Init -->|"load JSONL"| JSONL
+    Init --> Worker
+    Worker -->|"regex hits"| Log
+    Log --> JSONL
+    Log --> IPC
+    IPC --> Live
+    Live --> Panel
+    IPCHandle -->|"get"| Loader
+    Loader --> Panel
+```
+
+#### Crash-Guard Sentinel (related)
+
+To prevent Chromium's Service Worker LevelDB from becoming corrupted across
+restarts, Intelli writes a sentinel file `<userData>/.intelli-clean-exit`
+on every clean `before-quit`. At next startup, if the sentinel is **absent**
+(previous session crashed), the `Service Worker/` directory is wiped before
+any extension loads. If it is **present**, the wipe is skipped.
+This eliminates `IO error: .../LOCK` and `Status code: 2` extension errors.
+
+#### Discovered Missing APIs (as of 2026-02-27)
+
+The following APIs were found by the static scanner across the two currently
+installed extensions. These are candidates for future shim implementation:
+
+| Extension | API | Source file | Priority |
+|---|---|---|---|
+| MaxAI | `chrome.downloads.download` | content script | Medium — needed for MaxAI's PDF/image export feature |
+| LLM Tweet Comment Generator | `chrome.runtime.openOptionsPage` | background | Low — opens extension options; could be a no-op or create-tab shim |
+| LLM Tweet Comment Generator | `chrome.runtime.onMessage.addListener` | background.bundle.js | High — cross-context messaging; partially covered by `runtime.onMessage` event shim but `addListener` sub-method not captured |
+| LLM Tweet Comment Generator | `chrome.action.onClicked.addListener` | background.bundle.js | Medium — toolbar icon click event; not yet routed through Intelli's action shim |
+
+> **Regex note**: the scanner captures the full dot-chain (e.g.
+> `runtime.onMessage.addListener`) while `_SHIMMED_APIS` contains the shorter
+> event object name (`runtime.onMessage`). Adding the `.addListener` variants
+> to `_SHIMMED_APIS` (or normalizing the regex to stop at 2 segments) will
+> suppress false positives for already-handled event objects.
+
+#### Files
+
+| File | Symbols |
+|---|---|
+| `browser-shell/main.js` | `_SHIMMED_APIS`, `EXT_API_AUDIT_LOG`, `_apiAuditEntries`, `_SCAN_WORKER_SRC`, `_startScanWorker`, `_logUnknownApi`, `_initExtApiAuditAgent`, IPC handlers (`get-ext-api-audit`, `clear-ext-api-audit`), menu entry, before-quit sentinel write |
+| `browser-shell/preload.js` | `extApiAuditGet`, `extApiAuditClear`, `onExtApiAuditNew` |
+| `browser-shell/src/browser.html` | `#panel-ext-audit` side panel |
+| `browser-shell/src/browser.js` | `loadExtApiAuditPanel()`, `_renderAuditEntries()` |
+
+---
+
 ## Notes
 
 - The **Tab Context Bridge** serializes the active tab to a structured snapshot

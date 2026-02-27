@@ -305,6 +305,21 @@
     <div id="chrext-status" class="panel-status" style="margin-top:8px"></div>
   </div>
 
+  <!-- ── Extension API Audit panel ─────────────────────────────────── -->
+  <div id="panel-ext-audit" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Extension API Audit</span>
+      <button class="panel-close" id="extaudit-close">&#10005;</button>
+    </div>
+    <p class="panel-hint" style="margin:0 0 8px">Chrome APIs called by extensions that Intelli has not shimmed.</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button id="extaudit-refresh-btn" class="btn-primary" style="flex:1">&#8635; Refresh</button>
+      <button id="extaudit-clear-btn"   class="btn-secondary" style="flex:1">&#128465; Clear</button>
+    </div>
+    <div id="extaudit-stats" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
+    <div id="extaudit-list" class="panel-list" style="font-size:12px"></div>
+  </div>
+
   <!-- panel backdrop (click to dismiss) -->
   <div id="panel-backdrop" class="hidden"></div>
 

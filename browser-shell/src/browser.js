@@ -560,6 +560,7 @@ async function openPanel(name) {
   if (name === 'history')       loadHistoryPanel();
   if (name === 'settings')      { renderTabGroupList(); loadSettingsPanel(); }
   if (name === 'chrome-ext')    loadChromeExtPanel();
+  if (name === 'ext-audit')     loadExtApiAuditPanel();
 }
 
 function closeAllPanels() {
@@ -1473,6 +1474,60 @@ async function loadChromeExtPanel() {
     row.append(icon, info, toggle, rmBtn);
     $chrextList.appendChild(row);
   }
+}
+
+// ── Extension API Audit panel ─────────────────────────────────────────────────
+async function loadExtApiAuditPanel() {
+  const $list  = document.getElementById('extaudit-list');
+  const $stats = document.getElementById('extaudit-stats');
+  if (!$list) return;
+
+  function _renderAuditEntries(entries) {
+    $list.innerHTML = '';
+    if (!entries.length) {
+      $list.innerHTML = '<div style="color:var(--text-muted);padding:8px 0">No unimplemented APIs detected.</div>';
+      $stats.textContent = '';
+      return;
+    }
+    const byExt = {};
+    for (const e of entries) {
+      (byExt[e.extName] = byExt[e.extName] || []).push(e);
+    }
+    $stats.textContent = `${entries.length} issue(s) across ${Object.keys(byExt).length} extension(s)`;
+    for (const [extName, items] of Object.entries(byExt)) {
+      const hdr = document.createElement('div');
+      hdr.style.cssText = 'font-weight:600;margin:8px 0 4px;font-size:12px;color:var(--accent)';
+      hdr.textContent = extName;
+      $list.appendChild(hdr);
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:2px 0;color:var(--text-secondary)';
+        const ts = new Date(item.ts).toLocaleDateString();
+        row.textContent = `chrome.${item.api}  —  ${item.source}  (${ts})`;
+        $list.appendChild(row);
+      }
+    }
+  }
+
+  const entries = await window.electronAPI.extApiAuditGet().catch(() => []);
+  _renderAuditEntries(entries);
+
+  document.getElementById('extaudit-refresh-btn')?.addEventListener('click', async () => {
+    const fresh = await window.electronAPI.extApiAuditGet().catch(() => []);
+    _renderAuditEntries(fresh);
+  });
+
+  document.getElementById('extaudit-clear-btn')?.addEventListener('click', async () => {
+    await window.electronAPI.extApiAuditClear().catch(() => {});
+    _renderAuditEntries([]);
+  });
+
+  document.getElementById('extaudit-close')?.addEventListener('click', closeAllPanels);
+
+  window.electronAPI.onExtApiAuditNew(entry => {
+    const fresh = [...(document.getElementById('extaudit-list') ? [] : []), entry];
+    window.electronAPI.extApiAuditGet().then(all => _renderAuditEntries(all)).catch(() => {});
+  });
 }
 
 document.getElementById('chrext-crxextractor-link')?.addEventListener('click', (e) => {

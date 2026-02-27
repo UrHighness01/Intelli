@@ -170,4 +170,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Remove all listeners for a channel (cleanup)
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // ── Extension API Audit ────────────────────────────────────────────────
+  extApiAuditGet:   ()   => ipcRenderer.invoke('get-ext-api-audit'),
+  extApiAuditClear: ()   => ipcRenderer.invoke('clear-ext-api-audit'),
+  onExtApiAuditNew: (cb) => ipcRenderer.on('ext-api-audit-new', (_, entry) => cb(entry)),
 });

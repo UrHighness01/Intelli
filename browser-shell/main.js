@@ -2032,6 +2032,14 @@ function registerIPC() {
     shell.openPath(app.getPath('downloads'));
   });
 
+  // ── Extension API Audit ───────────────────────────────────────────────────
+  ipcMain.handle('get-ext-api-audit', () => _apiAuditEntries);
+  ipcMain.handle('clear-ext-api-audit', async () => {
+    _apiAuditEntries = [];
+    await fs.promises.writeFile(EXT_API_AUDIT_LOG(), '').catch(() => {});
+    return { ok: true };
+  });
+
   // ── App menu (three-dot) — native popup with Chrome-style structure ───────
   ipcMain.handle('show-app-menu', () => {
     const zl = tabs[activeTabId]?.view.webContents.getZoomLevel() ?? 0;
@@ -2077,6 +2085,8 @@ function registerIPC() {
           { label: 'Manage Chrome Extensions', click: () => notifyChrome('open-panel', 'chrome-ext') },
           { label: 'Chrome Web Store',         click: () => createTab('https://chrome.google.com/webstore') },
           { label: 'Developer Mode Addons',    click: () => notifyChrome('open-panel', 'dev-addons') },
+          { type: 'separator' },
+          { label: 'Extension API Audit',      click: () => notifyChrome('open-panel', 'ext-audit') },
         ],
       },
       { type: 'separator' },
@@ -2463,6 +2473,151 @@ function installCSP() {
   });
 }
 
+// ─── Extension API Audit Agent ────────────────────────────────────────────────
+// Statically scans installed Chrome extension JS files (in a worker thread)
+// to detect calls to chrome.* APIs that Intelli has NOT shimmed.
+// Results are persisted to a JSONL file and pushed live to the main window.
+
+const EXT_API_AUDIT_LOG = () => path.join(app.getPath('userData'), 'ext-api-audit.jsonl');
+
+// All chrome.* API methods that Intelli currently shims / supports.
+const _SHIMMED_APIS = new Set([
+  'runtime.sendMessage','runtime.connect','runtime.getURL','runtime.getManifest',
+  'runtime.id','runtime.lastError','runtime.onMessage','runtime.onConnect',
+  'runtime.onInstalled','runtime.onStartup','runtime.onSuspend',
+  'storage.local.get','storage.local.set','storage.local.remove','storage.local.clear',
+  'storage.sync.get','storage.sync.set','storage.sync.remove','storage.sync.clear',
+  'storage.onChanged',
+  'tabs.query','tabs.get','tabs.create','tabs.update','tabs.remove',
+  'tabs.sendMessage','tabs.onUpdated','tabs.onActivated','tabs.onRemoved',
+  'tabs.captureVisibleTab','tabs.executeScript','tabs.insertCSS',
+  'windows.getAll','windows.getCurrent','windows.create','windows.update',
+  'windows.onFocusChanged',
+  'alarms.create','alarms.get','alarms.getAll','alarms.clear','alarms.clearAll',
+  'alarms.onAlarm',
+  'contextMenus.create','contextMenus.update','contextMenus.remove',
+  'contextMenus.removeAll','contextMenus.onClicked',
+  'notifications.create','notifications.update','notifications.clear',
+  'notifications.onClicked','notifications.onClosed',
+  'scripting.executeScript','scripting.insertCSS','scripting.removeCSS',
+  'scripting.registerContentScripts','scripting.unregisterContentScripts',
+  'declarativeNetRequest.updateDynamicRules','declarativeNetRequest.getDynamicRules',
+  'webRequest.onBeforeRequest','webRequest.onBeforeSendHeaders',
+  'webRequest.onHeadersReceived',
+  'identity.getAuthToken','identity.launchWebAuthFlow',
+  'cookies.get','cookies.getAll','cookies.set','cookies.remove',
+  'history.addUrl','history.deleteUrl','history.search',
+  'bookmarks.get','bookmarks.search','bookmarks.create','bookmarks.remove',
+  'action.setIcon','action.setTitle','action.setBadgeText','action.setBadgeBackgroundColor',
+  'browserAction.setIcon','browserAction.setTitle','browserAction.setBadgeText',
+  'sidePanel.open','sidePanel.setOptions',
+  'i18n.getMessage','i18n.getUILanguage',
+]);
+
+let _apiAuditEntries = [];  // in-memory cache (also written to JSONL)
+
+// ── Worker source (eval'd in a worker_threads context) ────────────────────────
+const _SCAN_WORKER_SRC = `
+const { workerData, parentPort } = require('worker_threads');
+const fs   = require('fs');
+const path = require('path');
+const shimmed = new Set(workerData.shimmed);
+const API_RE  = /chrome\\.([a-zA-Z]+(?:\\.[a-zA-Z]+)+)\\s*(?:\\(|;|\\.)/g;
+
+for (const { extId, extPath, extName } of workerData.entries) {
+  let jsFiles = [];
+  try {
+    const walk = (dir, depth) => {
+      if (depth > 6) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+      catch (_) { return; }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.isFile() && e.name.endsWith('.js')) jsFiles.push(full);
+      }
+    };
+    walk(extPath, 0);
+  } catch (_) {}
+
+  const unknown = new Map();
+  for (const file of jsFiles) {
+    let src = '';
+    try { src = fs.readFileSync(file, 'utf8'); } catch (_) { continue; }
+    let m;
+    API_RE.lastIndex = 0;
+    while ((m = API_RE.exec(src)) !== null) {
+      const api = m[1];
+      if (!shimmed.has(api)) {
+        if (!unknown.has(api)) unknown.set(api, path.basename(file));
+      }
+    }
+  }
+  parentPort.postMessage({ extId, extName, apis: [...unknown.entries()].map(([api, src]) => ({ api, src })) });
+}
+parentPort.postMessage({ done: true });
+`;
+
+let _scanWorkerRunning = false;
+
+function _startScanWorker(entries) {
+  if (_scanWorkerRunning) return;
+  _scanWorkerRunning = true;
+  const { Worker: _W } = require('worker_threads');
+  let src;
+  try { src = require('vm').Script; } catch (_) {} // just a warm-up import
+  const w = new _W(_SCAN_WORKER_SRC, {
+    eval: true,
+    workerData: { shimmed: [..._SHIMMED_APIS], entries },
+    resourceLimits: { maxOldGenerationSizeMb: 64 },
+  });
+  w.on('message', async (msg) => {
+    if (msg.done) { _scanWorkerRunning = false; return; }
+    const { extId, extName, apis } = msg;
+    if (!apis.length) return;
+    console.log(`[ext-api-audit] Scan "${extName}": ${apis.length} unimplemented API(s)`);
+    for (const { api, src } of apis) {
+      await _logUnknownApi(extId, api, src, extName);
+    }
+  });
+  w.on('error', (e) => { console.error('[ext-api-audit] Worker error:', e.message); _scanWorkerRunning = false; });
+  w.on('exit',  ()  => { _scanWorkerRunning = false; });
+}
+
+async function _logUnknownApi(extId, api, source, knownExtName) {
+  const existing = _apiAuditEntries.find(e => e.extId === extId && e.api === api);
+  if (existing) return; // already logged
+  const entry = { ts: Date.now(), extId, extName: knownExtName || extId, api, source };
+  _apiAuditEntries.push(entry);
+  try { await fs.promises.appendFile(EXT_API_AUDIT_LOG(), JSON.stringify(entry) + '\n'); } catch (_) {}
+  console.log(`[ext-api-audit] ${entry.extName}: ${api} (${source})`);
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('ext-api-audit-new', entry);
+  }
+}
+
+async function _initExtApiAuditAgent() {
+  // 1. Load persisted entries from JSONL
+  try {
+    const raw = await fs.promises.readFile(EXT_API_AUDIT_LOG(), 'utf8').catch(() => '');
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { _apiAuditEntries.push(JSON.parse(line)); } catch (_) {}
+    }
+    console.log(`[ext-api-audit] Loaded ${_apiAuditEntries.length} existing entries`);
+  } catch (_) {}
+
+  // 2. Schedule a static scan 12 s after startup (avoids competing with tab init)
+  setTimeout(() => {
+    const exts = session.defaultSession.getAllExtensions();
+    if (!exts.length) { console.log('[ext-api-audit] No extensions to scan.'); return; }
+    const entries = exts.map(e => ({ extId: e.id, extPath: e.path, extName: e.name }));
+    console.log(`[ext-api-audit] Starting static scan of ${entries.length} extension(s)…`);
+    _startScanWorker(entries);
+  }, 12000);
+}
+
 function createMainWindow() {
   mainWin = new BrowserWindow({
     width:           1280,
@@ -2785,6 +2940,9 @@ app.whenReady().then(async () => {
   // moment with zero open windows on Windows/Linux.  If splash is destroyed
   // first, window-all-closed fires immediately and app.quit() kills the process.
   createMainWindow();
+  // Start extension API audit agent — scans ext JS files in a worker thread
+  // to find unimplemented chrome.* calls. Runs 12 s after startup.
+  _initExtApiAuditAgent();
   splash.destroy();
 
   // Auto-update: listen for events and relay to the chrome renderer.
@@ -2823,6 +2981,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   _closeHoverWin();
   stopGateway();
+  // Write clean-exit sentinel so next launch skips the Service Worker DB wipe
+  try { fs.writeFileSync(_CLEAN_EXIT_SENTINEL, Date.now().toString()); } catch (_) {}
 });
 
 // Security: restrict what new windows can be opened
