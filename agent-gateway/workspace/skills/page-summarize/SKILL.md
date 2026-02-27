@@ -1,8 +1,8 @@
 ---
-name: Page Summarize
-slug: page-summarize
+name: page-summarize
 description: Summarize the current browser tab in a few sentences.
-trigger: /summarize
+metadata:
+  trigger: /summarize
 ---
 
 # Page Summarize

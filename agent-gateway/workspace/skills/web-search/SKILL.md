@@ -1,8 +1,8 @@
 ---
-name: Web Search
-slug: web-search
+name: web-search
 description: Search the web and return top results with a synthesized answer.
-trigger: /search
+metadata:
+  trigger: /search
 ---
 
 # Web Search
@@ -15,4 +15,4 @@ When asked to search for something or when the user types `/search <query>`:
 4. Synthesize a clear answer citing the sources (title + URL).
 
 Always cite your sources at the bottom as:
-> Source: [Title](URL)
+> Source: Title — URL

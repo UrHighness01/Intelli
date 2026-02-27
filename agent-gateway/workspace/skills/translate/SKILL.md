@@ -1,8 +1,8 @@
 ---
-name: Translate
-slug: translate
+name: translate
 description: Translate text into any language.
-trigger: /translate
+metadata:
+  trigger: /translate
 ---
 
 # Translate
