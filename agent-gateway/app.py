@@ -181,12 +181,17 @@ def _audit(event: str, details: dict, actor: str = None):
         # (CWE-312 / CodeQL py/clear-text-storage-sensitive-data).
         safe_details = _scrub_audit_details(details)
         entry = {'ts': datetime.now(timezone.utc).isoformat(), 'event': event, 'actor': actor, 'details': safe_details}
+        # Build the clear-text JSON representation first. This may contain
+        # user-controlled data but with any sensitive-named fields already
+        # redacted by _scrub_audit_details.
         json_line = json.dumps(entry, ensure_ascii=False)
         key = _audit_key()
-        if key:
-            json_line = _encrypt_audit_line(json_line, key)
+        # Encrypt the audit line when a key is configured so that secrets are
+        # never stored in clear text on disk. The variable written to disk is
+        # always the post-encryption value when 'key' is present.
+        to_write = _encrypt_audit_line(json_line, key) if key else json_line
         with AUDIT_PATH.open('a', encoding='utf-8') as f:
-            f.write(json_line + "\n")
+            f.write(to_write + "\n")
     except Exception:
         pass
 

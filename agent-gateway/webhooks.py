@@ -218,7 +218,9 @@ def register_webhook(url: str, events: Optional[List[str]] = None, secret: str =
         'id': hook_id,
         'url': url,
         'events': sorted(events),
-        'secret': secret,  # stored in plaintext in-memory; encrypted at disk-write time
+        # Secret is held in-memory only; persistence is handled by _save(),
+        # which encrypts secrets on disk so they are never stored in clear text.
+        'secret': secret,
         'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     with _lock:
