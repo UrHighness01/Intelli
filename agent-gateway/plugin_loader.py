@@ -364,7 +364,9 @@ def install(source: str) -> Dict[str, Any]:
 
 def uninstall(slug: str) -> bool:
     """Remove a plugin completely.  Returns True if it existed."""
-    slug = _safe_plugin_slug(slug)
+    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
+    if not _PLUGIN_SLUG_RE.match(slug):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
     dest = PLUGINS_DIR / slug
     if not dest.exists():
         return False
@@ -380,7 +382,9 @@ def uninstall(slug: str) -> bool:
 
 def enable(slug: str) -> bool:
     """Enable a plugin and register its tools.  Returns True on success."""
-    slug = _safe_plugin_slug(slug)
+    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
+    if not _PLUGIN_SLUG_RE.match(slug):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
     dest = PLUGINS_DIR / slug
     manifest = _read_manifest(dest)
     if manifest is None:
@@ -396,7 +400,9 @@ def enable(slug: str) -> bool:
 
 def disable(slug: str) -> bool:
     """Disable a plugin and unregister its tools.  Returns True if it was enabled."""
-    slug = _safe_plugin_slug(slug)
+    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
+    if not _PLUGIN_SLUG_RE.match(slug):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
     with _lock:
         _unregister_tools(slug)
         _registry_snapshot.pop(slug, None)
@@ -410,7 +416,9 @@ def disable(slug: str) -> bool:
 
 def reload_plugin(slug: str) -> Dict[str, Any]:
     """Disable then re-enable a plugin (picks up code changes)."""
-    slug = _safe_plugin_slug(slug)
+    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
+    if not _PLUGIN_SLUG_RE.match(slug):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
     disable(slug)
     if not enable(slug):
         raise FileNotFoundError(f'Plugin "{slug}" not found in {PLUGINS_DIR}')

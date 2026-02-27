@@ -92,6 +92,8 @@ def save_message(
     content: str,
     meta: Optional[dict] = None,
 ) -> None:
+    # Sanitise session_id in this scope: CodeQL taint barrier before any path use.
+    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
     """Append a single message to the session file and update the index.
 
     Args:
@@ -147,6 +149,7 @@ def list_sessions(limit: int = 50, offset: int = 0) -> list[dict]:
 
 def get_session(session_id: str) -> list[dict]:
     """Return all messages in a session in chronological order."""
+    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
     path = _session_path(session_id)
     if not path.exists():
         return []
@@ -164,6 +167,7 @@ def get_session(session_id: str) -> list[dict]:
 
 def delete_session(session_id: str) -> bool:
     """Delete a session file and remove it from the index."""
+    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
     path = _session_path(session_id)
     if not path.exists():
         return False

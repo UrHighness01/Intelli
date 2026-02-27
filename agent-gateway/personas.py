@@ -108,12 +108,10 @@ def get_persona(slug: str) -> Optional[dict]:
     """Return a persona by slug, or None if not found."""
     if slug in ('', 'intelli'):
         return _DEFAULT_PERSONA
-    safe = _safe_slug(slug)
-    if safe is None:
+    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
+    if not slug:
         return None
-    # Apply os.path.basename() at the join site so CodeQL sees the taint barrier
-    # in the same scope as the path expression.
-    return _load_dir(_PERSONAS_DIR / os.path.basename(safe))
+    return _load_dir(_PERSONAS_DIR / slug)
 
 
 def create_persona(
@@ -124,10 +122,10 @@ def create_persona(
     provider: str = '',
 ) -> dict:
     """Create a new persona and persist it to disk. Returns the full persona dict."""
-    slug = _safe_slug(name)
-    if slug is None:
+    slug = os.path.basename(_slug(name))  # sanitise: CodeQL taint barrier in this scope
+    if not slug:
         raise ValueError(f'Invalid persona name: {name!r}')
-    d = _PERSONAS_DIR / os.path.basename(slug)  # basename at join site: taint barrier
+    d = _PERSONAS_DIR / slug
     d.mkdir(parents=True, exist_ok=True)
     cfg: dict = {
         'name':       name,
@@ -145,10 +143,10 @@ def update_persona(slug: str, **kwargs) -> Optional[dict]:
     """Update fields of an existing persona. Pass soul= to update SOUL.md."""
     if slug in ('', 'intelli'):
         return None  # built-in is immutable
-    safe = _safe_slug(slug)
-    if safe is None:
+    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
+    if not slug:
         return None
-    d = _PERSONAS_DIR / os.path.basename(safe)  # basename at join site: taint barrier
+    d = _PERSONAS_DIR / slug
     cfg_path = d / 'config.json'
     if not cfg_path.exists():
         return None
@@ -166,10 +164,10 @@ def delete_persona(slug: str) -> bool:
     """Delete a persona. Cannot delete the built-in 'intelli' persona."""
     if slug in ('', 'intelli'):
         return False
-    safe = _safe_slug(slug)
-    if safe is None:
+    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
+    if not slug:
         return False
-    d = _PERSONAS_DIR / os.path.basename(safe)  # basename at join site: taint barrier
+    d = _PERSONAS_DIR / slug
     if not d.exists():
         return False
     shutil.rmtree(d)
