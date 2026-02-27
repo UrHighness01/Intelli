@@ -69,9 +69,9 @@ app.commandLine.appendSwitch('no-default-browser-check');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('force-color-profile', 'srgb');
 
-// Real Chrome 122 UA string (Electron 29 = Chrome 122). The word "Electron"
-// is removed so sites cannot trivially fingerprint us.
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+// Spoof a current Chrome UA. Chrome 122 (Electron 29's real engine) is 
+// ancient by Feb 2026 — using it triggers bot-detection on X.com and others.
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
 // ─── Anti-détection injectable dans le monde principal ───────────────────────
 // Exécuté via executeJavaScript() (monde principal) à chaque dom-ready,
@@ -558,9 +558,10 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   const view = new BrowserView({
     webPreferences: {
       nodeIntegration:  false,
-      contextIsolation: true,    // isolate Electron globals from page world
-      sandbox:          true,    // full sandbox — no Node in page renderer
+      contextIsolation: false,   // must be false so preload-page can override navigator.*
+      sandbox:          false,   // preload-page.js needs non-sandboxed context
       webviewTag:       false,
+      preload:          path.join(__dirname, 'preload-page.js'),
     },
   });
 
@@ -1981,7 +1982,7 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const h = details.requestHeaders;
     h['User-Agent']          = CHROME_UA;
-    h['Sec-CH-UA']           = '"Not A(Brand";v="99", "Chromium";v="122", "Google Chrome";v="122"';
+    h['Sec-CH-UA']           = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"';
     h['Sec-CH-UA-Mobile']    = '?0';
     h['Sec-CH-UA-Platform']  = '"Windows"';
     h['Accept-Language']     = _acceptLanguage;

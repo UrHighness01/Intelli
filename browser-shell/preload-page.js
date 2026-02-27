@@ -59,8 +59,8 @@ try {
 
 // ── 4. navigator.languages + navigator.language ────────────────────────────
 try {
-  Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'], configurable: true });
-  Object.defineProperty(navigator, 'language',  { get: () => 'fr-FR', configurable: true });
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+  Object.defineProperty(navigator, 'language',  { get: () => 'en-US', configurable: true });
 } catch (_) {}
 
 // ── 5. navigator.hardwareConcurrency + deviceMemory ───────────────────────
