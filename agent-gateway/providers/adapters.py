@@ -17,10 +17,11 @@ Requires: ``requests`` (already in requirements.txt).
 
 Supported providers
 -------------------
-  openai      – OpenAI Chat Completions API       INTELLI_OPENAI_KEY or OPENAI_API_KEY
-  anthropic   – Anthropic Messages API            INTELLI_ANTHROPIC_KEY or ANTHROPIC_API_KEY
-  openrouter  – OpenRouter Chat Completions API   INTELLI_OPENROUTER_KEY
-  ollama      – Local Ollama REST API             no key required; OLLAMA_BASE_URL
+  openai          – OpenAI Chat Completions API         INTELLI_OPENAI_KEY or OPENAI_API_KEY
+  anthropic        – Anthropic Messages API              INTELLI_ANTHROPIC_KEY or ANTHROPIC_API_KEY
+  openrouter       – OpenRouter Chat Completions API     INTELLI_OPENROUTER_KEY
+  github_copilot   – GitHub Copilot Chat API             INTELLI_GITHUB_COPILOT_TOKEN or GITHUB_COPILOT_TOKEN or GITHUB_TOKEN
+  ollama           – Local Ollama REST API               no key required; OLLAMA_BASE_URL
 
 Usage
 -----
@@ -37,6 +38,7 @@ Usage
 from __future__ import annotations
 
 import os
+import json as _json
 import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional
 
@@ -66,6 +68,9 @@ def _build_default_allowlist() -> List[str]:
         os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'https://api.anthropic.com',
         'https://openrouter.ai',
+        'https://api.githubcopilot.com',
+        'https://api.individual.githubcopilot.com',
+        'https://api.github.com',            # Copilot token exchange
         os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434'),
     ]
     result: List[str] = []
@@ -127,11 +132,40 @@ def _resolve_key(provider: str, env_aliases: List[str]) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Provider settings store
+# ---------------------------------------------------------------------------
+
+class ProviderSettingsStore:
+    """Persist per-provider settings (model_id, endpoint) in a JSON sidecar file."""
+    _path = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'provider_settings.json'))
+
+    @classmethod
+    def get(cls, provider: str) -> dict:
+        try:
+            with open(cls._path, 'r', encoding='utf-8') as f:
+                return _json.load(f).get(provider, {})
+        except Exception:
+            return {}
+
+    @classmethod
+    def set(cls, provider: str, settings: dict) -> None:
+        try:
+            with open(cls._path, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+        except Exception:
+            data = {}
+        data[provider] = {**data.get(provider, {}), **settings}
+        with open(cls._path, 'w', encoding='utf-8') as f:
+            _json.dump(data, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Base adapter
 # ---------------------------------------------------------------------------
 
 class BaseAdapter:
     provider = 'base'
+    requires_key: bool = True  # set to False for local providers (e.g. Ollama)
 
     def is_available(self) -> bool:
         raise NotImplementedError
@@ -176,19 +210,26 @@ class OpenAIAdapter(BaseAdapter):
     def is_available(self) -> bool:
         return bool(_resolve_key('openai', ['OPENAI_API_KEY']))
 
+    def _get_default_model(self) -> str:
+        return ProviderSettingsStore.get('openai').get('model_id') or self.DEFAULT_MODEL
+
     def chat_complete(
         self,
         messages: List[Dict[str, str]],
-        model: str = DEFAULT_MODEL,
+        model: str = '',
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs: Any,
     ) -> Dict[str, Any]:
+        if not model:
+            model = self._get_default_model()
         self._check_requests()
         key = _resolve_key('openai', ['OPENAI_API_KEY'])
         if not key:
             raise RuntimeError('OpenAI API key not configured')
         _check_outbound_url(self.BASE_URL)
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
@@ -197,11 +238,12 @@ class OpenAIAdapter(BaseAdapter):
                 'messages': messages,
                 'temperature': temperature,
                 'max_tokens': max_tokens,
-                **kwargs,
+                **oai_kwargs,
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f'OpenAI API error {resp.status_code}: {resp.text[:500]}')
         data = resp.json()
         choice = data['choices'][0]['message']['content']
         return self._standard_reply(choice, data.get('model', model), data.get('usage'))
@@ -225,15 +267,20 @@ class AnthropicAdapter(BaseAdapter):
     def is_available(self) -> bool:
         return bool(_resolve_key('anthropic', ['ANTHROPIC_API_KEY']))
 
+    def _get_default_model(self) -> str:
+        return ProviderSettingsStore.get('anthropic').get('model_id') or self.DEFAULT_MODEL
+
     def chat_complete(
         self,
         messages: List[Dict[str, str]],
-        model: str = DEFAULT_MODEL,
+        model: str = '',
         temperature: float = 0.7,
         max_tokens: int = 1024,
         system: str = '',
         **kwargs: Any,
     ) -> Dict[str, Any]:
+        if not model:
+            model = self._get_default_model()
         self._check_requests()
         key = _resolve_key('anthropic', ['ANTHROPIC_API_KEY'])
         if not key:
@@ -284,18 +331,25 @@ class OpenRouterAdapter(BaseAdapter):
     def is_available(self) -> bool:
         return bool(_resolve_key('openrouter', []))
 
+    def _get_default_model(self) -> str:
+        return ProviderSettingsStore.get('openrouter').get('model_id') or self.DEFAULT_MODEL
+
     def chat_complete(
         self,
         messages: List[Dict[str, str]],
-        model: str = DEFAULT_MODEL,
+        model: str = '',
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs: Any,
     ) -> Dict[str, Any]:
+        if not model:
+            model = self._get_default_model()
         self._check_requests()
         key = _resolve_key('openrouter', [])
         if not key:
             raise RuntimeError('OpenRouter API key not configured')
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
         _check_outbound_url(self.BASE_URL)
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
@@ -310,11 +364,12 @@ class OpenRouterAdapter(BaseAdapter):
                 'messages': messages,
                 'temperature': temperature,
                 'max_tokens': max_tokens,
-                **kwargs,
+                **oai_kwargs,
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f'OpenRouter API error {resp.status_code}: {resp.text[:500]}')
         data = resp.json()
         choice = data['choices'][0]['message']['content']
         return self._standard_reply(choice, data.get('model', model), data.get('usage'))
@@ -328,21 +383,37 @@ class OllamaAdapter(BaseAdapter):
     """Local Ollama REST API.
 
     No API key required; assumes Ollama is running at OLLAMA_BASE_URL
-    (default: http://localhost:11434).
+    (default: http://localhost:11434).  A custom endpoint and default model
+    can be set through the admin provider settings store.
     """
     provider = 'ollama'
-    DEFAULT_MODEL = 'llama3'
+    requires_key = False
+    DEFAULT_MODEL = 'llama3.1:8b'
 
-    def __init__(self):
-        self.base_url = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
+    def _get_base_url(self) -> str:
+        """Return the Ollama endpoint, preferring admin settings over env var."""
+        endpoint = ProviderSettingsStore.get('ollama').get('endpoint', '').strip()
+        if endpoint:
+            base = endpoint.rstrip('/')
+            # Dynamically whitelist admin-configured endpoint at runtime
+            p = _urlparse.urlparse(base)
+            origin = f'{p.scheme}://{p.netloc}'
+            if origin not in _OUTBOUND_ALLOWLIST:
+                _OUTBOUND_ALLOWLIST.append(origin)
+            return base
+        return os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
+
+    def _get_default_model(self) -> str:
+        return ProviderSettingsStore.get('ollama').get('model_id') or self.DEFAULT_MODEL
 
     def is_available(self) -> bool:
         """Check if Ollama is reachable."""
         if not _HAS_REQUESTS:
             return False
         try:
-            _check_outbound_url(self.base_url)
-            r = _requests.get(f'{self.base_url}/api/tags', timeout=2)
+            base_url = self._get_base_url()
+            _check_outbound_url(base_url)
+            r = _requests.get(f'{base_url}/api/tags', timeout=2)
             return r.status_code == 200
         except Exception:
             return False
@@ -350,15 +421,18 @@ class OllamaAdapter(BaseAdapter):
     def chat_complete(
         self,
         messages: List[Dict[str, str]],
-        model: str = DEFAULT_MODEL,
+        model: str = '',
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs: Any,
     ) -> Dict[str, Any]:
+        if not model:
+            model = self._get_default_model()
         self._check_requests()
-        _check_outbound_url(self.base_url)
+        base_url = self._get_base_url()
+        _check_outbound_url(base_url)
         resp = _requests.post(
-            f'{self.base_url}/api/chat',
+            f'{base_url}/api/chat',
             json={
                 'model': model,
                 'messages': messages,
@@ -378,6 +452,220 @@ class OllamaAdapter(BaseAdapter):
 
 
 # ---------------------------------------------------------------------------
+# GitHub Copilot adapter
+# ---------------------------------------------------------------------------
+
+class GitHubCopilotAdapter(BaseAdapter):
+    """GitHub Copilot Chat Completions API (OpenAI-compatible).
+
+    GitHub Copilot requires a two-step token exchange:
+      1. User supplies a GitHub OAuth/PAT token (with `copilot` scope).
+      2. We exchange it for a short-lived Copilot API token via
+         GET https://api.github.com/copilot_internal/v2/token
+      3. The Copilot API token encodes the real base URL in its payload
+         (``proxy-ep=...``); we parse that out and use it.
+
+    Environment variables (resolved in order):
+      INTELLI_GITHUB_COPILOT_TOKEN, GITHUB_COPILOT_TOKEN, GITHUB_TOKEN
+    """
+    provider = 'github_copilot'
+    DEFAULT_MODEL = 'gpt-4o'
+    _TOKEN_EXCHANGE_URL = 'https://api.github.com/copilot_internal/v2/token'
+    _DEFAULT_BASE_URL = 'https://api.individual.githubcopilot.com'
+
+    # Available Copilot models (as of early 2026)
+    KNOWN_MODELS = [
+        'gpt-4o',
+        'gpt-4o-mini',
+        'gpt-4.1',
+        'gpt-4.1-mini',
+        'gpt-4.5',
+        'gpt-5',
+        'gpt-5-mini',
+        'o1',
+        'o1-mini',
+        'o3',
+        'o3-mini',
+        'o4-mini',
+        'claude-sonnet-4.5',
+        'claude-sonnet-4.6',
+    ]
+
+    # In-memory Copilot token cache: { github_token_hash -> (copilot_token, base_url, expires_at_ms) }
+    _cache: Dict[str, tuple] = {}
+
+    def is_available(self) -> bool:
+        return bool(_resolve_key('github_copilot', [
+            'GITHUB_COPILOT_TOKEN', 'GITHUB_TOKEN',
+        ]))
+
+    def _get_default_model(self) -> str:
+        return ProviderSettingsStore.get('github_copilot').get('model_id') or self.DEFAULT_MODEL
+
+    @staticmethod
+    def _parse_proxy_ep(copilot_token: str) -> Optional[str]:
+        """Extract proxy-ep from the Copilot token and convert to api.* URL."""
+        import re as _re
+        m = _re.search(r'(?:^|;)\s*proxy-ep=([^;\s]+)', copilot_token, _re.IGNORECASE)
+        if not m:
+            return None
+        ep = m.group(1).strip()
+        # Convert proxy.* -> api.*
+        host = ep.replace('https://', '').replace('http://', '')
+        host = _re.sub(r'^proxy\.', 'api.', host, flags=_re.IGNORECASE)
+        return f'https://{host}' if host else None
+
+    def _resolve_copilot_token(self, github_token: str) -> tuple:
+        """Exchange a GitHub token for a short-lived Copilot API token.
+
+        Returns (copilot_token, base_url).  Caches result until 5 min before expiry.
+        """
+        import hashlib as _hashlib
+        import time as _time
+
+        key = _hashlib.sha256(github_token.encode()).hexdigest()[:16]
+        now_ms = int(_time.time() * 1000)
+
+        if key in self._cache:
+            cop_tok, base_url, expires_at = self._cache[key]
+            if expires_at - now_ms > 5 * 60 * 1000:  # more than 5 min remaining
+                return cop_tok, base_url
+
+        # Exchange with GitHub
+        self._check_requests()
+        resp = _requests.get(
+            self._TOKEN_EXCHANGE_URL,
+            headers={
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {github_token}',
+                'Editor-Version': 'vscode/1.97.0',
+                'Editor-Plugin-Version': 'copilot/1.249.0',
+                'User-Agent': 'GitHubCopilotChat/0.24.0',
+            },
+            timeout=15,
+        )
+        if not resp.ok:
+            raise RuntimeError(
+                f'GitHub Copilot token exchange failed: HTTP {resp.status_code} — '
+                'Check that your GitHub token has the "copilot" scope.'
+            )
+        data = resp.json()
+        cop_tok = data.get('token', '')
+        if not cop_tok:
+            raise RuntimeError('Copilot token exchange returned empty token')
+
+        # expires_at is a unix timestamp (seconds)
+        raw_exp = data.get('expires_at', 0)
+        expires_at_ms = int(raw_exp) * 1000 if raw_exp < 10_000_000_000 else int(raw_exp)
+
+        base_url = self._parse_proxy_ep(cop_tok) or self._DEFAULT_BASE_URL
+
+        # Whitelist the base URL dynamically
+        p = _urlparse.urlparse(base_url)
+        origin = f'{p.scheme}://{p.netloc}'
+        if origin not in _OUTBOUND_ALLOWLIST:
+            _OUTBOUND_ALLOWLIST.append(origin)
+
+        self._cache[key] = (cop_tok, base_url, expires_at_ms)
+        return cop_tok, base_url
+
+    def chat_complete(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = '',
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if not model:
+            model = self._get_default_model()
+        self._check_requests()
+        github_token = _resolve_key('github_copilot', [
+            'GITHUB_COPILOT_TOKEN', 'GITHUB_TOKEN',
+        ])
+        if not github_token:
+            raise RuntimeError('GitHub Copilot token not configured')
+
+        cop_tok, base_url = self._resolve_copilot_token(github_token)
+        _check_outbound_url(base_url)
+
+        # o1/o3/o4-family models don't accept a temperature parameter
+        _o_series = model.startswith(('o1', 'o3', 'o4'))
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
+
+        # Normalise messages: Copilot does not support vision content arrays.
+        # If any message has a list content, flatten to text-only.
+        def _flatten_content(c: Any) -> str:
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                parts = []
+                for item in c:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        parts.append(item.get('text', ''))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                return '\n'.join(p for p in parts if p)
+            return str(c) if c is not None else ''
+
+        normalised_msgs = [
+            {**m, 'content': _flatten_content(m.get('content'))}
+            if isinstance(m.get('content'), list)
+            else m
+            for m in messages
+        ]
+
+        body: Dict[str, Any] = {
+            'model': model,
+            'messages': normalised_msgs,
+            'max_tokens': max_tokens,
+            **oai_kwargs,
+        }
+        if not _o_series:
+            body['temperature'] = temperature
+
+        resp = _requests.post(
+            f'{base_url}/chat/completions',
+            headers={
+                'Authorization': f'Bearer {cop_tok}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                # Must look like a real Copilot-enabled editor
+                'Copilot-Integration-Id': 'vscode-chat',
+                'Editor-Version': 'vscode/1.97.0',
+                'Editor-Plugin-Version': 'copilot-chat/0.24.0',
+                'User-Agent': 'GitHubCopilotChat/0.24.0',
+                'openai-intent': 'conversation-panel',
+            },
+            json=body,
+            timeout=60,
+        )
+        if not resp.ok:
+            import logging as _logging
+            _log = _logging.getLogger('intelli.copilot')
+            # Summarise each message: role + content type + length
+            msg_summary = [
+                {
+                    'role': m.get('role'),
+                    'content_type': type(m.get('content')).__name__,
+                    'content_len': len(str(m.get('content', ''))),
+                }
+                for m in normalised_msgs
+            ]
+            _log.warning(
+                'Copilot %s — model=%s body_keys=%s messages=%s resp=%s',
+                resp.status_code, model, list(body.keys()), msg_summary, resp.text[:800],
+            )
+            raise RuntimeError(f'GitHub Copilot API error {resp.status_code}: {resp.text[:800]}')
+        data = resp.json()
+        if not data.get('choices'):
+            raise RuntimeError(f'GitHub Copilot returned no choices: {str(data)[:400]}')
+        choice = data['choices'][0]['message']['content']
+        return self._standard_reply(choice, data.get('model', model), data.get('usage'))
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -386,6 +674,7 @@ _ADAPTERS: Dict[str, BaseAdapter] = {
     'anthropic': AnthropicAdapter(),
     'openrouter': OpenRouterAdapter(),
     'ollama': OllamaAdapter(),
+    'github_copilot': GitHubCopilotAdapter(),
 }
 
 

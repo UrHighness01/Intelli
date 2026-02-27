@@ -44,6 +44,7 @@ def token(client):
 def _mock_adapter(content='Hello world test response', provider='openai', model='gpt-4o-mini'):
     adapter = MagicMock()
     adapter.is_available.return_value = True
+    adapter.last_result_meta = {}
     adapter.chat_complete.return_value = {
         'content': content,
         'model': model,
@@ -61,7 +62,7 @@ class TestChatCompleteNonStreaming:
     def test_returns_json_by_default(self, client, token):
         """stream=false returns Content-Type application/json as before."""
         adapter = _mock_adapter('Hello JSON world')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'hi'}]},
@@ -75,7 +76,7 @@ class TestChatCompleteNonStreaming:
     def test_stream_false_explicit_returns_json(self, client, token):
         """stream=false explicit returns JSON unchanged."""
         adapter = _mock_adapter('Explicit false')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=false',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'hi'}]},
@@ -100,7 +101,7 @@ class TestChatCompleteStreaming:
     def test_returns_event_stream_content_type(self, client, token):
         """?stream=true must respond with text/event-stream."""
         adapter = _mock_adapter('streaming test')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'hi'}]},
@@ -112,7 +113,7 @@ class TestChatCompleteStreaming:
     def test_stream_contains_data_lines(self, client, token):
         """Response body must contain 'data: ' lines."""
         adapter = _mock_adapter('Hello world')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'hi'}]},
@@ -125,7 +126,7 @@ class TestChatCompleteStreaming:
     def test_stream_final_event_has_done_true(self, client, token):
         """Last SSE data event must have done=true."""
         adapter = _mock_adapter('Hello world from stream')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'test'}]},
@@ -140,7 +141,7 @@ class TestChatCompleteStreaming:
         """Final SSE event must carry the full content from the adapter."""
         full_content = 'This is the complete answer from the model'
         adapter = _mock_adapter(full_content)
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'q'}]},
@@ -154,7 +155,7 @@ class TestChatCompleteStreaming:
     def test_stream_token_events_have_done_false(self, client, token):
         """Intermediate token events must have done=false."""
         adapter = _mock_adapter('one two three')  # 3 tokens
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'go'}]},
@@ -172,7 +173,7 @@ class TestChatCompleteStreaming:
         """Concatenating all token events must equal the final content."""
         full_content = 'alpha beta gamma delta'
         adapter = _mock_adapter(full_content)
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'q'}]},
@@ -205,7 +206,7 @@ class TestChatCompleteStreaming:
         adapter = MagicMock()
         adapter.is_available.return_value = True
         adapter.chat_complete.side_effect = RuntimeError('upstream failure')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'q'}]},
@@ -220,7 +221,7 @@ class TestChatCompleteStreaming:
     def test_stream_cache_headers_present(self, client, token):
         """SSE response must carry Cache-Control: no-cache."""
         adapter = _mock_adapter('hi there')
-        with patch('app.get_adapter', return_value=adapter):
+        with patch('app._FailoverAdapter', return_value=adapter):
             r = client.post(
                 '/chat/complete?stream=true',
                 json={'provider': 'openai', 'messages': [{'role': 'user', 'content': 'hi'}]},

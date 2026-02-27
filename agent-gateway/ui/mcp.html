@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — MCP Servers</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --blue:     #60a5fa;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 16px;
+    }
+    header a.back { color: var(--muted); text-decoration: none; font-size: .85rem; }
+    header a.back:hover { color: var(--accent); }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header .sub { color: var(--muted); font-size: .82rem; margin-left: auto; }
+
+    main { padding: 24px 28px; max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+    /* Auth */
+    #auth-panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    #auth-panel label { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+    #token-input {
+      flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 12px; color: var(--text);
+      font-family: monospace; font-size: .85rem; outline: none;
+    }
+    #token-input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 7px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.danger    { background: #7f2020; color: var(--text); }
+    button.warning   { background: #7a5c1c; color: var(--text); }
+    button:disabled  { opacity: .4; cursor: default; }
+
+    /* Panel */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .panel-header h3 { font-size: .95rem; font-weight: 600; }
+    .panel-body { padding: 18px; }
+
+    /* Server cards list */
+    #server-list { display: flex; flex-direction: column; gap: 12px; }
+    .srv-card {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px 16px; display: flex; align-items: flex-start; gap: 14px;
+    }
+    .srv-status {
+      width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0;
+    }
+    .srv-status.ready    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .srv-status.error    { background: var(--red); }
+    .srv-status.starting { background: var(--yellow); }
+    .srv-status.stopped  { background: var(--muted); }
+
+    .srv-info { flex: 1; min-width: 0; }
+    .srv-name { font-size: .95rem; font-weight: 600; word-break: break-all; }
+    .srv-cmd  { font-family: monospace; font-size: .75rem; color: var(--muted); margin-top: 3px; word-break: break-all; }
+    .srv-meta { font-size: .75rem; color: var(--muted); margin-top: 4px; }
+    .srv-meta .chip {
+      display: inline-block; background: var(--border); border-radius: 4px;
+      padding: 1px 6px; margin-right: 6px; font-size: .7rem;
+    }
+    .srv-tools {
+      margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px;
+    }
+    .tool-tag {
+      background: #2a2d4a; border: 1px solid var(--border); border-radius: 4px;
+      padding: 2px 7px; font-size: .7rem; font-family: monospace; color: var(--blue);
+    }
+    .srv-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    /* Add form */
+    .add-form { display: flex; flex-direction: column; gap: 12px; }
+    .form-row { display: flex; flex-direction: column; gap: 5px; }
+    .form-row label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+    .form-row input, .form-row textarea {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 12px; color: var(--text); font-size: .85rem; outline: none; resize: vertical;
+    }
+    .form-row input:focus, .form-row textarea:focus { border-color: var(--accent); }
+    .form-hint { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+    .form-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+    /* Presets */
+    .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .preset-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); font-size: .78rem; padding: 5px 12px; border-radius: 6px;
+    }
+    .preset-btn:hover { border-color: var(--accent); }
+
+    /* Empty / error states */
+    .empty { color: var(--muted); font-size: .85rem; text-align: center; padding: 24px; }
+    .error-banner {
+      background: #3a1515; border: 1px solid var(--red); border-radius: 6px;
+      padding: 10px 14px; font-size: .82rem; color: var(--red); display: none;
+    }
+    .success-banner {
+      background: #153a20; border: 1px solid var(--green); border-radius: 6px;
+      padding: 10px 14px; font-size: .82rem; color: var(--green); display: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">← Hub</a>
+  <h1>⚡ MCP Servers</h1>
+  <span class="sub" id="tool-count-sub"></span>
+</header>
+
+<main>
+  <!-- Auth -->
+  <div id="auth-panel">
+    <label for="token-input">Bearer token</label>
+    <input id="token-input" type="password" placeholder="paste your token…" />
+    <button onclick="loadServers()">Connect</button>
+  </div>
+
+  <div id="error-banner" class="error-banner"></div>
+  <div id="success-banner" class="success-banner"></div>
+
+  <!-- Running servers -->
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Running Servers</h3>
+      <div style="display:flex;gap:8px;">
+        <button class="secondary" onclick="loadServers()">↻ Refresh</button>
+        <button class="warning" onclick="reloadConfig()">⟳ Reload Config</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div id="server-list"><div class="empty">Connect with a token to view servers.</div></div>
+    </div>
+  </div>
+
+  <!-- Add server -->
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Add MCP Server</h3>
+    </div>
+    <div class="panel-body">
+      <!-- Quick presets -->
+      <div class="preset-row">
+        <button class="preset-btn" onclick="fillPreset('filesystem')">📁 Filesystem</button>
+        <button class="preset-btn" onclick="fillPreset('github')">🐙 GitHub</button>
+        <button class="preset-btn" onclick="fillPreset('brave-search')">🔍 Brave Search</button>
+        <button class="preset-btn" onclick="fillPreset('postgres')">🐘 Postgres</button>
+        <button class="preset-btn" onclick="fillPreset('puppeteer')">🤖 Puppeteer</button>
+      </div>
+
+      <div class="add-form">
+        <div class="form-row">
+          <label>Server Name (unique ID)</label>
+          <input id="f-name" type="text" placeholder="filesystem" />
+        </div>
+        <div class="form-row">
+          <label>Command</label>
+          <input id="f-cmd" type="text" placeholder="npx" />
+          <div class="form-hint">Executable to run. Must be in PATH (e.g. npx, uvx, python).</div>
+        </div>
+        <div class="form-row">
+          <label>Arguments (one per line)</label>
+          <textarea id="f-args" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/home/user/docs"></textarea>
+        </div>
+        <div class="form-row">
+          <label>Environment Variables (JSON object, optional)</label>
+          <textarea id="f-env" rows="2" placeholder='{"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}'></textarea>
+        </div>
+        <div class="form-actions">
+          <button onclick="addServer()">Add &amp; Start</button>
+          <button class="secondary" onclick="clearForm()">Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+  const BASE = window.location.origin;
+  const PRESETS = {
+    'filesystem': {
+      name: 'filesystem',
+      command: 'npx',
+      args: '-y\n@modelcontextprotocol/server-filesystem\n/home',
+      env: '{}'
+    },
+    'github': {
+      name: 'github',
+      command: 'npx',
+      args: '-y\n@modelcontextprotocol/server-github',
+      env: '{"GITHUB_PERSONAL_ACCESS_TOKEN": ""}'
+    },
+    'brave-search': {
+      name: 'brave-search',
+      command: 'npx',
+      args: '-y\n@modelcontextprotocol/server-brave-search',
+      env: '{"BRAVE_API_KEY": ""}'
+    },
+    'postgres': {
+      name: 'postgres',
+      command: 'npx',
+      args: '-y\n@modelcontextprotocol/server-postgres\npostgresql://localhost/mydb',
+      env: '{}'
+    },
+    'puppeteer': {
+      name: 'puppeteer',
+      command: 'npx',
+      args: '-y\n@modelcontextprotocol/server-puppeteer',
+      env: '{}'
+    },
+  };
+
+  function token() {
+    return localStorage.getItem('gw_token') || document.getElementById('token-input').value.trim();
+  }
+
+  function headers() {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() };
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.textContent = msg; el.style.display = 'block';
+    document.getElementById('success-banner').style.display = 'none';
+    setTimeout(() => el.style.display = 'none', 6000);
+  }
+
+  function showSuccess(msg) {
+    const el = document.getElementById('success-banner');
+    el.textContent = msg; el.style.display = 'block';
+    document.getElementById('error-banner').style.display = 'none';
+    setTimeout(() => el.style.display = 'none', 4000);
+  }
+
+  async function loadServers() {
+    const t = token();
+    if (t) localStorage.setItem('gw_token', t);
+    try {
+      const r = await fetch(`${BASE}/mcp/servers`, { headers: headers() });
+      if (!r.ok) { showError(`HTTP ${r.status} — check token`); return; }
+      const data = await r.json();
+      renderServers(data.servers || []);
+
+      // Update tool count
+      const tr = await fetch(`${BASE}/mcp/tools`, { headers: headers() });
+      if (tr.ok) {
+        const td = await tr.json();
+        document.getElementById('tool-count-sub').textContent = `${td.count || 0} MCP tool(s) active`;
+      }
+    } catch (e) {
+      showError('Cannot reach gateway: ' + e.message);
+    }
+  }
+
+  function renderServers(servers) {
+    const list = document.getElementById('server-list');
+    if (!servers.length) {
+      list.innerHTML = '<div class="empty">No MCP servers configured. Add one below.</div>';
+      return;
+    }
+    list.innerHTML = servers.map(srv => {
+      const statusCls = srv.status;
+      const uptime = srv.uptime_s != null ? `${srv.uptime_s}s uptime` : '';
+      const toolTags = (srv.tools || []).map(t =>
+        `<span class="tool-tag">${srv.name}__${t}</span>`
+      ).join('');
+      return `
+        <div class="srv-card" id="srv-${srv.name}">
+          <div class="srv-status ${statusCls}" title="${srv.status}"></div>
+          <div class="srv-info">
+            <div class="srv-name">${srv.name}</div>
+            <div class="srv-cmd">${srv.command} ${(srv.args || []).join(' ')}</div>
+            <div class="srv-meta">
+              <span class="chip">${srv.status}</span>
+              <span class="chip">${srv.tool_count} tool(s)</span>
+              ${uptime ? `<span class="chip">${uptime}</span>` : ''}
+              ${srv.error ? `<span style="color:var(--red)">${srv.error}</span>` : ''}
+            </div>
+            ${toolTags ? `<div class="srv-tools">${toolTags}</div>` : ''}
+          </div>
+          <div class="srv-actions">
+            <button class="warning" onclick="restartServer('${srv.name}')">↺</button>
+            <button class="danger" onclick="removeServer('${srv.name}')">✕</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function reloadConfig() {
+    try {
+      const r = await fetch(`${BASE}/mcp/reload`, { method: 'POST', headers: headers() });
+      const data = await r.json();
+      showSuccess(`Reloaded — started: [${(data.started||[]).join(', ')||'none'}]`
+        + (data.errors?.length ? ` | errors: ${data.errors.join(', ')}` : ''));
+      await loadServers();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  async function restartServer(name) {
+    try {
+      const r = await fetch(`${BASE}/mcp/servers/${name}/restart`, { method: 'POST', headers: headers() });
+      if (!r.ok) { showError(`Restart failed: HTTP ${r.status}`); return; }
+      showSuccess(`${name} restarted`);
+      await loadServers();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  async function removeServer(name) {
+    if (!confirm(`Remove MCP server "${name}"? This will also unregister its tools.`)) return;
+    try {
+      const r = await fetch(`${BASE}/mcp/servers/${name}`, { method: 'DELETE', headers: headers() });
+      if (!r.ok) { showError(`Remove failed: HTTP ${r.status}`); return; }
+      showSuccess(`${name} removed`);
+      await loadServers();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  async function addServer() {
+    const name = document.getElementById('f-name').value.trim();
+    const cmd  = document.getElementById('f-cmd').value.trim();
+    const args = document.getElementById('f-args').value.trim()
+                   .split('\n').map(s => s.trim()).filter(Boolean);
+    let env = {};
+    const envRaw = document.getElementById('f-env').value.trim();
+    if (envRaw) {
+      try { env = JSON.parse(envRaw); }
+      catch { showError('Environment must be valid JSON object'); return; }
+    }
+    if (!name || !cmd) { showError('Name and Command are required'); return; }
+
+    try {
+      const r = await fetch(`${BASE}/mcp/servers`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ name, command: cmd, args, env }),
+      });
+      const data = await r.json();
+      if (!r.ok) { showError(data.detail || `HTTP ${r.status}`); return; }
+      showSuccess(`Server "${name}" started — ${data.tool_count || 0} tool(s) registered`);
+      clearForm();
+      await loadServers();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  function fillPreset(key) {
+    const p = PRESETS[key];
+    if (!p) return;
+    document.getElementById('f-name').value = p.name;
+    document.getElementById('f-cmd').value  = p.command;
+    document.getElementById('f-args').value = p.args;
+    document.getElementById('f-env').value  = p.env || '{}';
+  }
+
+  function clearForm() {
+    ['f-name','f-cmd','f-args','f-env'].forEach(id => document.getElementById(id).value = '');
+  }
+
+  // Auto-load if token already saved
+  const saved = localStorage.getItem('gw_token');
+  if (saved) { document.getElementById('token-input').value = saved; loadServers(); }
+</script>
+</body>
+</html>

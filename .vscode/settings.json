@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/agent-gateway/.venv/bin/python",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/agent-gateway"
+    ],
+    "python.terminal.activateEnvironment": true
+}

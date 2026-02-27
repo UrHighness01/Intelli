@@ -12,9 +12,9 @@ body {
   overflow: hidden;
 }
 .logo {
-  font-size: 3rem;
-  margin-bottom: 16px;
-  animation: pulse 1.8s ease-in-out infinite;
+  margin-bottom: 20px;
+  animation: pulse 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 18px rgba(108, 99, 255, 0.55));
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }

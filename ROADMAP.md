@@ -1,481 +1,155 @@
-# Intelli Browser Roadmap
+# Intelli — Implementation Status
 
-A practical roadmap for building "Intelli": a next-gen browser combining Brave-level security with native AI/agent integration, HTML context feeding, and agent orchestration.
-
-## Overview
-- Goal: ship a secure, extensible browser where AI/agents are first-class citizens—persistent panels, local/remote model routing, and a secure context bridge that feeds DOM snapshots to agents safely and transparently.
-- Principles: security-by-default, modular architecture, user control & transparency, and support for hybrid (local+cloud) models.
+All core features are fully implemented. This document summarises what is built,
+grouped by category, and lists the small remaining backlog at the end.
 
 ---
 
-## Phase 1 — Core Engine Foundation
-- Fork or embed Chromium to leverage compatibility, performance, and security.
-- Implement Brave-style privacy features: tracker/ad-blocking, fingerprint randomization, per-site isolated profiles, and an opt-in crypto wallet.
-- Design an extensible architecture: modular services (agent gateway, context bridge, plugin SDK, sandboxing layer).
+## Core Gateway Infrastructure
 
-Deliverables:
-- Minimal Chromium-based shell with a persistent sidebar area reserved for the AI panel.
-- Privacy defaults and profile isolation implemented.
-
----
-
-## Phase 2 — Embedded AI & Agent System
-- Add a native, persistent chatbox panel (sidebar) integrated into the browser UI (not an extension).
-- Implement provider-agnostic LLM routing: support OpenAI, OpenRouter, Anthropic/Claude, Google Gemini, Ollama, and local models. Securely store API keys (browser OS secure storage / encrypted local vault).
-- Launch a local Agent Gateway on browser start (OpenClaw-compatible API if feasible). The gateway exposes a local HTTP/IPC endpoint for agents and orchestrators.
-
-Deliverables:
-- Sidebar UI + provider selector and secure key management.
-- Local agent gateway process and basic agent lifecycle management (start/stop/list).
-
----
-
-## Phase 3 — Contextual Awareness (HTML Feeding)
-- Tab Context Bridge: capture structured snapshots of the active tab (DOM tree, meta, URL, selected text, frame origins, resource metadata).
-- Expose that context to the agent gateway via IPC or a local HTTP API with strict per-site permissions.
-- Implement privacy controls: global pause, per-site allow/deny, automatic masking of known sensitive fields (password inputs, CVVs). Maintain an audit log of what was shared.
-
-Deliverables:
-- Secure tab-to-agent feed with permission UI and redaction options.
+| Feature | Module | Status |
+|---|---|---|
+| FastAPI HTTP gateway | `app.py` | ✅ Done |
+| Schema validation + supervisor pipeline | `supervisor.py` | ✅ Done |
+| Manifest-driven approval routing | `supervisor.py` + `tools/capability.py` | ✅ Done |
+| Bearer token auth (PBKDF2, access/refresh/revoke) | `auth.py` | ✅ Done |
+| RBAC + per-user tool scoping | `auth.py` | ✅ Done |
+| Emergency kill-switch | `app.py` | ✅ Done |
+| Rate limiting — per-IP + per-user | `rate_limit.py` | ✅ Done |
+| Content filter (literal + regex deny-rules) | `content_filter.py` | ✅ Done |
+| Approval queue + SSE real-time stream | `supervisor.py` | ✅ Done |
+| Approval auto-reject timeout | `supervisor.py` | ✅ Done |
+| Approval-queue depth alerting | `app.py` | ✅ Done |
+| Approval webhooks (HMAC signing + retry) | `webhooks.py` | ✅ Done |
+| Prometheus metrics + per-tool p50 latency | `metrics.py` | ✅ Done |
+| Append-only audit log (JSONL) | `audit.log` | ✅ Done |
+| Encrypted audit log (AES-256-GCM) | `app.py` | ✅ Done |
+| CORS restriction (`CORSMiddleware`) | `app.py` | ✅ Done |
+| Outbound provider allowlist | `providers/adapters.py` | ✅ Done |
+| GDPR/CCPA data export + erasure | `consent_log.py` | ✅ Done |
 
 ---
 
-## Phase 4 — Agent Tools, Actions & Add-on Creation
-- Tool Call Proxy: map agent tool calls to browser APIs (file ops, script execution, automated click/scroll/input replay) behind a validated gateway.
-- One-click Addon Creation: let the AI scaffold and inject scoped JS/CSS mini-addons (user must approve and inspect before activation). Use signed sandboxed registries for sharing.
-- Task/Goal Management: agents can own multi-step goals, persist progress, and run sub-tasks using tab context (e.g., summarize page PDF, draft reply to thread, autofill form).
+## Agent Subsystems
 
-Deliverables:
-- Tool proxy API with validation layer; addon scaffolder with approval flow.
-
----
-
-## Phase 5 — Multi-Agent Orchestration (Optional / Advanced)
-- Agent lifecycle manager: create/kill/inspect agents and subagents; control resource caps and execution windows.
-- Per-agent memory and storage: isolated caches, optional long-term memory with per-domain scoping and purge controls.
-- Autonomous exploration (opt-in): agents may suggest or execute browsing tasks with explicit user consent and a replayable audit trail.
-
-Deliverables:
-- Agent dashboard with logs, memory inspector, and controls for autonomy and scheduling.
-
----
-
-## Phase 6 — Developer & Power User Features
-- Plugin/Add-on SDK: an AI-native SDK for adding panels, tools, and connectors (supports JS and WASM; optional Python worker sandbox).
-- Dev console: event streams (tab events, agent logs, tool results) and quick replay/debug utilities.
-- Scripting panel: sandboxed JS/Python REPL for experimental automation; require explicit user approval for persistence and network access.
-
-Deliverables:
-- SDK docs, example plugins, and built-in dev console panel.
+| Feature | Module | Status |
+|---|---|---|
+| Agent memory (key-value + TTL + export/import) | `agent_memory.py` | ✅ Done |
+| Vector / semantic memory | `memory_store.py` | ✅ Done |
+| Context compaction (auto-summarise) | `compaction.py` | ✅ Done |
+| Task scheduler (recurring tool-calls) | `scheduler.py` | ✅ Done |
+| Provider key management (store / rotate / TTL) | `providers/key_rotation.py` | ✅ Done |
+| Provider failover (auto-fallback) | `failover.py` | ✅ Done |
+| Chat proxy streaming (SSE) | `app.py` | ✅ Done |
+| Consent / context timeline | `consent_log.py` | ✅ Done |
+| Tab snapshot (agent reads active page) | `tab_bridge.py` | ✅ Done |
+| Addon system (agent-written JS injection) | `addons.py` | ✅ Done |
+| Personas (named agents with system prompts) | `personas.py` | ✅ Done |
+| Session history | `sessions.py` | ✅ Done |
+| Agent-to-agent routing (A2A) | `a2a.py` | ✅ Done |
+| Sub-agent spawning and orchestration | `tools/tool_runner.py` | ✅ Done |
+| MCP client (Model Context Protocol) | `mcp_client.py` | ✅ Done |
+| Canvas / structured output | `canvas_manager.py` | ✅ Done |
+| Voice I/O (STT + TTS) | `voice.py` | ✅ Done |
+| Plugin system (pip / zip / GitHub install) | `plugin_loader.py` | ✅ Done |
+| Workspace / skill ecosystem | `workspace_manager.py` | ✅ Done |
 
 ---
 
-## Phase 7 — UX, Privacy, and Governance
-- Security-first defaults: per-site agent permissions, local-model-only modes, and requirement for explicit consent before sending context off-device.
-- Transparency: detailed logs of context sent to agents (with redact/recall UI), and a permissioned timeline for agent actions.
-- Customizability: themes, repositionable agent panels, voice input, and accessibility features.
+## Notification & Data Features
 
-Deliverables:
-- Privacy dashboard, logs UI, and consent flows.
-
----
-
-## Extra Ideas
-- Built-in Web Automation API: agents can request event replays (click, scroll, input) in a constrained, auditable sandbox.
-- Invisible/local-only mode: run agents exclusively on local models with no external network.
-- Contextive Memory: per-site memory summaries that can be enabled/disabled; optionally encrypted at rest.
-- Crowdsourced mini-addons repository with user moderation and signing.
+| Feature | Module | Status |
+|---|---|---|
+| Outbound push notifications (Telegram / Discord / Slack) | `notifier.py` | ✅ Done |
+| Notes / local knowledge base (Markdown) | `notes.py` | ✅ Done |
+| Secure credential store (OS keychain + AES-256-GCM) | `credential_store.py` | ✅ Done |
+| Page diff watcher (change monitoring) | `watcher.py` | ✅ Done |
+| Analytics (usage stats + export) | `ui/analytics.html` | ✅ Done |
 
 ---
 
-## Critical Cautions & Design Constraints
-- Never allow unchecked code execution. All auto-generated scripts/addons must be previewed, signed, and sandboxed.
-- Minimize attack surface: sandbox agent processes, restrict network/file APIs by default, perform static/heuristic checks on generated code.
-- Modular provider API: do not tie to a single LLM vendor. Provide an abstraction layer for function-calling and tool schemas.
+## Tools
+
+| Tool | Module | Status |
+|---|---|---|
+| Browser automation (click, screenshot, DOM) | `tools/browser_tools.py` | ✅ Done |
+| Web fetch, search, summarise | `tools/web_tools.py` | ✅ Done |
+| PDF reader (text + structure) | `tools/pdf_reader.py` | ✅ Done |
+| Video frame analysis (ffmpeg + vision) | `tools/video_frames.py` | ✅ Done |
+| Image upload / multimodal | `tools/tool_runner.py` | ✅ Done |
+| Code generation, execution, linting | `tools/coding_tools.py` | ✅ Done |
+| Capability manifest verifier | `tools/capability.py` | ✅ Done |
 
 ---
 
-## Reliability with Local Models — Supervisor Pattern (Hybrid Strategy)
-Local models (<=13B) struggle with strict function-call formatting, schema adherence, and long multi-step tool orchestration. To make agent tooling reliable across model scales:
+## Sandboxing & Security Hardening
 
-1. Use a hybrid stack:
-   - Local model: general conversation, summarization, and contextual framing.
-   - Cloud/bigger model or a specialized supervisor: handle strict function/tool-calling turns and validation.
-
-2. Agent Supervisor Layer:
-   - The local model outputs suggestions in pseudo-structured form.
-   - Supervisor parses, validates, and converts to canonical tool calls; it enforces schemas, escapes values, and checks preconditions.
-   - If validation fails, the supervisor returns a deterministic error token and asks the model to retry or reformat.
-
-3. Optional lightweight alternatives:
-   - Small deterministic validators (regex + JSON schema) to correct common formatting issues without cloud calls.
-   - Few-shot finetuning on tool-call examples for local models, or use a small on-premise verifier finetuned for your tool schema.
-
-Outcome: this hybrid pipeline ensures reliable tool usage while allowing most conversational work to remain local and private when desired.
+| Feature | Module | Status |
+|---|---|---|
+| Subprocess sandbox worker + action whitelist | `sandbox/worker.py` | ✅ Done |
+| Persistent worker pool with health checks | `sandbox/pool.py` | ✅ Done |
+| Docker runner (`--cap-drop ALL`, seccomp, read-only FS) | `sandbox/docker_runner.py` | ✅ Done |
+| seccomp profile for Linux worker | `sandbox/seccomp-worker.json` | ✅ Done |
+| Worker health + validation-error-rate alerting | `app.py` | ✅ Done |
+| Pinned dependency hashes | `requirements.lock` | ✅ Done |
+| Signed releases (Sigstore keyless) | `.github/workflows/release.yml` | ✅ Done |
+| pip-audit + SBOM in CI | `.github/workflows/ci.yml` | ✅ Done |
 
 ---
 
-## Next Steps / Implementation Roadmap
-1. Finalize the architecture diagram (agent gateway, IPC, sandboxing boundaries).
-2. Prototype the Agent Gateway API and Tab Context Bridge with strict permissions.
-3. Implement the agent supervisor prototype (small validator service + schema enforcement).
-4. Build the sidebar UI and provider key manager.
-5. Iterate on privacy UX and add-on approval flow.
+## Admin UI (24 pages)
+
+| Page | Status |
+|---|---|
+| index, status, audit, approvals, users | ✅ Done |
+| providers, schedule, metrics, memory, consent | ✅ Done |
+| content-filter, rate-limits, webhooks, capabilities | ✅ Done |
+| tab_permission, chat, canvas, personas, mcp | ✅ Done |
+| sessions, analytics, watchers, setup, workspace | ✅ Done |
 
 ---
 
-## Notes
-- This document is a living roadmap. Prioritize security and user consent throughout implementation. The hybrid supervisor pattern is recommended to make agent tooling robust across both local and cloud LLMs.
+## CLI (`gateway_ctl.py`)
 
-If you want, I can now:
-- produce a detailed architecture diagram and API spec for the Agent Gateway and Tab Context Bridge,
-- or scaffold an initial `agent-gateway` prototype (local HTTP server + schema validator).
-
----
-
-Created by: Intelli design draft
-
-
-## Implementation status (updated 2026-02-21 → refreshed this session)
-
-- [x] Prototype Agent Gateway: local FastAPI gateway (`agent-gateway/`) with schema validation, supervisor pipeline, and tests.
-- [x] Review and refine roadmap with hybrid pipeline sketch (this document now includes a detailed hybrid supervisor design).
-- [x] Tab Context Bridge: DOM snapshotter with input-field redaction and a preview UI (`agent-gateway/tab_bridge.py`, `agent-gateway/ui/tab_permission.html`).
-- [x] Schema validator with deterministic error tokens: Supervisor now emits structured validation errors with deterministic tokens and feedback.
-- [x] Approval workflow: approval API endpoints, minimal approval UI, and approval queue tests.
-- [x] Per-tool schema registry: example JSON schemas and runtime enforcement in the supervisor.
-- [x] Persisted redaction rules + audit log: redaction rules persisted to `agent-gateway/redaction_rules.json`, audit entries appended to `agent-gateway/audit.log`, and admin-protected endpoints.
-- [x] OS-backed user credential storage: passwords stored in the OS keyring when available, with safe fallback to local storage.
-- [x] Subprocess sandbox worker: `agent-gateway/sandbox/worker.py` and IPC integration in `agent-gateway/sandbox/proxy.py`.
-- [x] Worker lifecycle & health checks: `agent-gateway/sandbox/manager.py` and `/health/worker` + `/metrics` endpoints.
-- [x] Sandbox tests: `test_sandbox_worker.py`, `test_sandbox_manager.py`, `test_worker_health_api.py`.
-- [x] Import shim `agent_gateway/__init__.py` to allow package imports from the hyphenated folder.
-- [x] ProviderKeyStore resilient fallback: `keyring` optional with file-backed fallback.
-- [x] Auth system (RBAC): token-based auth (`/admin/login`, `/auth/refresh`, `/auth/revoke`) with PBKDF2 passwords, access/refresh token lifecycle, and role checks.
-- [x] Persistent token revocation: revoked tokens stored in `revoked_tokens.json` (SHA-256-hashed with expiry).
-- [x] Monitoring / metrics / audit export: Prometheus-format `/metrics` and authenticated `/admin/audit` JSON-lines export.
-- [x] SSE real-time approval stream: `/approvals/stream` with env-configurable poll interval and keepalive.
-- [x] Docker runner hardening: `--cap-drop ALL`, `no-new-privileges:true`, configurable seccomp profile, PID limit, and FD ulimit.
-- [x] CI/CD security hardening: SBOM generation and dependency scanning.
-- [x] Rate limiter: sliding-window per-client-IP rate limiter (`rate_limit.py`) wired into `/tools/call`, `/validate`, `/admin/login`, and `/chat/complete`; configurable via env vars.
-- [x] Risk scorer: heuristic risk scoring in `supervisor.py` (`compute_risk()`) — classifies tool calls as `low`/`medium`/`high` based on tool name, arg key patterns, traversal/injection signatures, and payload size; `high` calls queued for approval automatically.
-- [x] Provider adapters: concrete adapters for OpenAI, Anthropic, OpenRouter, and Ollama (`providers/adapters.py`) with unified `chat_complete()` interface.
-- [x] Provider key management API: `POST/GET/DELETE /admin/providers/{provider}/key`, `GET /providers` (admin-gated), and a `/chat/complete` proxy endpoint.
-- [x] Audit review UI: `ui/audit.html` — dark-mode HTML/JS viewer for `/admin/audit` with token login, event/actor/details filtering, and newest-first display.
-- [x] **Tool capability manifests + verifier**: 13 capability manifest JSON files (`schemas/capabilities/**/*.json`), `tools/capability.py` (CapabilityVerifier), wired into supervisor and app; `GET /tools/capabilities`; `AGENT_GATEWAY_ALLOWED_CAPS` env var; 403 on capability_denied.
-- [x] **Provider key TTL + rotation**: `providers/key_rotation.py` (KeyMetadata, store_key_with_ttl, rotate_key, list_expiring); wired into `POST /admin/providers/{provider}/key` (+ `ttl_days`), new `POST .../key/rotate`, `GET .../key/expiry`, `GET .../key/status` (+ expiry fields), `GET /admin/providers/expiring`.
-- [x] **Consent / context timeline**: `consent_log.py` (append-only JSONL, field-name-only logging); wired into `/tab/preview` (logs on every preview call); `GET /consent/timeline` + `DELETE /consent/timeline` admin endpoints; `ui/consent.html` dark-mode timeline viewer.
-- [x] **Signed-release CI workflow**: `.github/workflows/release.yml` — triggers on `v*` tags, runs test suite, generates SBOM (pip-licenses), runs pip-audit vulnerability scan, builds wheel+sdist, signs artifacts with Sigstore keyless signing, creates GitHub Release.
-- [x] **E2E integration tests**: `tests/test_e2e.py` — 25 tests covering full HTTP flows: auth, tool call pipeline, capability verifier, approval lifecycle, provider key lifecycle (store → rotate → expiry), audit trail, consent timeline, and rate limiter.
-- [x] **Unit tests for new modules**: `tests/test_capability.py` (35 assertions), `tests/test_consent_log.py` (20 assertions), `tests/test_key_rotation.py` (20 assertions), `tests/test_provider_api.py` extended with rotation/expiry tests.
-- [x] **Per-user scoped tool permissions**: `auth.py` — `get_user_allowed_tools()` / `set_user_allowed_tools()` against `users.json`; `GET /admin/users/{username}/permissions` and `PUT /admin/users/{username}/permissions` admin endpoints; enforced in `POST /tools/call` (403 `tool_not_permitted` when caller's token maps to a user with a restrict allow-list). 13 new tests in `tests/test_user_permissions.py`.
-- [x] **Agent kill-switch (emergency stop)**: `threading.Event()` kill-switch in `app.py`; `POST /admin/kill-switch` (activate with reason), `DELETE /admin/kill-switch` (deactivate), `GET /admin/kill-switch` (status) — all admin-gated; activation causes `/tools/call` to return 503; actions audited. 5 new tests in `tests/test_kill_switch.py`.
-- [x] **OpenAPI spec overhaul**: `openapi.yaml` expanded from 262 lines to full coverage of all 30+ endpoints: health, metrics, tool invocation, approvals/SSE, consent timeline, auth, kill-switch, per-user permissions, provider key management (store/rotate/expiry/delete), chat proxy, tab preview, and redaction rules — with complete request/response schemas and security declarations.
-- [x] **README overhaul**: comprehensive documentation including UI page URLs, full endpoint reference table (grouped by category), authentication guide, per-user permissions guide, kill-switch guide, capability system guide, provider key management guide, consent timeline guide, environment variables reference, persistent files reference, security model summary, and development quickstart.
-- [x] **Tests: 291 passing, 2 skipped** (up from 179; +112 new tests: 7 per-user rate-limit, 11 GDPR export, 94 fuzzer payloads).
-- [x] **Agent memory store** (Phase 5 — Per-agent memory and storage): `agent_memory.py` — thread-safe JSON-backed per-agent key-value store; path-traversal-safe agent-ID validation; `memory_get/set/delete/list/clear` and `list_agents()`; admin-gated REST API: `GET /agents`, `GET/POST/DELETE /agents/{id}/memory`, `DELETE /agents/{id}/memory/{key}`. 10 unit-level tests, 10 HTTP tests in `tests/test_agent_memory.py`.
-- [x] **Content moderation filter** (Abuse, Safety & Moderation): `content_filter.py` — configurable deny-list supporting literal and regex patterns; recursive string extraction from any JSON value; raises HTTP 403 `content_policy_violation` on match; patterns sourced from env var and persisted JSON file; runtime admin API: `GET/POST/DELETE /admin/content-filter/rules`, `POST /admin/content-filter/reload`; enforced in `POST /tools/call` (args) and `POST /chat/complete` (messages). 24 unit tests, 7 HTTP tests, 3 integration enforcement tests in `tests/test_content_filter.py`.
-- [x] **Metrics dashboard UI** (Monitoring & Observability): `ui/metrics.html` — dark-theme live dashboard matching existing UI style; polls `GET /metrics` (Prometheus text format) every 5 s; parses all metric/label/type/help lines; shows 6 summary cards (tool calls, validation errors, pending approvals, provider requests, provider errors, rate-limit hits); full metric table with name/labels/type/help/value columns and per-metric sparklines; client-side filter bar; session-stored Bearer token.
-- [x] **Memory key TTL/expiry**: `agent_memory.py` extended with per-key TTL — `memory_set()` now accepts `ttl_seconds`; values stored as `{"__v": value, "__exp": unix_ts}` wrapper; `_load_active()` prunes expired on every read; new `memory_prune(agent_id)` (remove only expired, returns count) and `memory_get_meta(agent_id, key)` (returns `{value, expires_at}`) functions; `app.py` updated: `MemoryUpsertRequest.ttl_seconds`, GET endpoint returns `expires_at`, new `POST /agents/{id}/memory/prune` (admin-gated). 14 new TTL unit tests + 3 HTTP tests in `tests/test_agent_memory.py` (54 total).
-- [x] **Agent memory browser UI**: `ui/memory.html` — dark-theme two-column admin browser; left panel lists agents (from `GET /agents`), right panel shows key-value table with Edit/Delete per row, Add form (key, value, optional TTL), Prune expired and Clear all buttons; expiry shown as relative time with color-coded warning (< 5 min) and expired states; inline editing (click Edit → input → Enter to save); toast notifications; sessionStorage Bearer token.
-- [x] **OpenAPI spec — new endpoints**: `openapi.yaml` extended with full definitions for: `GET /agents`, `GET/POST/DELETE /agents/{id}/memory`, `GET/DELETE /agents/{id}/memory/{key}`, `POST /agents/{id}/memory/prune`, `GET/POST /admin/content-filter/rules`, `DELETE /admin/content-filter/rules/{index}`, `POST /admin/content-filter/reload`; added `memory` and `content-filter` tags; `ContentFilterRule` schema in components.
-- [x] **Tests: 372 passing, 2 skipped** (up from 355; +17 new tests: 34 agent memory TTL/HTTP, +3 HTTP memory/prune).
-- [x] **Rate-limit admin API**: `rate_limit.py` extended with `get_config()`, `update_config(**kwargs)`, `usage_snapshot()` (runtime read/write of all six rate-limit globals without restart); new admin-gated REST endpoints: `GET /admin/rate-limits` (config + live per-client snapshot), `PUT /admin/rate-limits` (reconfigure at runtime, audited), `DELETE /admin/rate-limits/clients/{client_key}` (evict one IP), `DELETE /admin/rate-limits/users/{username}` (evict one user); `gateway_ctl.py` extended with `rate-limits status|set|reset-client|reset-user` sub-commands. 27 tests in `tests/test_rate_limit_admin.py`.
-- [x] **Provider health-check endpoint**: `GET /admin/providers/{provider}/health` (admin-gated) queries `ProviderKeyStore` for key presence and calls `adapter.is_available()`; returns `{'status': 'ok'|'no_key'|'unavailable', 'configured': bool, 'available': bool}`; 400 for unknown providers; `gateway_ctl.py` `provider-health <provider>` command. 9 tests in `tests/test_provider_health.py`.
-- [x] **Approval webhooks**: `webhooks.py` — registry of HTTP callback URLs notified on `approval.created`, `approval.approved`, `approval.rejected` events; persisted to `webhooks.json`; outbound delivery is fire-and-forget via `ThreadPoolExecutor` (urllib, no extra deps); admin-gated CRUD: `POST /admin/webhooks` (201, validates URL + events), `GET /admin/webhooks`, `GET /admin/webhooks/{id}`, `DELETE /admin/webhooks/{id}`; fire hooks integrated into `/approvals/{id}/approve`, `/approvals/{id}/reject`, and the `pending_approval` branch of `/tools/call`; `gateway_ctl.py` `webhooks list|add|delete` commands; `openapi.yaml` updated with all new paths + `Webhook`/`RateLimitConfig`/`BadRequest` components. 35 tests in `tests/test_webhooks.py`.
-- [x] **Tests: 443 passing, 2 skipped** (up from 372; +71 new tests: 27 rate-limit admin, 9 provider health, 35 webhooks).
-- [x] **GDPR/consent export API**: `GET /consent/export/{actor}` (data-subject access, all entries for an actor) and `DELETE /consent/export/{actor}` (right to erasure); backed by `export_actor_data()` / `erase_actor_data()` in `consent_log.py`; admin-gated and audited. 11 new tests in `tests/test_gdpr_export.py`.
-- [x] **Per-user rate limits**: per-username sliding-window quota (`check_user_rate_limit()`) in `rate_limit.py` with separate `_user_windows` dict; enforced in authenticated `POST /tools/call` and `POST /chat/complete`; configurable via `AGENT_GATEWAY_USER_RATE_LIMIT_REQUESTS` / `AGENT_GATEWAY_USER_RATE_LIMIT_WINDOW`. 7 new tests in `tests/test_per_user_rate_limit.py`.
-- [x] **Expanded fuzzing harness**: `tests/test_fuzzer_payloads.py` — 112 tests across two surfaces: (1) ToolCall structural fuzzing (missing fields, wrong types, oversized 1 MB args, deeply nested dicts, 18 injection string variants × 3 arg positions); (2) `/tab/preview` DOM injection fuzzing (16 adversarial HTML payloads, 500 KB flood, 5 000-input document, unicode extremes). Key invariant: no fuzz input may produce HTTP 5xx.
-- [x] **CLI operator tool** (`gateway_ctl.py`): argparse CLI wrapping the admin API — commands: `login`, `kill-switch on/off/status`, `permissions get/set/clear`, `audit tail`, `key set/rotate/status/expiry/delete`, `providers list/expiring`, `consent export/erase/timeline`, `webhooks list/add/delete`, `rate-limits status/set/reset-client/reset-user`, `provider-health`. Reads token from `~/.config/intelli/gateway_token` cache or `GATEWAY_TOKEN` env var. Works with `httpx` or stdlib `urllib` fallback.
-- [x] **Content filter UI**: `ui/content-filter.html` — dark-theme two-column admin UI matching the style of `ui/memory.html` and `ui/metrics.html`; left panel shows deny-rule table (pattern + mode badge + label + delete), add-rule form (pattern, mode dropdown, label), reload-from-disk button; right panel is a live test-input textarea that evaluates text client-side against the fetched rules and shows PASS/BLOCK result with matched rule name; sessionStorage Bearer token.
-- [x] **Memory export/import (backup & recovery)**: `agent_memory.py` extended with `export_all()` (full live snapshot → `{agents, agent_count, key_count, exported_at}`) and `import_all(data, merge=True)` (merge or replace per-agent memory); admin-gated REST endpoints `GET /admin/memory/export` and `POST /admin/memory/import`; audited; `openapi.yaml` updated with both paths. 19 new tests across `TestExportAll`, `TestImportAll`, `TestMemoryExportImportHTTP` in `tests/test_agent_memory.py`.
-- [x] **Webhook delivery log**: `webhooks.py` extended so `_deliver()` records every outbound attempt (timestamp, event, status, HTTP status code, error) in a per-hook in-memory `deque` (max 100 entries, newest-first); new `get_deliveries(hook_id, limit)` function; admin-gated `GET /admin/webhooks/{hook_id}/deliveries` endpoint (returns `{hook_id, count, deliveries}`; 404 for unknown hook); `openapi.yaml` updated. 11 new tests across `TestGetDeliveries` and `TestDeliveriesEndpoint` in `tests/test_webhooks.py`.
-- [x] **Tests: 473 passing, 2 skipped** (up from 443; +30 new tests: 19 memory export/import, 11 webhook delivery log).
-- [x] **User management API**: `auth.py` extended with `list_users()` (returns `[{username, roles, has_tool_restrictions}]`, no passwords), `delete_user(username)` (protected against deleting built-in `admin`), and `change_password(username, new_password)`; four new admin-gated REST endpoints: `GET /admin/users` (list all), `POST /admin/users` (create, 201 / 409 on duplicate), `DELETE /admin/users/{username}` (403 for admin, 404 if missing), `POST /admin/users/{username}/password` (404 if missing); all mutating actions audited; `openapi.yaml` updated with new paths and `UserSummary` schema. 33 new tests in `tests/test_user_management.py`.
-- [x] **Approvals dashboard UI**: `ui/approvals.html` — dark-theme real-time approval queue viewer; SSE-driven live updates via `GET /approvals/stream` with auto-reconnect and green/red live-dot indicator; each pending item rendered as a card showing request ID, tool name, args (pretty JSON), risk badge (LOW/MED/HIGH with %-score), timestamp, plus per-card ✓ Approve / ✗ Reject buttons (admin-gated REST calls); resolved items move to a session history table; empty-state when queue is clear; sessionStorage Bearer token; manual Refresh button.
-- [x] **Webhooks admin UI**: `ui/webhooks.html` — dark-theme two-column webhook manager; left panel shows add-registration form (URL, per-event checkboxes: `approval.created/approved/rejected`) with Register button; hook list below with URL, event chips, created-at and ✕ Delete button; selecting a hook loads its delivery history in the right panel (table: timestamp, event, status badge ok/error, HTTP code, error message); both panels independent-refreshable; sessionStorage Bearer token; auto-connects on load when token is cached.
-- [x] **Tests: 506 passing, 2 skipped** (up from 473; +33 new tests: 11 auth unit, 22 HTTP endpoint).
-- [x] **Agent task scheduler**: `scheduler.py` — interval-based recurring tool-call scheduler with background daemon thread (1 s tick), JSON persistence (`schedule.json`), and full CRUD API (`add_task`, `list_tasks`, `get_task`, `delete_task`, `set_enabled`, `update_task`); executor injected at startup via `set_executor(supervisor.process_call)` to avoid circular imports; five new admin-gated REST endpoints in `app.py`: `GET/POST /admin/schedule`, `GET/PATCH/DELETE /admin/schedule/{task_id}`; `openapi.yaml` updated with scheduler paths and `ScheduledTask` schema.
-- [x] **Worker health + validation-error-rate alerting** (security hardening): `app.py` — `_alert_monitor` daemon thread polls `WorkerManager.check_health()` every `AGENT_GATEWAY_WORKER_CHECK_INTERVAL` seconds (default 60); fires `gateway.alert` webhook on `worker_unhealthy`/`worker_recovered` health transitions (state machine, no repeat alerts); sliding-window `collections.deque` tracks tool-validation-error timestamps and fires `validation_error_rate` alert when count ≥ `AGENT_GATEWAY_VALIDATION_ERR_THRESHOLD` in the last `AGENT_GATEWAY_VALIDATION_ERR_WINDOW` seconds (both configurable, threshold 0 = disabled); `PUT /admin/alerts/config` extended with `worker_check_interval_seconds`, `validation_error_window_seconds`, `validation_error_threshold` (all optional; partial update merges into existing config, does not replace it); boundary validation (interval < 5 → 422, window ≤ 0 → 422, threshold < 0 → 422). 19 new tests in `tests/test_alert_monitor.py`.
-- [x] **Tests: 1169 passing, 2 skipped** (up from 506; +663 new tests across all test modules added since last recorded count).
-- [x] **User management UI**: `ui/users.html` — dark-theme two-column admin interface; left panel: create-user form (username, password, role checkboxes) + user list with avatar initials, role chips (red admin / purple user), yellow dot for users with tool restrictions, and active selection; right panel: dynamically rendered detail with change-password section, roles display, and allowed-tools tag editor (add by typing, remove ✕, Save/Clear → `PUT /admin/users/{username}/permissions`); delete user button (hidden for built-in `admin`).
-- [x] **Admin navigation hub**: `ui/index.html` replaced with a dark-theme admin landing page; 9 tool cards (Approvals, Users, Agent Memory, Metrics, Webhooks, Content Filter, Audit Log, Consent Timeline, Tab Preview) each link to their respective UI; live status bar polls `GET /health`, `/approvals`, and `/metrics` every 10 s; quick-link row points to Swagger, ReDoc, and key API paths.
-- [x] **Tests: 560 passing, 2 skipped** (up from 506; +54 new tests: 33 scheduler module unit tests, 21 schedule HTTP endpoint tests — `tests/test_scheduler.py`).
-- [x] **Scheduler Prometheus metrics**: `scheduler.py` now imports `metrics`; `_run_task()` emits `scheduler_runs_total{task}` and `scheduler_errors_total{task}` counters plus a `scheduler_run_duration_seconds{task}` histogram observation; `scheduler_tasks_total` gauge updated on `add_task()` and `delete_task()`.
-- [x] **Scheduler trigger endpoint**: `trigger_task(task_id)` function in `scheduler.py` sets `next_run_at` to the past so the daemon picks it up within 1 s; `POST /admin/schedule/{task_id}/trigger` (202) added to `app.py` and `openapi.yaml`.
-- [x] **Scheduler UI**: `ui/schedule.html` — dark-theme two-column task manager; left panel: collapsible create form (name, tool, JSON args, interval, enabled toggle) + task list with status dot (green=enabled), interval badge (auto-formatted 60s→1m→1h), run count; right panel: stat cards (run count, last run, next run), last result/error display, edit form (name/args/interval save), action bar with Enable/Disable toggle, ▶ Run now (trigger), and Delete; auto-connects if sessionStorage token cached.
-- [x] **Tests: 572 passing, 2 skipped** (up from 560; +12 new tests: `TestTriggerTask`, `TestSchedulerMetrics`, `TestScheduleTriggerEndpoint`).
-- [x] **Scheduler task run history**: `get_history(task_id, limit=50)` added to `scheduler.py` — per-task in-memory `deque(maxlen=50)` records each execution (run counter, timestamp, duration, ok, result, error); populated in `_run_task()`, cleared in `delete_task()`; `GET /admin/schedule/{task_id}/history` endpoint added to `app.py` and `openapi.yaml` (404 if task not found, returns `{task_id, count, history}`); history table + refresh button added to `ui/schedule.html` detail panel (auto-loads on task select); 13 new tests in `tests/test_scheduler.py` (`TestGetHistory` + `TestScheduleHistory`).
-- [x] **Rate-limit admin UI**: `ui/rate-limits.html` — dark-theme two-column interface; left panel: config editor with enabled toggle, IP limits (max\_requests, window\_seconds, burst) and user limits (user\_max\_requests, user\_window\_seconds) fields, Apply button (`PUT /admin/rate-limits`); right panel: live usage snapshot polling every 10 s (`GET /admin/rate-limits`), client table (key, type IP/user, hits, remaining) with per-row Evict buttons (`DELETE /admin/rate-limits/clients/{key}` or `/users/{username}`); auto-connects from sessionStorage token; Rate Limits card added to `ui/index.html` nav hub.
-- [x] **Scheduler metric cards in metrics.html**: two new summary cards (`scheduler_runs_total` labelled green, `scheduler_errors_total` labelled red) added to `ui/metrics.html` cards grid; `updateCards()` JS updated to populate them on each poll cycle.
-- [x] **Tests: 585 passing, 2 skipped** (up from 572; +13 new tests: `TestGetHistory` (8 unit) + `TestScheduleHistory` (5 HTTP)).
-- [x] **Audit server-side filtering + CSV export**: `GET /admin/audit` enhanced with `actor`, `action`, `since`, `until` query params — substring match on actor/event fields, ISO-8601 datetime range (raises HTTP 400 on invalid input); new `GET /admin/audit/export.csv` endpoint (same filters, `text/csv` response, `Content-Disposition: attachment; filename="audit.csv"`); `ui/audit.html` updated with two `datetime-local` date-range pickers, ↓ CSV download button (fetch+blob pattern), and `_serverParams()` helper wiring all filters to server-side API; `openapi.yaml` updated with 4 new query parameters and the new CSV path.
-- [x] **Scheduler CLI commands**: `gateway_ctl.py` `schedule` subcommand registered in `_build_parser()` with 8 sub-actions: `list`, `get <task_id>`, `create <name> <tool> [--args JSON] [--interval SECONDS] [--disabled]`, `delete <task_id>`, `enable <task_id>`, `disable <task_id>`, `trigger <task_id>`, `history <task_id>`.
-- [x] **Providers dashboard UI**: `ui/providers.html` — dark-theme provider management page; 2×2 grid of 4 provider panels (openai, anthropic, openrouter, ollama); each panel shows live health status badge (ok/no_key/unavailable), configured/available flags, TTL/expiry line (colour-coded: red <7 days, yellow <30 days), and key management controls (Store / Rotate / Delete); expiring-keys table polling `GET /admin/providers/expiring?within_days=7`; auto-refreshes health every 30 s; sessionStorage Bearer token with auto-connect; Providers nav card added to `ui/index.html`.
-- [x] **Tests: 594 passing, 2 skipped** (up from 585; +9 new tests in `tests/test_metrics_api.py`: audit filter by actor, action, since/until exclusion, invalid datetime 400 ×2, CSV content-type, Content-Disposition header, and auth guard).
-- [x] **Type-checker fixes (13 errors)**: `users.html` — removed invalid `title:` CSS property from `.restriction-dot`; `webhooks.py` — wrapped `resp.status` in `int(...or 0)` to satisfy `int | None`; `test_metrics_api.py` — changed `details: dict = None` to `details: dict | None = None`; `test_per_user_rate_limit.py` and `test_content_filter.py` — added `# type: ignore[assignment]` to `HTTPException.detail` dict annotations.
-- [x] **`GET /admin/status` endpoint**: returns JSON summary of gateway state — `version`, `uptime_seconds`, `kill_switch_active`, `kill_switch_reason`, `tool_calls_total` (Prometheus counter), `pending_approvals`, `scheduler_tasks`, `memory_agents`; admin Bearer required; documented in `openapi.yaml`.
-- [x] **`gateway-ctl status` command**: pretty-prints the status summary with coloured kill-switch indicator.
-- [x] **Audit CLI filter flags**: `audit tail` now accepts `--actor`, `--action`, `--since`, `--until` (ISO-8601) alongside `--n`; new `audit export-csv --output FILE` subcommand downloads the filtered CSV directly via urllib.
-- [x] **`provider-health` CLI subcommands**: refactored from a single positional-arg command to three sub-actions — `check <provider>` (single check), `list` (polls all 4 providers and prints a health table), `expiring [--within-days N]` (calls `GET /admin/providers/expiring`).
-- [x] **Tests: 599 passing, 2 skipped** (up from 594; +5 new tests: `test_gateway_status_requires_auth`, `test_gateway_status_returns_expected_fields`, `test_gateway_status_uptime_is_positive`, `test_gateway_status_kill_switch_off_by_default`, `test_gateway_status_reflects_kill_switch_on`).
-- [x] **Audit actor attribution**: added `_actor(token)` helper to `app.py` that resolves an admin Bearer token to the authenticated username via `auth.get_user_for_token()`; all 18 `_audit()` call sites updated from `actor=(token[:6]+'...')` to `actor=_actor(token)`; also fixed a bug in `memory_import` where `'admin'` was passed as `details` and the info dict as `actor` (positional args reversed). New tests in `tests/test_audit_actor.py`.
-- [x] **Webhook HMAC signing**: `register_webhook()` in `webhooks.py` now accepts `secret=''`; secret stored in hook dict (persisted to `webhooks.json`); `_deliver()` computes `hmac.new(secret.encode(), body, sha256).hexdigest()` and sends `X-Intelli-Signature-256: sha256=<hex>` header when secret is non-empty; `WebhookCreate` FastAPI model gains `secret: str = ''` field; `create_webhook` endpoint passes it through and audit-logs `'signed': True/False`; `openapi.yaml` updated with `secret` field and HMAC description. 7 new tests in `tests/test_webhooks.py` (`TestHMACSigning`).
-- [x] **`ui/status.html` — live gateway dashboard**: polls `GET /admin/status` every 5 s; cards for version, uptime, tool calls, pending approvals, scheduler tasks, memory agents; kill-switch panel with Arm/Disarm controls and 🔴/🟢 indicator; sessionStorage auto-connect; Status nav card added to `ui/index.html`.
-- [x] **Tests: 615 passing, 2 skipped** (up from 599; +16 new tests: 9 in `tests/test_audit_actor.py` for `_actor()` helper and audit log assertions, 7 in `tests/test_webhooks.py::TestHMACSigning` for HMAC header presence, value correctness, and endpoint integration).
-- [x] **Webhook delivery retries with exponential back-off**: `_deliver()` in `webhooks.py` now retries up to `AGENT_GATEWAY_WEBHOOK_MAX_RETRIES` (default 3) total attempts; between attempts the thread sleeps `2**attempt` seconds (1 s, 2 s, 4 s …); stops immediately on a 2xx response; the per-hook delivery log record gains an `attempts` field; `docstring` updated with the new env var. 6 new tests in `tests/test_webhooks.py::TestDeliveryRetry`.
-- [x] **`gateway_ctl.py` — `webhooks add --secret`**: `--secret SECRET` argument added to the `webhooks add` subcommand; forwarded as `secret` in the POST body when non-empty, enabling HMAC-signed webhook registration from the CLI. 4 new tests in `tests/test_gateway_ctl_memory.py::TestWebhooksAddSecret`.
-- [x] **`gateway_ctl.py` — `memory` subcommand**: 9 sub-actions: `agents` (list all agent IDs), `list <agent_id>` (all keys), `get <agent_id> <key>`, `set <agent_id> <key> <value> [--ttl SECONDS]`, `delete <agent_id> <key>`, `prune <agent_id>` (remove expired), `clear <agent_id>`, `export [--output FILE]`, `import <file> [--replace]`; JSON-or-string value auto-detection; merge vs replace mode for import. Usage examples added to module docstring. 17 new tests in `tests/test_gateway_ctl_memory.py::TestMemoryCLI`.
-- [x] **Tests: 642 passing, 2 skipped** (up from 615; +27 new tests: 6 retry back-off, 4 webhooks-secret CLI, 17 memory CLI).
-- [x] **Webhook UI — secret input + `gateway.alert` event**: `ui/webhooks.html` add-form gains a password input for the HMAC signing secret (sent as `secret` in POST body when non-empty); event checkboxes extended with `gateway.alert`; registered hook rows now show a 🔑 signed badge when `hook.signed` is true; delivery table gains an **Attempts** column backed by the existing `attempts` field in delivery records.
-- [x] **`openapi.yaml` — delivery `attempts` + Webhook `signed` + `AlertConfig` schema + `/admin/alerts/config` endpoints**: `attempts` field (integer ≥ 1) added to webhook delivery item schema; `signed` field (boolean, secret masked) added to `Webhook` component; `gateway.alert` added to the event enum; new `AlertConfig` schema (`{approval_queue_threshold: integer ≥ 0}`) and `GET/PUT /admin/alerts/config` endpoint definitions added.
-- [x] **`webhooks.py` — `_public_hook()` helper + `gateway.alert` event**: `VALID_EVENTS` extended with `'gateway.alert'`; new `_public_hook()` strips the raw secret and exposes `signed: bool` so the API never leaks HMAC secrets; `register_webhook()`, `list_webhooks()`, and `get_webhook()` updated to return the public view.
-- [x] **`gateway_ctl.py` — `schedule history --n N`**: `--n N` argument added to the `schedule history` subparser; when provided the URL is built as `/admin/schedule/{task_id}/history?limit=N` so operators can cap output to the N most-recent records.
-- [x] **Approval-queue depth alert** (`gateway.alert` webhook event): `AGENT_GATEWAY_APPROVAL_ALERT_THRESHOLD` env var (default 0 = disabled); `_alert_config` runtime dict; every time a new approval is enqueued the gateway checks pending count — if threshold > 0 and depth ≥ threshold a `gateway.alert` event is fired and audit-logged; `GET /admin/alerts/config` returns current threshold; `PUT /admin/alerts/config` updates it without restart; `AlertsConfigUpdate` Pydantic model with `approval_queue_threshold ≥ 0` validation.
-- [x] **Tests: 656 passing, 2 skipped** (up from 642; +14 new tests in `tests/test_alert_config.py`: 3 GET, 5 PUT, 6 alert-firing logic).
-- [x] **`GET /admin/schedule/{task_id}/history` — `?limit=N` server-side paging**: Added `limit: int = Query(50, ge=1, le=500)` query param to `schedule_history()`; response now includes `total` (pre-slice count) alongside `count` (returned records); `?limit=0` / `?limit=501` return HTTP 422. 5 new tests in `tests/test_scheduler.py::TestScheduleHistory`.
-- [x] **`gateway_ctl.py` — `alerts` subcommand**: `alerts status` prints current threshold + disabled/active state via `GET /admin/alerts/config`; `alerts set N` calls `PUT /admin/alerts/config`; negative threshold exits with error. 11 new tests in `tests/test_gateway_ctl_alerts.py`.
-- [x] **`ui/status.html` — Alert threshold panel**: New 🔔 Approval-Queue Depth Alert panel below the kill-switch section; shows current state via `GET /admin/alerts/config` on every 5-second poll cycle; inline number input + Save button calls `PUT /admin/alerts/config`; indicator dot turns amber when a non-zero threshold is active.
-- [x] **`ui/webhooks.html` — Delivery retry row highlight**: Rows with `attempts > 1` get amber left-border (`row-retried` CSS class) and ⚠️ suffix in the Attempts column to make retried deliveries immediately visible.
-- [x] **Tests: 672 passing, 2 skipped** (up from 656; +16 new tests: 5 scheduler limit-param, 11 alerts CLI).
-- [x] **Approval auto-reject timeout** (`GET/PUT /admin/approvals/config`): `AGENT_GATEWAY_APPROVAL_TIMEOUT` env var (default 0 = disabled); runtime-mutable `_approvals_config`; `ApprovalQueue.expire_pending(secs)` auto-rejects items older than the threshold; daemon reaper thread checks every 5 s, fires `approval.rejected` + `gateway.alert` webhooks and audit-logs each expired item with `reason: timeout`; `timeout_seconds < 0` returns 422.
-- [x] **`ui/approvals.html` — Auto-reject timeout panel**: ⏱ panel added to the existing approvals queue UI showing current timeout; inline seconds input + Save button calls `PUT /admin/approvals/config`; `connect()` now loads timeout config automatically on connection.
-- [x] **`ui/audit.html` — Expanded event filter**: `filter-event` dropdown reorganised into optgroups covering Approvals, Alerts (`alert_fired`, `update_alerts_config`, `update_approvals_config`), Webhooks, Keys & Providers, and Other events.
-- [x] **`supervisor.py` — `enqueued_at` timestamp on queue items**: `ApprovalQueue.submit()` now records `enqueued_at: float` (Unix timestamp) in every stored item, exposed through `GET /approvals` and the SSE stream.
-- [x] **Tests: 689 passing, 2 skipped** (up from 672; +17 new tests in `tests/test_approvals_timeout.py`: 6 `expire_pending` unit, 3 GET config, 7 PUT config, 1 integration).
-- [x] **`gateway_ctl.py` — `approvals` subcommand**: `approvals list` prints pending queue with tool/risk/age; `approvals approve <id>` / `approvals reject <id>` call the existing endpoints; `approvals timeout get` shows current timeout; `approvals timeout set <secs>` calls `PUT /admin/approvals/config`. Negative seconds exits with error. 23 new tests in `tests/test_gateway_ctl_approvals.py`.
-- [x] **`openapi.yaml` — `ApprovalRequest` schema + `ApprovalsConfig` endpoints**: `risk` (enum low/medium/high) and `enqueued_at` (Unix float) fields added to `ApprovalRequest` component; `GET/PUT /admin/approvals/config` endpoints documented with `ApprovalsConfig` schema (`{timeout_seconds: number ≥ 0, required}`).
-- [x] **`ui/schedule.html` — Run history limit selector**: `<select id="history-limit">` (options 25/50/100/250/500, default 25) added to history section header; `loadHistory()` now passes `?limit=N` to the server-side paging endpoint and displays "(showing N of M)" when total exceeds the selected limit.
-- [x] **Tests: 712 passing, 2 skipped** (up from 689; +23 new approvals CLI tests in `tests/test_gateway_ctl_approvals.py`: 4 list, 3 approve, 2 reject, 4 timeout get, 4 timeout set, 6 parser).
-- [x] **`supervisor.py` — manifest-driven `requires_approval` routing**: `Supervisor.process_call()` and `approval_required()` now load the capability manifest for the called tool and use its `requires_approval` field as the authoritative routing decision, overriding the heuristic risk score when a manifest is present. `requires_approval: false` bypasses the approval queue even when args score high (e.g. path-traversal on `file.read`); `requires_approval: true` always enqueues even for safe-looking args. Tools with no manifest continue to fall back to heuristic risk scoring (unchanged). `ToolManifest` imported alongside `CapabilityVerifier` in the try/except import block. 20 new tests in `tests/test_supervisor_manifest_routing.py` across 4 classes (ManifestAllowsCall, ManifestForcesApproval, NoManifestFallback, ApprovalRequired); `test_risk_scorer.py::test_path_traversal_queued` updated to use a no-manifest tool.
-- [x] **`openapi.yaml` — schedule history `?limit` parameter + `total` field**: `GET /admin/schedule/{task_id}/history` now documents the `limit` query parameter (integer 1–500, default 50) and includes `total` (all-time run count before limit is applied) and `count` (records returned) in the `200` response schema; `422` response code added for out-of-range limit values.
-- [x] **Tests: 732 passing, 2 skipped** (up from 712; +20 new tests in `tests/test_supervisor_manifest_routing.py`).
-- [x] **`gateway_ctl.py` — `capabilities` subcommand**: `capabilities list` prints all registered tool manifests as a formatted table (tool name, risk level, approval required, required/optional capability tokens); `capabilities show <tool>` prints full manifest detail for one tool; exits 1 with an error message when the tool has no manifest. Case-insensitive lookup. 17 new tests in `tests/test_gateway_ctl_capabilities.py` across `TestCapabilitiesList`, `TestCapabilitiesShow`, and `TestCapabilitiesParser`.
-- [x] **`ui/capabilities.html`** — new tool capability manifest browser: calls `GET /tools/capabilities` (public endpoint, no auth required); filter bar with free-text search, risk-level dropdown (all/low/medium/high), and approval dropdown; summary pills showing Total / High / Medium / Low / Requires-approval counts; card grid with colour-coded risk badge (LOW/MEDIUM/HIGH), auto-approved vs requires-approval badge, description, required capability tags (purple), and optional capability tags (muted). Nav card `🛠️ Capabilities` added to `ui/index.html`.
-- [x] **`ui/approvals.html`** — bug fixes + UX improvements: `riskClass()`/`riskLabel()` now correctly handle string risk values (`'low'`/`'medium'`/`'high'`) returned by the API (were compared as floats → displayed `NaN%`); tool name now extracted from `item.payload.tool` fallback (`item.tool` was always undefined); card header is now collapsible (click toggles `.collapsed` class, chevron ▾ rotates, payload section hidden via CSS); `enqueued_at` Unix timestamp displayed as age (`Xs ago` / `Xm ago`) and locale time string; approval/reject history entries now use the correct tool name.
-- [x] **Tests: 749 passing, 2 skipped** (up from 732; +17 new tests in `tests/test_gateway_ctl_capabilities.py`).
-- [x] **`gateway_ctl.py` — `status` subcommand tests**: `tests/test_gateway_ctl_status.py` added (was implemented but untested); 14 tests across `TestStatusShow` (12: endpoint call, version, uptime, kill-switch off/armed/reason, all numeric fields, zero-value resilience, missing-field resilience) and `TestStatusParser` (2: subcommand registered, `func` wired correctly).
-- [x] **`GET /tools/capabilities` — `allowed_arg_keys` exposed**: `app.py` `list_tool_capabilities()` now includes `allowed_arg_keys` (sorted list or `null`) in every tool entry; `openapi.yaml` `ToolCapabilityEntry` schema updated with `allowed_arg_keys: array<string>, nullable: true` and a description noting that any call key absent from the list should be treated as unexpected.
-- [x] **`ui/approvals.html` — manifest capability lookup on card**: on `connect()` the page fetches `GET /tools/capabilities` (public, no auth) and caches manifests in `_manifests`; `buildCard()` now renders a **Declared args** row beneath the JSON payload — each declared key shown as a purple tag; if the submitted call contains a key *not* in `allowed_arg_keys` it is highlighted in red with a ⚠ "Unexpected arg key" warning banner, letting the operator immediately spot potentially injected or malformed argument names.
-- [x] **Tests: 763 passing, 2 skipped** (up from 749; +14 new tests in `tests/test_gateway_ctl_status.py`).
-- [x] **`tests/test_gateway_ctl_rate_limits.py`** — 20 new tests for `cmd_rate_limits`: `TestRateLimitsStatus` (4: GET endpoint, config keys printed, active-client count, empty-response resilience), `TestRateLimitsSet` (6: max_requests, multiple fields, None fields skipped, enabled true/false, user fields), `TestRateLimitsResetClient` (1), `TestRateLimitsResetUser` (1), `TestRateLimitsParser` (5: registered, status, set, reset-client, reset-user).
-- [x] **`tests/test_gateway_ctl_schedule.py`** — 21 new tests for `cmd_schedule`: `TestScheduleList` (5: GET endpoint, name/tool printed, empty message, enabled indicator, multi-task), `TestScheduleGet` (1), `TestScheduleCreate` (4: POST body, disabled flag, invalid JSON no-crash, args parsed), `TestScheduleDelete` (1), `TestScheduleEnableDisable` (2), `TestScheduleTrigger` (1), `TestScheduleHistory` (4: GET endpoint, `?limit=N` appended, records printed, empty message), `TestScheduleParser` (6: registered, list, create, history limit, enable, trigger).
-- [x] **`ui/capabilities.html` — `allowed_arg_keys` on cards**: `buildCard()` now reads `t.allowed_arg_keys`; when it is an array (manifest declares them) an **Accepted arg keys** row is rendered with green-tinted monospace tags beneath the capabilities row; `null` (no restriction declared) renders nothing; `.cap-tag.arg` CSS class added.
-- [x] **Tests: 804 passing, 2 skipped** (up from 763; +41 new tests: 20 rate-limits CLI + 21 schedule CLI).
-- [x] **Pylance type-error fixes (12 errors, 5 files)**: `tests/test_gateway_ctl_approvals.py`, `test_gateway_ctl_capabilities.py`, `test_gateway_ctl_status.py`, `test_gateway_ctl_rate_limits.py`, `test_gateway_ctl_schedule.py` — replaced `self.parser._subparsers._group_actions[0]._name_parser_map` block (Pylance: `_group_actions` possibly `None`, `_name_parser_map` not on `Action`) with a `_subcommands(parser)` helper that iterates `parser._actions` and uses `getattr()` — runtime-identical, zero static errors.
-- [x] **`tests/test_gateway_ctl_kill_switch.py`** — 10 tests for `cmd_kill_switch`: `TestKillSwitchStatus` (GET endpoint called, empty-response resilience), `TestKillSwitchOn` (POST with reason body, empty reason, missing attribute), `TestKillSwitchOff` (DELETE endpoint), `TestKillSwitchParser` (registered, status/on/off parsed, `func` wired).
-- [x] **`tests/test_gateway_ctl_permissions.py`** — 16 tests for `cmd_permissions`: `TestPermissionsGet` (2: GET endpoint, per-user URL), `TestPermissionsSet` (4: PUT with tool list, comma-split, whitespace-strip, single tool), `TestPermissionsClear` (2: PUT with `null` allowed_tools, correct URL), `TestPermissionsParser` (8: registered, get/set/clear parsed, tools string preserved, `func` wired).
-- [x] **`tests/test_gateway_ctl_webhooks.py`** — 17 tests for `cmd_webhooks`: `TestWebhooksList` (3: GET endpoint, no-webhooks message, empty-response), `TestWebhooksAdd` (5: POST with URL, events split, no events omitted, secret present, secret absent), `TestWebhooksDelete` (2: DELETE with ID, correct URL), `TestWebhooksParser` (7: registered, list/add/delete parsed, events/secret flags, `func` wired).
-- [x] **`tests/test_gateway_ctl_consent.py`** — 18 tests for `cmd_consent`: `TestConsentExport` (2: GET endpoint, per-actor URL), `TestConsentErase` (4: DELETE with `--yes`, abort on decline, proceed on confirm, correct URL), `TestConsentTimeline` (4: GET endpoint, limit param, origin param, no origin when empty), `TestConsentParser` (8: registered, export/erase/timeline parsed, `--yes`/`--n`/`--origin` flags, `func` wired).
-- [x] **`tests/test_gateway_ctl_key.py`** — 19 tests for `cmd_key`: `TestKeySet` (4: POST endpoint, with/without TTL, per-provider URL), `TestKeyRotate` (2: rotate endpoint, TTL), `TestKeyStatus` (2: GET status, per-provider), `TestKeyExpiry` (1), `TestKeyDelete` (2: DELETE, per-provider), `TestKeyParser` (8: registered, set/rotate/status/expiry/delete parsed, `--ttl-days`, `func` wired).
-- [x] **`tests/test_gateway_ctl_providers.py`** — 11 tests for `cmd_providers`: `TestProvidersList` (4: GET endpoint, empty-list, empty-response, names printed), `TestProvidersExpiring` (2: expiring endpoint with within_days), `TestProvidersParser` (5: registered, list/expiring parsed, `--within-days`, `func` wired).
-- [x] **`tests/test_gateway_ctl_audit.py`** — 18 tests for `cmd_audit`: `TestAuditTail` (8: GET endpoint, tail param, actor/action/since filters, actor omitted when empty, empty entries, entry count printed), `TestAuditExportCsv` (2: _request called with export URL, CSV written to file), `TestAuditParser` (8: registered, tail/export-csv parsed, `--n`/`--actor`/`--since`/`--output` flags, `func` wired).
-- [x] **`tests/test_gateway_ctl_login.py`** — 11 tests for `cmd_login`: `TestLogin` (5: POST to /admin/login, token saved, exit on missing token, success message, correct URL), `TestLoginParser` (6: registered, username/password required, short/long flags, `func` wired).
-- [x] **Tests: 921 passing, 2 skipped** (up from 804; +117 new tests across 8 new `test_gateway_ctl_*.py` files).
-- [ ] Browser integration: embed Chromium + sidebar UI and wire the renderer to POST snapshots to the gateway.
-
-The prototype implementation lives under `agent-gateway/` and includes tests and a README with quickstart instructions.
-
-- [x] **`app.py` — CORS restriction**: `from fastapi.middleware.cors import CORSMiddleware` added to imports; `_cors_origins` list parsed from `AGENT_GATEWAY_CORS_ORIGINS` env var (default: `http://127.0.0.1:8080`, comma-separated for multi-origin); `app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_credentials=True, allow_methods=['*'], allow_headers=['*'])` inserted immediately after `app = FastAPI(...)`; CORS preflight/response headers now correctly echoed only for listed origins. `docs/deployment.md` updated with `AGENT_GATEWAY_CORS_ORIGINS` env var entry. Fixes ROADMAP item 8 and SECURITY.md checklist item.
-- [x] **`ui/tab_permission.html` — per-origin DOM redaction UI** (full rewrite): Dark-theme admin panel with Bearer token auth bar + connection status dot; "Configured Redaction Rules" card grid showing all origins (loaded via new `GET /admin/redaction-rules`); each origin card shows fields as `×`-removable tags; clicking a card populates the "Manage Rules for an Origin" editor; per-field tag editor with Add / Save / Clear All buttons; debounced auto-load of existing rules on URL input change; snapshot preview section (kept from original); sessionStorage token cache. New `GET /admin/redaction-rules` (admin-gated) endpoint in `app.py` that returns all configured origins and their sorted field lists. `openapi.yaml` entry for `/admin/redaction-rules` with `tags: [tab, admin]`.
-- [x] **Tests: 1099 passing, 1 skipped** (up from 1087; +11 in `tests/test_cors.py`: `TestCORSAllowedOrigin` (3), `TestCORSDisallowedOrigin` (2), `TestCORSMultipleOrigins` (1), `TestAdminRedactionRules` (5)).
-- [x] **`browser-shell/main.js` — `capture-tab` IPC handler** (item 5): New `ipcMain.handle('capture-tab', ...)` placed immediately after the existing `get-tab-snapshot` handler; captures tab HTML via `executeJavaScript`; takes an optional page screenshot via `wc.capturePage()` (returns `NativeImage` → base64 `dataURL`; silently skipped if capturePage fails); POSTs `{html, url, title}` to `POST /tab/preview` using Node's built-in `http` module with the admin Bearer token; returns `{ok, status, url, title, screenshotDataUrl, result}` where `result` is the gateway's sanitized preview JSON. Agents in the sidebar panel can now call `electronAPI.captureTab()` and get a sanitized, consent-logged snapshot.
-- [x] **`browser-shell/preload.js` — `electronAPI.captureTab()`**: `captureTab: () => ipcRenderer.invoke('capture-tab')` added with JSDoc explaining the full return shape; placed adjacent to the existing `getTabSnapshot` entry.
-- [x] **`scripts/log_shipper.py` — audit log SIEM sidecar** (item 10): Tails `agent-gateway/audit.log` from its end-of-file position (no history re-shipped on first run); reads new lines on each poll interval; parses JSONL (wraps non-JSON lines as `{"raw": "..."}`); ships batches as NDJSON (`Content-Type: application/x-ndjson`) to `INTELLI_SIEM_URL` with optional `Authorization: Bearer` header; retries up to `INTELLI_SIEM_RETRIES` (default 3) times on HTTP 5xx / network errors with `INTELLI_SIEM_RETRY_DELAY` (default 2 s) between attempts; detects log rotation (file shrank → resets position); exits cleanly on `KeyboardInterrupt`; 7 env vars documented in module docstring.
-- [x] **`docs/runbook.md §17` — "Log Rotation & SIEM Shipping"**: §17 expanded from a 3-line rotation snippet to a full section covering rotation, log_shipper quick-start, 7-row env-var table, behaviour notes (start-from-end, NDJSON format, retry policy, rotation handling), and a systemd unit example.
-- [x] **`agent-gateway/requirements.in` + `requirements.lock`** (item 9): `requirements.in` created (abstract ranges matching `requirements.txt`); `requirements.lock` generated by `python -m piptools compile --generate-hashes requirements.in -o requirements.lock` — full transitive closure pinned to exact versions with SHA-256 hashes per wheel + sdist; CI (`ci.yml`) and release (`release.yml`) workflows updated to `pip install --require-hashes -r agent-gateway/requirements.lock`.
-- [x] **`SECURITY.md` + `THREAT_MODEL.md` updated**: log shipping and pinned hashes items marked done in both files.
-
-## Remaining steps — recommended priority
-
-> Items 2–22 are fully implemented (see progress log above). Items below are the
-> current backlog ordered by value / effort. Items struck through are fully done.
-
-### Immediate (ready to implement)
-
-1. ~~**`openapi.yaml` — `memory` tag for agent-memory endpoints**~~: `- name: memory` declared in top-level `tags:`; all `/agents/*` and `/admin/memory/*` endpoints use `tags: [memory]` or `tags: [memory, admin]`; `test_openapi_tags.py` guard enforces tag discipline. **Done (was already complete).**
-
-2. ~~**`ui/status.html` — approval queue depth colour indicator**~~: **Done.**
-
-3. ~~**Per-origin DOM redaction UI** (`ui/tab_permission.html`)~~: Full rewrite — dark-theme admin panel with Bearer token auth bar, "All Configured Rules" card grid (loads via `GET /admin/redaction-rules`), per-origin field management (add/remove individual fields as tags without re-entering the full list), click-to-edit origin cards, auto-load existing rules on URL change (debounced), clear-all and save buttons, snapshot preview section; new `GET /admin/redaction-rules` admin endpoint in `app.py` returns all configured origins + sorted field lists; `openapi.yaml` entry for `/admin/redaction-rules`; 11 new tests in `tests/test_cors.py::TestAdminRedactionRules`. **Done.**
-
-### Near-term (Electron browser-shell extensions)
-
-4. ~~**Browser sidebar panel**~~: **Done.**
-
-5. ~~**Tab snapshot IPC bridge**~~: New `capture-tab` IPC handler added to `browser-shell/main.js` — captures tab HTML via `executeJavaScript`, takes an optional page screenshot via `wc.capturePage()`, POSTs both to `POST /tab/preview` (with admin Bearer token) for sanitization + consent logging, and returns the gateway's sanitized preview JSON to the caller; exposed as `electronAPI.captureTab()` in `preload.js`. Distinct from the existing `getTabSnapshot()` / auto-push on navigation (which goes to `PUT /tab/snapshot` without sanitization). Agents in the sidebar panel can now call `electronAPI.captureTab()` and receive a sanitized, consent-logged snapshot. **Done.**
-
-6. ~~**Electron auto-updater**~~ — `electron-updater` wired in `browser-shell/`; `package.json` gains `dependencies: { electron-updater }` + `build.publish` GitHub config; `main.js` imports with graceful try/catch, wires `update-available`/`update-downloaded` events to IPC, fires `checkForUpdates()` 5 s after window opens; `install-update` IPC `quitAndInstall()`; `preload.js` exposes `onUpdateAvailable`, `onUpdateDownloaded`, `installUpdate`; `browser.html` `#update-bar` banner; `browser.css` blue banner styles; `browser.js` shows banner on update + wires Restart & Install / dismiss buttons. **Done.**
-
-### Medium-term (hardening)
-
-7. ~~**seccomp profile for subprocess worker (Linux)**~~ — `agent-gateway/sandbox/seccomp-worker.json` created: `defaultAction: SCMP_ACT_ERRNO` (deny all); explicit allow-list for every syscall Python needs (I/O, mmap/brk, signals, futex/clone, clock, temp-files, prctl, getrandom, uname, pipes, inotify); explicit ERRNO blocks for networking (`socket`/`connect`/…), process-spawning (`fork`/`vfork`/`execve`/`execveat`), and dangerous kernel interfaces (`ptrace`, `bpf`, `perf_event_open`, `init_module`, `kexec_*`, `reboot`, `mount`, and 10 more); `docs/deployment.md §4.1` documents Docker `--security-opt seccomp=…` usage, compose YAML snippet, and smoke-test command. **Done.**
-
-8. ~~**CORS restriction**~~: `CORSMiddleware` added to `app.py` with `allow_origins=_cors_origins` (default: `["http://127.0.0.1:8080"]`); env var `AGENT_GATEWAY_CORS_ORIGINS` (comma-separated) controls the list; preflight + response headers enforced; 6 CORS tests in `tests/test_cors.py`; `docs/deployment.md` updated with the new env var. **Done.**
-
-9. ~~**Pinned dependency hashes**~~: `agent-gateway/requirements.in` created (abstract ranges matching `requirements.txt`); `agent-gateway/requirements.lock` generated by `python -m piptools compile --generate-hashes requirements.in -o requirements.lock` (full transitive closure with SHA-256 hashes per wheel/sdist); CI (`ci.yml` and `release.yml`) updated to use `pip install --require-hashes -r agent-gateway/requirements.lock`; `SECURITY.md` and `THREAT_MODEL.md` updated. **Done.**
-
-10. ~~**Log shipping sidecar**~~: `scripts/log_shipper.py` created — tails `audit.log` from its end-of-file position (avoids re-shipping history), batches NDJSON entries, and POSTs to `INTELLI_SIEM_URL` with optional Bearer auth; retry logic with exponential back-off (up to `INTELLI_SIEM_RETRIES` attempts, `INTELLI_SIEM_RETRY_DELAY` seconds apart); handles log rotation (file shrink detected → position reset); configurable via 7 env vars; `docs/runbook.md §17` expanded from a one-liner to a full "Log Rotation & SIEM Shipping" section with env-var table, quick-start, and systemd unit example; `SECURITY.md` and `THREAT_MODEL.md` updated. **Done.**
-
-### Long-term / research
-
-11. ~~**Browser integration — full sidebar AI chat**~~ — `app.py` gains `stream: bool = Query(False)` on `POST /chat/complete`; when `stream=True` returns `StreamingResponse(text/event-stream)` with word-by-word `{"token": "…", "done": false}` events followed by a final `{**result, "done": true}` event; error path yields `{"error": "…", "done": true}`; headers: `Cache-Control: no-cache`, `X-Accel-Buffering: no`, `Access-Control-Allow-Origin: *`; `ui/chat.html` created (dark-themed streaming chat panel: provider dropdown with live health-check, model input, SSE `fetch` + `ReadableStream` loop, blinking cursor during streaming, token-count stats bar, `sessionStorage` auth shared with all admin pages, `⚙ Hub` back-link); `browser-shell/main.js` sidebar `BrowserView` now loads `/ui/chat.html` instead of `/ui/`; `#btn-sidebar` title and `aria-label` updated to "AI Chat sidebar"; 💬 AI Chat nav card (Stream badge) added as first entry in `ui/index.html` tool-grid; 13 tests in `tests/test_chat_stream.py` (non-streaming JSON, explicit `stream=false`, auth 401, SSE content-type, data lines, done=true final event, content integrity, intermediate done=false, reconstruct == full, unauth streaming 401, bad provider 400, adapter error event, cache-control header). **Done.**
-
-12. **OAuth2 / OIDC federation** — add FastAPI OIDC middleware so enterprise users can log in with their IdP instead of a local password.
-
-13. ~~**Encrypted audit log at rest**~~ — `app.py` gains `_audit_key()` (reads `INTELLI_AUDIT_ENCRYPT_KEY` env as 64-hex/32-byte AES-256-GCM key), `_encrypt_audit_line()` (random 12-byte nonce + GCM encrypt → base64), `_decrypt_audit_line()` (inverse); `_audit()` conditionally encrypts each JSONL line before appending; `audit_export()` read path calls `_audit_key()` once then tries `_decrypt_audit_line()` per line with silent plaintext fallback for mixed logs; 12 tests in `tests/test_audit_encrypt.py` covering roundtrip, Unicode, nonce uniqueness, tamper detection, wrong key, key validation (short/absent/whitespace), and plaintext fallback. **Done.**
-
-14. ~~**Accessibility & i18n**~~ — `ui/i18n.js` created (ES module): 35-entry English `STRINGS` map, `t(key, fallback)` translator, `setLang(code)` switcher, `_applyTranslations()` for `[data-i18n]` / `[data-i18n-placeholder]` / `[data-i18n-aria]` elements; `_enhanceAria()` auto-applies: skip-to-content link, `role="main"` on `<main>`, `role="banner"` on`<body > header`, `aria-live="polite"` + `aria-atomic` on `#toast` / `.toast`, `role="status"` + `aria-live` on `#status-dot`, `aria-label` on icon-only buttons (✕/×/✗/✓/⟳/↺/▶/🗑), `aria-label` from placeholder/title on unlabelled inputs, `aria-label` from nearest heading on unlabelled tables, `aria-hidden` on `.icon` nodes, `aria-label` with "(opens in new tab)" annotation on `target=_blank` links; `<script type="module" src="i18n.js"></script>` injected before `</body>` in all 15 admin UI pages. **Done.**
-
-15. ~~**Outbound allowlist for provider adapters**~~ — `providers/adapters.py` gains `_OUTBOUND_ALLOWLIST` (default: all 4 built-in provider origins derived from env vars; overridable via `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST` comma-separated origins) and `_check_outbound_url(url)` (parses origin, raises `RuntimeError` with allowlist in message if blocked); called at the top of `chat_complete()` in OpenAI, Anthropic, and OpenRouter adapters and in `is_available()` + `chat_complete()` in the Ollama adapter; 16 tests in `tests/test_provider_outbound.py` covering unit, integration, and graceful degradation. **Done.**
+20 subcommands covering all admin APIs: `login`, `kill-switch`, `audit`, `permissions`,
+`alerts`, `approvals`, `capabilities`, `content-filter`, `consent`, `key`, `memory`,
+`metrics`, `provider-health`, `providers`, `rate-limits`, `schedule`, `status`, `users`,
+`webhooks`.
 
 ---
 
-> **Session progress continues above this line.**
-> Items struck through (~~like this~~) are fully implemented.
+## Electron Browser Shell
 
-1. ~~Wire the Tab Snapshot Preview into the browser renderer and expose a per-tab permission prompt.~~ → **done**: `electronAPI.captureTab()` IPC bridge wired; `POST /tab/preview` + consent logging integrated (item 5 above).
-2. ~~Implement provider adapters and move API keys into an OS keyring or vault~~ — done (OpenAI, Anthropic, OpenRouter, Ollama adapters + admin key management API + `/chat/complete` proxy). ~~Remaining: key rotation, scoped permissions per-user, TTL-based expiry~~ — **key rotation + TTL done** (`providers/key_rotation.py`, rotate/expiry API). ~~Remaining: scoped permissions per-user~~ — **done** (`GET/PUT /admin/users/{username}/permissions`, enforced in `/tools/call`).
-3. ~~Harden the Tool Proxy: create a sandboxed helper process with capability restrictions~~ — Docker runner now applies `--cap-drop ALL`, `no-new-privileges`, PID/FD limits, and optional seccomp profile. ~~Remaining: sign tool contracts and enforce a formal capability model~~ — **capability model done** (`tools/capability.py`, 13 manifests, CapabilityVerifier, `AGENT_GATEWAY_ALLOWED_CAPS`).
-4. ~~Replace dev `X-API-Key` with an auth system (local RBAC, operator accounts)~~ — done. ~~Audit review UI~~ — done (`ui/audit.html`). ~~Consent timeline and per-tab permission UI~~ — **done** (`consent_log.py`, `ui/consent.html`, `/consent/timeline` endpoints).
-5. ~~Rate limiting~~ — done (`rate_limit.py`, sliding-window per-IP, env-configurable, wired into write endpoints).
-6. ~~Risk scorer~~ — done (`compute_risk()` in supervisor — heuristic `low/medium/high` based on tool name, arg patterns, traversal/injection signatures).
-7. ~~Expand OpenAPI/tool contracts and generate client SDKs for plugins and provider adapters~~ — **done** (`openapi.yaml` fully expanded: all 40+ endpoints documented with request/response schemas, security declarations, and reusable components; latest additions: agent memory CRUD + TTL/prune, content-filter admin, `memory` and `content-filter` tags, `ContentFilterRule` schema).
-8. ~~Add CI gates: SBOM, dependency scanning~~ — done. ~~Remaining: signed-release workflow~~ — **done** (`.github/workflows/release.yml` — `v*` tag trigger, pip-audit, pip-licenses SBOM, wheel build, Sigstore keyless signing, GitHub Release upload).
-9. ~~Add E2E tests and a fuzzing harness for the Tab Bridge and supervisor~~ — **E2E done** (`tests/test_e2e.py`, 25 tests). **Expanded fuzzing harness done** (`tests/test_fuzzer_payloads.py`, 94 adversarial payloads, 18 injection variants × 3 positions, 16 DOM injection vectors, never-5xx invariant enforced).
-10. ~~Incident Response: emergency agent kill-switch~~ — **done** (`POST/DELETE/GET /admin/kill-switch`, thread-safe `threading.Event()`, audited, blocks all `/tools/call` with 503).
-11. ~~Per-user rate limits~~ — **done** (`check_user_rate_limit()` in `rate_limit.py`, separate `_user_windows` dict, wired into `/tools/call` and `/chat/complete`, env-configurable).
-12. ~~GDPR/consent export API~~ — **done** (`GET/DELETE /consent/export/{actor}`, backed by `export_actor_data`/`erase_actor_data` in `consent_log.py`, admin-gated and audited).
-13. ~~Operator CLI~~ — **done** (`gateway_ctl.py` — `login`, `kill-switch`, `permissions`, `audit`, `key`, `providers`, `consent` commands; httpx or stdlib fallback; token cache).
-14. ~~Per-agent memory store~~ — **done** (`agent_memory.py`, thread-safe JSON per-agent store, full CRUD REST API, path-traversal-safe IDs, admin-gated endpoints). ~~Memory key TTL/expiry~~ — **done** (`ttl_seconds` param, `_load_active` auto-prune, `memory_prune`, `memory_get_meta`, `/prune` endpoint). ~~Agent memory browser UI~~ — **done** (`ui/memory.html`, two-column dark-theme browser, inline edit, TTL display, toast notifications).
-15. ~~Content moderation filter~~ — **done** (`content_filter.py`, literal + regex deny rules, recursive string check, HTTP 403 on match, enforced in `/tools/call` and `/chat/complete`, runtime admin API, env-var + file config).
-16. ~~Metrics dashboard UI~~ — **done** (`ui/metrics.html`, Prometheus poll, sparklines, 6 summary cards, full table with filter bar).
-17. ~~Rate-limit admin API~~ — **done** (`get_config()`, `update_config()`, `usage_snapshot()` in `rate_limit.py`; `GET/PUT /admin/rate-limits`, `DELETE /admin/rate-limits/clients/{key}`, `DELETE /admin/rate-limits/users/{username}`).
-18. ~~Provider health-check endpoint~~ — **done** (`GET /admin/providers/{provider}/health`; returns `ok`/`no_key`/`unavailable`).
-19. ~~Approval webhooks~~ — **done** (`webhooks.py`, persisted registry, fire-and-forget ThreadPoolExecutor delivery, CRUD at `/admin/webhooks`, fired on `approval.created/approved/rejected`).
-20. ~~Content filter UI~~ — **done** (`ui/content-filter.html`, two-column dark-theme admin browser, live client-side test panel, reload-from-disk, sessionStorage token).
-21. ~~Memory export/import (backup & recovery)~~ — **done** (`export_all()`/`import_all()` in `agent_memory.py`; `GET /admin/memory/export`, `POST /admin/memory/import`; merge and replace modes; audited). ~~Memory CLI commands~~ — **done** (`gateway_ctl.py memory agents|list|get|set|delete|prune|clear|export|import`).
-22. ~~Webhook delivery log~~ — **done** (`_delivery_log` deque in `webhooks.py`; `_deliver()` records every attempt; `get_deliveries(hook_id, limit)`; `GET /admin/webhooks/{hook_id}/deliveries`; 404 for unknown hook). ~~Webhook delivery retries~~ — **done** (exponential back-off up to `AGENT_GATEWAY_WEBHOOK_MAX_RETRIES` attempts; `attempts` field in delivery log). ~~Webhook HMAC via CLI~~ — **done** (`webhooks add --secret`). ~~Webhook UI secret input + `gateway.alert` checkbox~~ — **done** (`ui/webhooks.html` password field, signed badge, Attempts column). ~~`openapi.yaml` delivery/webhook schema gaps~~ — **done** (`attempts`, `signed`, `AlertConfig`, `/admin/alerts/config`). ~~`schedule history --n`~~ — **done** (paging limit forwarded as `?limit=N`). ~~Approval-queue depth alert~~ — **done** (`gateway.alert` event, `AGENT_GATEWAY_APPROVAL_ALERT_THRESHOLD`, `GET/PUT /admin/alerts/config`, `_public_hook()` secret masking). ~~`GET /admin/schedule/{task_id}/history?limit=N` server-side paging~~ — **done** (`Query(50, ge=1, le=500)`, `total` + `count` fields, 422 on out-of-range). ~~`gateway_ctl.py alerts` subcommand~~ — **done** (`alerts status` / `alerts set N`, negative-threshold guard). ~~Alert threshold panel in `ui/status.html`~~ — **done** (🔔 panel, `loadAlertConfig()` on every poll, amber dot). ~~Webhook retry row highlight in `ui/webhooks.html`~~ — **done** (`row-retried` amber border + ⚠️ in Attempts column). ~~Approval auto-reject timeout~~ — **done** (`AGENT_GATEWAY_APPROVAL_TIMEOUT`, `expire_pending()`, daemon reaper, `GET/PUT /admin/approvals/config`). ~~`ui/approvals.html` timeout panel~~ — **done** (⏱ panel + Save button). ~~`ui/audit.html` expanded event filter~~ — **done** (optgroups for Approvals, Alerts, Webhooks, Keys, Other). ~~`enqueued_at` field in approval queue items~~ — **done** (`ApprovalQueue.submit()` now stores Unix timestamp). ~~`gateway_ctl.py approvals` subcommand~~ — **done** (`approvals list/approve/reject/timeout get/timeout set`; 23 tests in `test_gateway_ctl_approvals.py`). ~~`openapi.yaml ApprovalRequest` schema gaps~~ — **done** (`risk` + `enqueued_at` fields, `GET/PUT /admin/approvals/config` documented). ~~`ui/schedule.html` run history limit selector~~ — **done** (`<select id="history-limit">` dropdown + `?limit=N` in `loadHistory()`, total vs returned count display). ~~`supervisor.py` manifest-driven `requires_approval` routing~~ — **done** (`ToolManifest.load()` consulted before heuristic; `requires_approval: false` bypasses queue; `requires_approval: true` always enqueues; no-manifest tools fall back to heuristic; 20 new tests). ~~`openapi.yaml` schedule history `?limit` + `total` field~~ — **done** (query param 1–500 documented, `total` + `count` in 200 schema, 422 response for out-of-range). ~~`gateway_ctl.py capabilities` subcommand~~ — **done** (`capabilities list` table + `capabilities show <tool>` detail; 17 tests in `test_gateway_ctl_capabilities.py`). ~~`ui/capabilities.html`~~ — **done** (public capabilities browser; risk + approval filters; summary pills; card grid; nav card added to `ui/index.html`). ~~`ui/approvals.html` bug fixes + collapsible cards~~ — **done** (`riskClass`/`riskLabel` string handling, tool name from `payload.tool`, collapsible card headers with chevron, age display). ~~`gateway_ctl.py status` tests~~ — **done** (14 tests in `test_gateway_ctl_status.py`). ~~`GET /tools/capabilities` `allowed_arg_keys` field~~ — **done** (`app.py` + openapi.yaml `ToolCapabilityEntry` schema). ~~`ui/approvals.html` manifest capability lookup~~ — **done** (`fetchManifests()` on connect; declared arg key tags; ⚠ unexpected-key warning banner). ~~`tests/test_gateway_ctl_rate_limits.py`~~ — **done** (20 tests). ~~`tests/test_gateway_ctl_schedule.py`~~ — **done** (21 tests). ~~`ui/capabilities.html` `allowed_arg_keys` on cards~~ — **done** (green-tinted arg key tags; null hides the row). ~~`GET /admin/metrics/tools` per-tool invocation endpoint~~ — **done** (`metrics.py` `get_labels_for_counter()` iterates labelled counter buckets; `app.py` admin-gated endpoint returns sorted `[{tool, calls}]` list + `total`; `tool_calls_total` sum bug fixed in `GET /admin/status` (was reading unlabelled bucket → always 0, now sums all `tool` labels); 8 new tests in `test_metrics_api.py`; 929 tests total). ~~`ui/metrics.html` per-tool bar chart~~ — **done** (horizontal bar chart section under full-metrics table; `updateToolTable(rows)` parses `tool_calls_total{tool="…"}` rows from existing Prometheus poll; proportional fill bar + call count + % of total; no extra HTTP fetch). ~~`ui/schedule.html` live trigger polling~~ — **done** (`triggerTask()` captures `prevRunCount`, polls `GET /admin/schedule/{id}` every 1 s up to 10 s, calls `renderDetail()` live, fires "✓ Run completed" / "⚠ error" / timeout toast, calls `loadHistory()` + `loadTasks()` on new run; replaces old `setTimeout(loadTasks, 1200)` stub). ~~`openapi.yaml` `GatewayStatus` named component~~ — **done** (`/admin/status` inline schema extracted to `components/schemas/GatewayStatus`; `/admin/metrics/tools` endpoint fully documented with response schema). ~~`tests/test_gateway_ctl_provider_health.py`~~ — **done** (26 tests across `TestProviderHealthCheck` (7: correct URL per provider, status icon ✓/✗/!, provider name printed, empty-response resilience), `TestProviderHealthList` (4: all 4 providers called, each URL verified, names printed, empty-response resilience), `TestProviderHealthExpiring` (7: endpoint called, default/custom `within_days`, no-expiring message, single/multiple rows, empty-response resilience), `TestProviderHealthParser` (8: registered, check/list/expiring parsed, all 4 provider choices, `--within-days` default+custom, `func` wired)). ~~`ui/metrics.html` per-tool call-rate sparklines~~ — **done** (`_prevToolCounts` + `_toolHistory` maps track per-poll deltas; `updateToolTable()` rewritten with DOM-based row construction so each bar row gets a `canvas.tool-spark` (60×20) drawn via `drawSparkline()`; green `+N` delta badge shown to the right of the count; zero-delta initial poll handled gracefully; reuses existing `SPARK_MAX = 20` window size).
-- [x] **Tests: 955 passing, 2 skipped** (up from 929; +26 new tests in `tests/test_gateway_ctl_provider_health.py`).
-- [x] **Pylance type-error fixes (5 errors, 2 files)**: `test_gateway_ctl_permissions.py` — `body['allowed_tools']` annotated with `# type: ignore[index]`; `test_gateway_ctl_provider_health.py` — `**kw` spread into `patch.object` replaced with explicit if/else branches so Pylance can resolve the overload.
-- [x] **`metrics.py` — `get_labels_for_histogram(name)`**: returns all `(labels_dict, sum, count, values_list)` tuples for a named histogram, sorted by count descending; used to compute per-tool p50 latency without exposing raw sample lists to callers.
-- [x] **`GET /admin/metrics/tools` — p50 + mean latency fields**: endpoint now merges `tool_call_duration_seconds` histogram data; each tool entry gains optional `p50_seconds` and `mean_seconds` fields when at least one duration observation exists; latency absent when no histogram data (e.g. synthetic counter tests). 4 new unit tests in `test_metrics_api.py`.
-- [x] **`ui/schedule.html` — bulk enable/disable all tasks**: two new "✓ All on" / "✗ All off" buttons added to `#list-header` beside the Refresh button; `bulkSetEnabled(enabled)` fires parallel `PATCH /admin/schedule/{id}` requests for every loaded task and shows a toast with successful/failed count.
-- [x] **`ui/status.html` — top-tool sub-line + metrics link**: `loadTopTool()` async function fetches `GET /admin/metrics/tools` on every 5-second poll cycle; populates a `card-sub` line on the Tool Calls card showing the top tool name, its call count, and p50 latency (when available); a `→ metrics` link navigates to `metrics.html`.
-- [x] **Tests: 962 passing, 2 skipped** (up from 955; +7 new tests: 4 `get_labels_for_histogram` unit tests, 3 `/admin/metrics/tools` latency endpoint tests).
-- [x] **`openapi.yaml` — `/admin/metrics/tools` p50 + mean latency schema**: `p50_seconds` (number, nullable) and `mean_seconds` (number, nullable) added to the tool-entry schema with descriptions; both documented as absent when no histogram data exists for the tool.
-- [x] **`ui/metrics.html` — per-tool p50 latency column**: `fetchNow()` fetches `GET /admin/metrics/tools` (admin-gated; silently skipped when no token or 4xx) on every poll cycle to build a `latMap`; `updateToolTable(rows, latMap)` renders a `p50 Xms` span in each tool bar row — blue `.has-data` when histogram data is present, muted `—` when absent; new `.tool-p50` / `.tool-p50.has-data` CSS classes; graceful degradation: chart still renders without auth token.
-- [x] **`gateway_ctl.py` — `metrics` subcommand**: `metrics tools` prints all tools as a formatted table (Tool | Calls | p50 ms | Mean ms); `metrics top [--n N]` (default 5) shows only the top N tools by call count; missing latency rendered as `—`; total summary line showing call count and tool count.
-- [x] **Tests: 984 passing, 2 skipped** (up from 962; +22 new tests in `tests/test_gateway_ctl_metrics.py`: 10 `TestMetricsTools`, 5 `TestMetricsTop`, 7 `TestMetricsParser`).
-- [x] **`gateway_ctl.py` — `content-filter` subcommand**: `content-filter list` prints all deny rules as an indexed table (# / Mode / Label / Pattern); `content-filter add <pattern> [--mode literal|regex] [--label TEXT]` posts a new rule (default mode `literal`, label omitted when empty); `content-filter delete <index>` removes a rule by zero-based index; `content-filter reload` reloads rules from env-var + file config and prints the loaded count. 28 new tests in `tests/test_gateway_ctl_content_filter.py` (`TestContentFilterList` 8, `TestContentFilterAdd` 6, `TestContentFilterDelete` 2, `TestContentFilterReload` 4, `TestContentFilterParser` 8).
-- [x] **`gateway_ctl.py` — `memory list --meta`**: `--meta` flag (store_true) added to `memory list`; when set, makes one extra `GET /agents/{id}/memory/{key}` request per key and appends an expiry annotation to each printed line: `[no expiry]`, `[expires in Xs/Xm/Xh]`, or `[EXPIRED]` when `expires_at` is in the past. 7 new tests in `tests/test_gateway_ctl_memory.py::TestMemoryListMeta`.
-- [x] **`ui/schedule.html` — Last duration stat card**: 4th stat card `d-last-dur` added to the stat grid beside run-count / last-run / next-run; `loadHistory()` populates it from the first history row's `duration_seconds` field (formatted as `X.XXX s`); `renderDetail()` resets it to `—` when switching tasks so stale values never show for a new selection.
-- [x] **Tests: 1020 passing, 2 skipped** (up from 984; +36 new tests: 28 content-filter CLI + 7 `memory list --meta` + 1 extra parser test).
-- [x] **`gateway_ctl.py` — `users` subcommand**: `users list` prints a formatted table (Username / Roles / Restrictions); `users create <username> <password> [--role ROLE]` posts `POST /admin/users` with role defaulting to `user`; `users delete <username>` calls `DELETE /admin/users/{username}`; `users password <username> <new_password>` calls `POST /admin/users/{username}/password`. 27 new tests in `tests/test_gateway_ctl_users.py` (`TestUsersList` 8, `TestUsersCreate` 6, `TestUsersDelete` 2, `TestUsersPassword` 3, `TestUsersParser` 8).
-- [x] **Tests: 1047 passing, 2 skipped** (up from 1020; +27 new tests in `tests/test_gateway_ctl_users.py`).
-- [x] **`ui/memory.html` — Export all / Import buttons**: "⬇ Export all" button in the agent panel calls `GET /admin/memory/export` and triggers a browser file download (`memory-export.json`); "⬆ Import" button opens a hidden `<input type="file">` that reads the selected JSON file, asks merge-vs-replace via `confirm()`, and POSTs to `POST /admin/memory/import` with `{agents, merge}` body; toast shows imported agent and key counts; agent list reloads automatically.
-- [x] **`ui/providers.html` — Chat proxy test panel**: New "⚡ Chat Proxy Test" section below the expiring-keys panel; provider dropdown (OpenAI / Anthropic / OpenRouter / Ollama), optional model input, temperature number input; message textarea; "▶ Send" button POSTs to `POST /chat/complete`; response displayed in a scrollable `<pre>` with provider name and elapsed time; error responses shown inline with toast; uses the existing admin Bearer token.
-- [x] **`ui/audit.html` — Column sort**: All three data columns (Timestamp, Event, Actor) are now sortable; clicking a header sets sort column and direction (▲/▼ indicators via CSS `::after`); default sort is newest-first by timestamp (matching the server response order); `sortBy(col)` toggles direction when clicking the same column, resets to sensible default when switching; `sortEntries(arr)` comparator integrates into the `applyFilters() → renderTable()` pipeline — no extra fetch needed, purely client-side.
-- [x] **`ui/schedule.html` — Duration sparkline**: 5th stat card "Duration trend" added to the Statistics grid; `<canvas id="dur-spark" width="120" height="32">` is populated by `drawDurationSparkline(rows)` called at the end of `loadHistory()`; plots `duration_seconds` in chronological order (oldest-left) as a green (#4caf50) line with a dot at the latest point; min/max normalised so the full canvas height is used regardless of absolute scale; canvas cleared on empty-history paths to avoid stale data from a previous selection.
-- [x] **`openapi.yaml` — `users` tag**: Added `- name: users` tag with description to the top-level `tags:` block; all six user-management endpoints (`GET/POST /admin/users`, `DELETE /admin/users/{username}`, `POST /admin/users/{username}/password`, `GET/PUT /admin/users/{username}/permissions`) updated from `tags: [admin]` to `tags: [admin, users]` so that API explorer tools can filter by the `users` category.
-- [x] **Tests: 1047 passing, 2 skipped** (unchanged — all three changes are pure UI/YAML with no server-side logic; the occasional single flaky test in `test_metrics_api.py` is a pre-existing shared-state timing issue that passes in isolation).
-- [x] **`gateway_ctl.py` — `users permissions` convenience sub-action**: `users permissions get <username>` calls `GET /admin/users/{username}/permissions` and prints an at-a-glance summary (unrestricted / no-tools / sorted bullet list); `users permissions set <username> <tools>` calls `PUT` with the comma-separated allow-list (whitespace-stripped, empty tokens skipped); `users permissions clear <username>` sends `allowed_tools: null` to lift all restrictions. Parser wired as a nested sub-parser (`dest='user_perm_action'`) under `users`, so both `gateway_ctl.py users permissions get alice` and the top-level `gateway_ctl.py permissions get alice` work independently.
-- [x] **`tests/test_openapi_tags.py` — OpenAPI guard tests** (7): `test_openapi_file_parses` · `test_defined_tags_have_descriptions` · `test_all_operations_have_tags` · `test_all_tags_are_declared` · `test_users_tag_declared` · `test_user_endpoints_use_users_tag` · `test_no_duplicate_tag_declarations` — prevents undeclared or tag-less operations from being merged undetected; `Admin – Scheduler` is pre-approved as a legacy tag via `_LEGACY_TAGS`.
-- [x] **`ui/index.html` — Nav-card search filter**: `<input id="card-search" type="search" placeholder="Filter panels…">` inserted between the section heading and the grid; `filterCards(query)` toggles `.hidden` (CSS `display:none`) on each `.tool-card` by matching the lowercased query against the card's full text content (icon + name + description + badge); a `"X of N"` count badge appears when a query is active; the native `<input type="search">` clear button (✕) is wired to reset the filter.
-- [x] **Tests: 1067 passing, 2 skipped** (up from 1047; +7 `test_openapi_tags.py` + 3 new `TestUsersParser` + 11 `TestUsersPermissions` guard tests — index.html and gateway_ctl.py parser changes carry no backend logic that needs new server tests).
-- [x] **Error fixes — 7 Pylance type-narrowing guards**: `tests/test_gateway_ctl_content_filter.py` — 4 `assert body is not None` guards inserted before `.get()` / `not in` usages in `test_mode_literal_sent`, `test_mode_regex_sent`, `test_label_included_when_set`, `test_label_omitted_when_empty`; `tests/test_openapi_tags.py` — `assert yaml is not None` guard added in `_load_spec()` to type-narrow the optional `yaml` import. All 7 Pylance errors cleared; zero runtime behaviour change.
-- [x] **`openapi.yaml` — full tag consistency pass**: 6 new named top-level tags declared (`kill-switch`, `status`, `audit`, `alerts`, `schedule`; `users` was already present from the prior session); 16 endpoint tag arrays updated — `GET/POST/DELETE /admin/kill-switch` → `[admin, kill-switch]`; `GET /admin/status` → `[admin, status]`; `GET /admin/metrics/tools` → `[admin, metrics]`; `GET /admin/audit` and `GET /admin/audit/export.csv` → `[admin, audit]`; `GET/PUT /admin/alerts/config` → `[admin, alerts]`; all 7 `/admin/schedule/*` endpoints (`list`, `create`, `get`, `update`, `delete`, `trigger`, `history`) migrated from the free-form `Admin – Scheduler` tag to `[admin, schedule]`. Every HTTP operation in the spec now carries at least one declared named tag.
-- [x] **`tests/test_openapi_tags.py` — `_LEGACY_TAGS` eliminated**: `_LEGACY_TAGS` set to `frozenset()` (empty); the `Admin – Scheduler` exception that was required to make `test_all_tags_are_declared` pass is no longer needed. All 7 guard tests now enforce full tag discipline with no exceptions.
-- [x] **`gateway_ctl.py` — `audit follow` live-tail action**: New `follow` branch in `cmd_audit`; polls `GET /admin/audit` every `--interval` seconds (default 5.0 s), deduplicates entries by `ts` field across iterations, streams new entries in the same format as `audit tail`; exits cleanly on `KeyboardInterrupt`. Parser entry added between `audit csv` and `audit.set_defaults` with `--interval SECS`, `--n`, `--actor`, `--action` flags.
-- [x] **`gateway_ctl.py` — `schedule list --next` countdown flag**: `--next` store-true flag added to the `schedule list` subparser; when set, tasks are sorted ascending by `next_run_at` and each row is annotated with a human-readable countdown: `in Xs`, `in Ym`, `in Z.zh`, or `(overdue)` for tasks whose `next_run_at` is in the past; tasks without a `next_run_at` value sort last.
-- [x] **`ui/status.html` — Scheduler Tasks card enrichment**: `<div class="card-sub" id="c-tasks-sub">` added inside the Scheduler Tasks stat card; new `loadSchedule()` async function (called on every poll cycle) fetches `GET /admin/schedule`, computes enabled/total count and the minimum `next_run_at` across enabled tasks, then sets `c-tasks-sub` to e.g. `"3/5 enabled · next in 47s"`; gracefully no-ops when unauthenticated or on network error.
-- [x] **Tests: 1068 passing, 2 skipped** (up from 1067; +1 net from openapi guard test now enforcing stricter tag discipline — all YAML, CLI, and UI changes are covered by the existing guard and integration suites; dedicated `audit follow` and `schedule list --next` parser tests are a logged remaining step).
-- [x] **`_fmt_audit_entry()` helper — consistent audit output formatting**: New module-level helper `_fmt_audit_entry(entry)` used by both `audit tail` and `audit follow`; actor left-padded to 16 chars, event left-padded to 28 chars, details JSON truncated to 120 chars with `…`; footer now uses grammatically correct `entry` / `entries` plural. Both subcommands now produce identical, terminal-width-friendly columns.
-- [x] **`tests/test_gateway_ctl_audit.py` — `TestAuditFollow` (6 new tests) + parser tests (4 new)**: `test_calls_audit_endpoint`, `test_prints_new_entries`, `test_prints_stopped_on_interrupt`, `test_uses_interval_argument`, `test_actor_filter_forwarded_to_url`, `test_deduplicates_repeated_entries`; parser: `test_follow_parsed`, `test_follow_interval_flag`, `test_follow_actor_flag`, `test_follow_action_flag`.
-- [x] **`tests/test_gateway_ctl_schedule.py` — `TestScheduleListNext` (7 new tests) + parser tests (2 new)**: `test_overdue_annotation`, `test_seconds_annotation`, `test_minutes_annotation`, `test_hours_annotation`, `test_no_next_run_at_does_not_crash`, `test_without_next_flag_no_annotation`, `test_sorts_ascending_by_next_run`; parser: `test_list_next_not_set_by_default`, `test_list_next_flag_parsed`.
-- [x] **`ui/audit.html` — group-by toggle**: "Group by event" button in toolbar; `_groupByEvent` boolean state; `groupEntries(arr)` collapses entries by event name preserving occurrence count; when active, `renderTable` renders one summary row per event type (badge + `×N` count chip, muted `(grouped)` details cell) sorted by frequency descending; button style changes to `.active` and text toggles to "Ungroup"; `.grp-count` CSS for the count chip.
-- [x] **`ui/users.html` — last-seen activity chip**: `_lastSeen` state dict populated by non-blocking `loadLastSeen()` (fetches `GET /admin/audit?tail=200`, maps `actor → latest ts`); `_relTime(ts)` formats elapsed time as `just now` / `Xm ago` / `Xh ago` / `Xd ago`; each user-item row gets a muted `.seen-chip` showing the actor's last audit timestamp; fetch runs in background after `loadUsers()` and triggers a second `renderUserList()` render once data arrives.
-- [x] **`README.md` (root) rewritten**: Full feature table, 15-row UI pages table, CLI cheat-sheet, repository layout table, quickstart with correct test count (~1087).
-- [x] **`agent-gateway/README.md` updated**: Feature list expanded (content-filter, rate-limits, memory, scheduler, webhooks, audit CSV, metrics); UI pages table (15 pages); endpoint reference completed (users, content-filter, rate-limits, memory, scheduler, webhooks, alerts, status/metrics sections added); environment variables table extended (content-filter, memory, audit path); persistent files table extended; development section updated with CLI reference cheat-sheet.
-- [x] **Tests: 1087 passing, 2 skipped** (up from 1068; +19 new: 10 `TestAuditFollow`+parser, 9 `TestScheduleListNext`+parser).
-- [x] **`browser-shell/` — Electron desktop browser with embedded gateway**: Full Chromium-based browser (address bar, tabs, back/forward/reload/stop, home) wrapping the agent gateway as a hidden subprocess. Architecture: Electron 29 main process (`main.js`) discovers `agent-gateway/` (dev: `../agent-gateway/`; packaged: `resources/agent-gateway/`), finds the Python interpreter (checks `.venv/Scripts/python.exe` then `PATH`), spawns `uvicorn app:app --host 127.0.0.1 --port 8080 --windowsHide` and polls `GET /health` every 400 ms for up to 15 s; `taskkill /f /t` terminates the process tree on close. One `BrowserWindow` hosts the 88 px chrome UI (`src/browser.html` — tab bar 36 px + address bar 52 px) plus one `BrowserView` per tab positioned below the chrome strip. `preload.js` exposes a `contextBridge` API (`window.electronAPI`) covering tabs (new/close/switch/list), navigation (navigate/back/forward/reload/stop/home), gateway status query, and external-URL delegation. `src/browser.js` renders the tab bar and address bar, wires keyboard shortcuts (Ctrl+T, Ctrl+W, Ctrl+L, Ctrl+R, Ctrl+1–9, Alt+←/→), and polls gateway status every 5 s (coloured dot: orange=starting, green=ready, red=error). Splash screen (`src/splash.html`) displayed while gateway boots. Address bar queries DuckDuckGo for non-URL input. Gateway menu shortcuts link to Admin Hub, Audit log, Users, and Status pages. Packaged with `electron-builder` 24.9 → Windows NSIS `.exe` (artifact: `Intelli-Setup-0.1.0.exe`) and Linux `.deb` + AppImage. Placeholder 16×16 purple `assets/icon.ico` generated by `generate-icon.js` (pure Node.js, no extra deps). `browser-shell/README.md` covers prerequisites, dev quickstart, build commands, architecture diagram, and keyboard shortcut reference.
-- [x] **Documentation refresh — all `.md` files**: `docs/deployment.md` (225 lines), `docs/developer-guide.md` (~270 lines), `docs/runbook.md` (257 lines), `ARCHITECTURE.md` (full Mermaid diagram with Electron shell + all 20 gateway subsystems + component table), `SECURITY.md` (4 items marked done: persistent token revocation, rate limiting on /admin/login, GDPR/CCPA API, secret rotation), `THREAT_MODEL.md` (38-row implementation status table appended), `README.md` (browser-shell row + `npm start` quickstart + correct venv startup command), `ROADMAP.md` (remaining-steps section replaced with clean prioritised backlog of 14 items).
-- [x] **`ui/status.html` — approval queue depth threshold colouring**: `_alertThreshold` module variable (default 0) shared between `loadAlertConfig()` and `render()`; Pending Approvals card colour is now proportional to the configured alert threshold — amber (`v-yellow`) when pending ≥ 80 % of threshold or > 0 when threshold is disabled, red (`v-red`) when pending ≥ threshold; zero pending always renders without colour class.
-- [x] **`browser-shell/` — admin-hub sidebar panel**: Lazily-created `BrowserView` (`sidebarView`) loaded with `${GATEWAY_ORIGIN}/ui/`; toggled via `ipcMain.handle('toggle-sidebar')`; `SIDEBAR_WIDTH = 340 px` constant added; `tabBounds()` subtracts sidebar width when open; new `sidebarBounds()` positions sidebar at `x: w - SIDEBAR_WIDTH, y: CHROME_HEIGHT`; `syncBounds()` replaces three duplicate resize handlers and also repositions the sidebar on window resize/fullscreen; `preload.js` exposes `electronAPI.toggleSidebar()`; `browser.html` adds `#btn-sidebar` (☰) button right of URL bar; `browser.js` wires button click + `Ctrl+Shift+A` shortcut and applies accent colour to button when sidebar is open.
-- [x] **`browser-shell/` — Chrome-style panel system (bookmarks, history, settings, clear-data, dev-addons)**: Five `position:fixed; right:0; width:360px` overlay panels in `src/browser.html` + `browser.css`; `openPanel(name)` / `closeAllPanels()` in `src/browser.js` toggle `.hidden` and call `electronAPI.setPanelVisible(bool)`. New IPC: `panel-visible` handler in `main.js` sets `panelVisible` state + calls `tab.view.setBounds(tabBounds(mainWin))` — `tabBounds()` now subtracts `panelW = panelVisible ? PANEL_WIDTH : 0` (`PANEL_WIDTH = 360` constant) so panels are never hidden behind the native `BrowserView` overlay. `toggle-chrome-devtools` IPC handler toggles `mainWin.webContents` DevTools. `preload.js` exposes `electronAPI.setPanelVisible(isOpen)` and `electronAPI.toggleChromeDevTools()`. Bookmark star (★) in address bar with `refreshBookmarkStar()` / `toggleBookmarkCurrentPage()` / `loadBookmarksPanel()` / `renderBookmarkList()`; zoom indicator with `refreshZoomIndicator()`; three-dot (⋮) app-menu button wired to `show-app-menu` IPC (native popup). Dev-addons panel: JS inject textarea executes in current tab; Store and Manager buttons open in a **new tab** via `newTab()` (not `navigate()`). Settings hub panel: Addons, Downloads links plus `setting-devtools-chrome` button wired to `toggleChromeDevTools()`. Clear-data panel: checkbox-gated `clearBrowsingData()`. History panel: `loadHistoryPanel()` / `renderHistoryList()` with day separators.
-- [x] **`gateway_ctl.py` — f-string Python 3.11 compat fix**: Line ~883 used a `\u2014` Unicode escape inside an f-string expression, which is illegal in Python < 3.12. Extracted to a local variable `ks_label = ('ACTIVE \u2014 ' + str(result.get('kill_switch_reason'))) if ks else 'off'` and used `ks_label` in the f-string. Fixes `SyntaxError: f-string expression part cannot include a backslash` on CI (Python 3.11).
-- [x] **`app.py` — ToolCall input size limit**: Added `Field` to the Pydantic import; `ToolCall.tool` changed to `str = Field(..., max_length=256)`. Oversized tool names and emoji floods now return 422 Unprocessable Entity instead of 500. Fixes fuzzer test assertions and prevents pathological identifiers from bypassing schema validation.
-- [x] **Tests: 1087 passing, 2 skipped** (unchanged count; 6 CI failures resolved): `test_fuzzer_payloads.py` — `UnicodeEncodeError` on lone-surrogate payloads caught in `_call()` helper; `test_providers.py` — removed orphaned `finally` block with undefined `orig`, patched `ProviderKeyStore._read_fallback` via `classmethod(lambda cls: {})` to prevent users.json file-backed key leaking into the test.
-- [x] **Documentation refresh** (this session): `docs/developer-guide.md` (Browser Shell section rewritten: panel system, `PANEL_WIDTH`/`SIDEBAR_WIDTH` constants, IPC surface table, extension-point table); `ARCHITECTURE.md` (Mermaid `PanelSystem` node + `panel-visible IPC` edge; Component Summary and Notes updated); `THREAT_MODEL.md` (two new rows: ToolCall name size limit, fuzzer payload coverage); `SECURITY.md` (Threat Model Summary: oversized-tool-call row; Hardening Checklist: ToolCall max_length item); `README.md` (Browser shell feature table updated with bookmark star, zoom indicator, ⋮ menu, panel system).
-- [x] **`browser-shell/` — Electron auto-updater (item 6)**: `package.json` adds `dependencies: { "electron-updater": "^6.3.0" }` + `build.publish: { provider: github, owner: UrHighness01, repo: Intelli }`; `main.js` imports `electron-updater` with a try/catch fallback (graceful degradation in dev without a publish config), wires `update-available` → `mainWin.webContents.send('update-available', { version, releaseDate })` and `update-downloaded` → `mainWin.webContents.send('update-downloaded')`, registers `ipcMain.handle('install-update')` → `autoUpdater.quitAndInstall()`, and fires `checkForUpdates()` 5 s after `createMainWindow()` to avoid startup races; `preload.js` exposes `electronAPI.onUpdateAvailable(cb)`, `electronAPI.onUpdateDownloaded(cb)`, and `electronAPI.installUpdate()`; `src/browser.html` adds a `#update-bar` banner div (hidden by default) between the address bar and panels; `src/browser.css` styles the banner (`#2a4a7f` blue background, `.update-btn-primary` / `.update-btn-dismiss` buttons); `src/browser.js` wires both events in `init()` — shows the bar on `update-available` (version in `<strong>`), changes button text to "Restart & Install" on `update-downloaded`, and wires the buttons.
-- [x] **`agent-gateway/sandbox/seccomp-worker.json` (item 7)**: Created minimal Linux seccomp allowlist — `defaultAction: SCMP_ACT_ERRNO`; 17 named allow groups covering every syscall Python needs (file I/O, mmap family, signals, futex/clone/threading, identity reads, rlimit, clock, fd management, exit, prctl/arch_prctl, getrandom, uname, temp-file ops, pipes/poll, xattr, inotify); 3 explicit ERRNO blocks: networking (`socket`, `connect`, `bind`, `listen`, `accept4`, `sendmsg`, …), process-spawning (`fork`, `vfork`, `execve`, `execveat`), and dangerous kernel interfaces (`ptrace`, `bpf`, `perf_event_open`, `init_module`, `delete_module`, `kexec_load`, `kexec_file_load`, `reboot`, `mount`, `umount2`, `pivot_root`, `seccomp`, `add_key`, and 5 more); `docs/deployment.md §4.1` added with Docker `--security-opt seccomp=…` command, docker-compose snippet, and smoke-test instructions.
-- [x] **`providers/adapters.py` — outbound allowlist (item 15)**: Imported `urllib.parse as _urlparse`; added `_build_default_allowlist()` (derives `scheme://netloc` origins from `OPENAI_BASE_URL`, Anthropic hardcoded, OpenRouter hardcoded, `OLLAMA_BASE_URL`) and `_OUTBOUND_ALLOWLIST` (populated from `INTELLI_PROVIDER_OUTBOUND_ALLOWLIST` env csv when set, else from `_build_default_allowlist()`); added `_check_outbound_url(url)` that parses the origin and raises `RuntimeError` with the blocked origin and the allowlist; call sites: top of `OpenAIAdapter.chat_complete()`, `AnthropicAdapter.chat_complete()`, `OpenRouterAdapter.chat_complete()`, `OllamaAdapter.is_available()`, `OllamaAdapter.chat_complete()`.
-- [x] **`tests/test_provider_outbound.py` — 16 new tests**: `TestCheckOutboundUrl` (10): exact-origin allow, allowed-with-path, blocked-unlisted, blocked-different-scheme, blocked-different-port, partial-host-match-blocked, default-allowlist-includes-all-providers, multiple-origins, empty-allowlist-blocks-all (whitespace-only → default allowlist), trailing-slash-normalization; `TestAdapterHonorsAllowlist` (6): OpenAI blocked, Anthropic blocked, OpenRouter blocked, Ollama chat blocked, Ollama is_available blocked (returns False), OpenAI allowed proceeds to HTTP call.
-- [x] **Tests: 1127 passed, 1 skipped** (up from 1115; +12 new tests in `tests/test_audit_encrypt.py`).
-- [x] **Item 13 — Encrypted audit log at rest (AES-256-GCM)**: `app.py` — `_audit_key()` reads `INTELLI_AUDIT_ENCRYPT_KEY` (64-hex env var → 32-byte key; returns `None` when absent); `_encrypt_audit_line()` (12-byte random nonce + AESGCM encrypt → `base64(nonce+ct)`); `_decrypt_audit_line()` (inverse); `_audit()` write path conditionally encrypts; `audit_export()` read path decrypts with silent plaintext fallback; 12 tests in `tests/test_audit_encrypt.py`.
-- [x] **Item 14 — Accessibility & i18n**: `ui/i18n.js` (ES module, 35-string English table, `t()` / `setLang()`, DOMContentLoaded ARIA auto-enhancer: skip-link, landmarks, `aria-live` on `#toast`/`#status-dot`, `aria-label` on icon-only buttons and unlabelled inputs/tables, `(opens in new tab)` annotation); `<script type="module" src="i18n.js">` added before `</body>` in all 15 admin UI pages.
-- [x] **Tests: 1140 passed, 1 skipped** (up from 1127; +13 new tests in `tests/test_chat_stream.py`).
-- [x] **Item 11 — Browser sidebar AI chat (SSE streaming)**: `app.py` — `stream: bool = Query(False)` added to `POST /chat/complete`; `_sse_gen()` inline generator splits adapter response by word, yields `{"token": "…", "done": false}` per word then `{**result, "done": true}` at end; error path yields `{"error": "…", "done": true}`; returns `StreamingResponse(media_type='text/event-stream', headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no','Access-Control-Allow-Origin':'*'})`; `ui/chat.html` created (dark-themed panel: provider dropdown + live `GET /admin/providers/{prov}/health` check, model input, SSE `fetch`+`ReadableStream` reader+`TextDecoder` loop, blinking cursor span injected during streaming, token-count stats bar, `sessionStorage('gw_token')` auth, `⚙ Hub` back-link, i18n.js integration); `browser-shell/main.js` sidebar now loads `/ui/chat.html`; `#btn-sidebar` title + `aria-label` updated to "AI Chat sidebar"; 💬 AI Chat nav card (Stream badge) prepended to `ui/index.html` tool-grid; 13 tests in `tests/test_chat_stream.py` covering non-streaming JSON, explicit `stream=false`, SSE content-type, data lines, final `done=true`, content integrity, intermediate `done=false`, content reconstruction, unauthenticated 401 (streaming + non-streaming), bad-provider 400, adapter-error event, cache-control header.
+| Feature | Status |
+|---|---|
+| Multi-tab Chromium shell | ✅ Done |
+| Embedded gateway lifecycle (spawn/kill) | ✅ Done |
+| Admin hub sidebar (toggle Ctrl+Shift+A) | ✅ Done |
+| Chrome panel system (bookmarks, history, settings) | ✅ Done |
+| Addon JS injection + inject-queue polling | ✅ Done |
+| Tab snapshot IPC bridge + captureTab() | ✅ Done |
+| Auto-updater (electron-updater) | ✅ Done |
+| Windows NSIS installer + Linux .deb / AppImage | ✅ Done |
+| Navigation guard | ✅ Done |
 
-23. Browser integration: embed Chromium + sidebar UI + renderer-to-gateway bridge (long-term, high complexity).
+---
 
-Refined Hybrid Supervisor Pipeline (implementation details)
---------------------------------------------------------
+## Operations
 
-Overview:
-- The hybrid supervisor mediates between local small models and optional cloud/specialized verifiers. It ensures tool-call correctness, enforces per-tool schemas, redacts sensitive fields, and decides whether a call requires elevation (human approval or a stronger verifier).
+| Feature | Status |
+|---|---|
+| SIEM log shipper sidecar (`scripts/log_shipper.py`) | ✅ Done |
+| Full OpenAPI 3.0.3 spec (20+ tags) | ✅ Done |
+| 1100+ pytest tests | ✅ Done |
+| Accessibility + i18n (`ui/i18n.js`) | ✅ Done |
 
-Components & responsibilities:
-- Ingress adapter: receives model outputs (pseudo-structured suggestions) and normalizes them into a canonical ToolCall envelope.
-- Schema validator: validates `ToolCall.args` against per-tool JSON Schema; on failure, returns a deterministic error token and structured feedback for the model to retry.
-- Sanitizer/Redactor: applies per-origin and per-user redaction rules (from `redaction_rules.json` / keyring-backed policies) and removes or replaces sensitive fields before downstream processing.
-- Risk scorer: lightweight heuristics + policy rules that mark calls as `low`, `medium`, or `high` risk (file writes, network access, system commands count as higher risk). Risk score influences whether approvals or a cloud verifier are required.
-- Approver/Escalation queue: stores pending high-risk calls for operator approval; includes audit metadata and a replayable sanitized snapshot.
-- Verifier (optional cloud/large model): performs deterministic reformatting/validation for strict function-call adherence when local models fail; should be auditable and rate-limited.
-- Executor (sandbox proxy): receives approved calls and runs them in a tightly constrained sandbox process with capability and resource limits, returning structured results.
+---
 
-Runtime flow:
-1. Model emits pseudo-ToolCall -> Ingress adapter normalizes it.
-2. Schema validator checks args.
-   - On validation error: return standardized error token + guidance for model to correct format.
-3. Sanitizer redacts sensitive fields and records audit entry.
-4. Risk scorer computes risk; if `high` then enqueue for approval and return `pending_approval` to orchestrator.
-5. If `low/medium`: optionally invoke verifier for deterministic formatting, then dispatch to sandboxed executor.
-6. Executor returns result; supervisor records result and emits audit + metrics.
+## Remaining / Future Items
 
-Design constraints & tests:
-- Deterministic error tokens for validation failures so models can detect and retry without leaking secrets.
-- Unit tests: schema validation, sanitizer redaction, risk scoring rules, approval queue lifecycle.
-- Integration tests: full flow with stubbed verifier and sandbox, including replay of sanitized snapshots.
-- Fuzzing: feed random DOM snapshots and malformed ToolCalls to the ingress + validator pipeline (CI harness already includes a fuzzer entry point).
-
-Operational notes:
-- All approval and audit actions are append-only and signed by the gateway process identity; retain logs for at least 90 days by default.
-- Metricization: per-tool invocation counts, failures, mean validation latency, approval rates, and executor resource usage.
-- Privacy-by-default: local models operate in a local-only mode; any call that would send data externally must require explicit site-level opt-in.
-
-
-Choose a next task and I will implement it: (A) wire the renderer preview + selectable input UI, (B) scaffold a sandboxed Tool Proxy, or (C) scaffold provider adapters + secure key storage.
-
-- **Compliance & Data Governance:** implement GDPR/CCPA compliance flows, data residency controls, Data Processing Addenda, and user data export/deletion APIs.
-- **Secure Updates & Supply Chain:** signed updates, reproducible builds, SBOM for third-party components, and an automated CI/CD pipeline with security gates.
-- **Secrets & Key Recovery:** store API keys in OS-backed secure storage or hardware-backed keystores; provide encrypted backup/escrow and recovery UI.
-- **Telemetry & Opt-in:** design minimal, privacy-preserving telemetry (opt-in), with clear opt-out and on/offline modes.
-- **Incident Response & Forensics:** comprehensive audit logs, replayable action traces, emergency agent kill-switch, and incident playbooks.
-- **Abuse, Safety & Moderation:** rate limits, action approval thresholds, content filtering, and escalation paths for harmful agent behaviors.
-- **Enterprise Features & Policy Controls:** MDM/enterprise policies, role-based access, centralized configuration, and logging for compliance needs.
-- **Testing & QA:** unit/integration tests for agent gateway, contract tests for tool schemas, fuzzing (DOM inputs, agent payloads), and end-to-end automation tests.
-- **Monitoring & Observability:** health endpoints, metrics (resource usage per agent), alerts for anomalous behavior, and dashboards for ops.
-- **Backup & Recovery:** encrypted export/import of agent memories and settings, plus snapshot-based rollback for agents and addons.
-- **Documentation & Developer DX:** comprehensive API docs, example plugins, security hardening guides, and onboarding tutorials for users and devs.
-- **Legal & Policy:** clear transparency about model providers, provenance of persistent memories, and a privacy/security notice for users.
-- **Accessibility & Internationalization:** screen-reader support, keyboard navigation, localization workflows, and RTL language support.
-- **Performance & Resource Controls:** per-agent CPU/GPU quotas, memory caps, and graceful degradation for large workloads.
-
-Deliverables:
-- Compliance checklist and DPA templates.
-- CI/CD with signed release pipeline and SBOM generation.
-- Test suite (unit + integration + fuzzing) and monitoring dashboards.
-- Enterprise policy management UI and backup/restore tools.
-
+| Item | Priority | Notes |
+|---|---|---|
+| OAuth2 / OIDC federation | Medium | Enterprise SSO |
+| In-product TLS (nginx / Caddy integration guide) | Low | Deployment docs cover this |
+| Vault AppRole / Kubernetes auth for production | Low | DevOps concern |
+| Browser integration — full Chromium fork | Research | Long-term |

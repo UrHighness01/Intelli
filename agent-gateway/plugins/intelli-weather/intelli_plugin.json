@@ -1,0 +1,46 @@
+{
+    "name": "intelli-weather",
+    "version": "1.0.0",
+    "description": "Fetch current weather conditions and forecasts via Open-Meteo (no API key required).",
+    "author": "Intelli",
+    "homepage": "https://github.com/UrHighness01/Intelli",
+    "tools": [
+        {
+            "name": "weather_get",
+            "description": "Get current weather for a city or coordinates. Returns temperature, condition, humidity, wind.",
+            "module": "main",
+            "function": "weather_get",
+            "args": {
+                "location": {
+                    "type": "string",
+                    "required": true,
+                    "description": "City name (e.g. 'London') or 'lat,lon' coordinates"
+                },
+                "units": {
+                    "type": "string",
+                    "required": false,
+                    "description": "Temperature units: 'celsius' (default) or 'fahrenheit'"
+                }
+            }
+        },
+        {
+            "name": "weather_forecast",
+            "description": "Get a 7-day weather forecast for a city or coordinates.",
+            "module": "main",
+            "function": "weather_forecast",
+            "args": {
+                "location": {
+                    "type": "string",
+                    "required": true,
+                    "description": "City name or 'lat,lon' coordinates"
+                },
+                "days": {
+                    "type": "integer",
+                    "required": false,
+                    "description": "Number of forecast days (1-7, default 3)"
+                }
+            }
+        }
+    ],
+    "env_vars": []
+}

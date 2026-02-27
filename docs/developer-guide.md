@@ -7,20 +7,37 @@
 ```
 Intelli/
 ├── agent-gateway/           ← FastAPI backend + all business logic
-│   ├── app.py               ← Main FastAPI application (all routes)
+│   ├── app.py               ← Main FastAPI application (60+ routes)
 │   ├── supervisor.py        ← Schema validation, risk scoring, approval queue
 │   ├── auth.py              ← PBKDF2 auth, access/refresh tokens, RBAC, user management
-│   ├── audit.py / audit.log ← Append-only JSONL audit trail
 │   ├── rate_limit.py        ← Sliding-window per-IP and per-user rate limiter
 │   ├── scheduler.py         ← Recurring tool-call scheduler (background daemon)
 │   ├── agent_memory.py      ← Per-agent key-value store with TTL
+│   ├── memory_store.py      ← Vector / semantic memory store
 │   ├── content_filter.py    ← Literal + regex deny-list enforcement
 │   ├── webhooks.py          ← Approval webhook registry + HMAC signed delivery
 │   ├── metrics.py           ← In-process counter/gauge/histogram registry
 │   ├── consent_log.py       ← Append-only context-sharing consent log (JSONL)
 │   ├── tab_bridge.py        ← DOM snapshot serializer + redaction engine
+│   ├── tab_snapshot.py      ← In-process active-tab HTML snapshot store
+│   ├── addons.py            ← Addon JS-injection manager + persistence
+│   ├── failover.py          ← Provider failover (auto-fallback)
+│   ├── compaction.py        ← Context compaction / auto-summarise
+│   ├── personas.py          ← Named agent personas with system prompts
+│   ├── sessions.py          ← Per-session conversation history
+│   ├── a2a.py               ← Agent-to-agent persona task routing
+│   ├── notifier.py          ← Outbound push notifications (Telegram/Discord/Slack)
+│   ├── notes.py             ← Local Markdown knowledge base (~/.intelli/notes/)
+│   ├── credential_store.py  ← OS keychain + AES-256-GCM named credential store
+│   ├── plugin_loader.py     ← Plugin installer + dynamic tool registry
+│   ├── voice.py             ← Voice I/O (STT + TTS)
+│   ├── canvas_manager.py    ← Canvas / structured multi-block output
+│   ├── mcp_client.py        ← MCP client (Model Context Protocol)
+│   ├── watcher.py           ← Page diff watcher (monitor URLs for changes)
+│   ├── workspace_manager.py ← Workspace and skill management
+│   ├── approval_gate.py     ← Approval gate helpers
 │   ├── gateway_ctl.py       ← Operator CLI (wraps all admin REST APIs)
-│   ├── openapi.yaml         ← Full OpenAPI 3.0.3 spec (20 named tags)
+│   ├── openapi.yaml         ← Full OpenAPI 3.0.3 spec (20+ named tags)
 │   ├── providers/
 │   │   ├── provider_adapter.py   ← ProviderKeyStore + BaseProviderAdapter
 │   │   ├── adapters.py           ← OpenAI / Anthropic / OpenRouter / Ollama adapters
@@ -32,14 +49,24 @@ Intelli/
 │   │   ├── proxy.py              ← Dispatch to subprocess or persistent worker
 │   │   ├── pool.py               ← Thread-safe WorkerPool with restart/backoff
 │   │   ├── manager.py            ← Health checks against bundled worker
-│   │   └── docker_runner.py      ← Docker-isolated worker runner
+│   │   ├── docker_runner.py      ← Docker-isolated worker runner
+│   │   └── seccomp-worker.json   ← Linux seccomp allowlist for worker subprocess
 │   ├── schemas/
 │   │   ├── *.json                ← Per-tool JSON Schema validation files
 │   │   └── capabilities/         ← Per-tool capability manifest JSON files (13)
 │   ├── tools/
-│   │   └── capability.py         ← CapabilityVerifier + ToolManifest
-│   ├── ui/                       ← 15 dark-mode admin HTML pages
-│   └── tests/                    ← 1 087 pytest tests (57 test files, 1087 passing)
+│   │   ├── capability.py         ← CapabilityVerifier + ToolManifest
+│   │   ├── tool_runner.py        ← Agent tool dispatcher
+│   │   ├── browser_tools.py      ← Headless browser automation
+│   │   ├── web_tools.py          ← Web fetch, search, summarise
+│   │   ├── pdf_reader.py         ← PDF text + structure extraction
+│   │   ├── video_frames.py       ← ffmpeg frame extraction + vision model
+│   │   ├── coding_tools.py       ← Code generation, execution, linting
+│   │   └── fuzzer.py             ← Security fuzzing harness
+│   ├── plugins/                  ← Installed plugins (intelli_plugin.json manifest)
+│   │   └── intelli-weather/      ← Starter plugin (Open-Meteo, no API key)
+│   ├── ui/                       ← 24 dark-mode admin HTML pages
+│   └── tests/                    ← 1100+ pytest tests
 │
 ├── browser-shell/           ← Electron desktop browser
 │   ├── main.js              ← Electron main process: gateway lifecycle + tab management
@@ -53,7 +80,10 @@ Intelli/
 │   └── assets/icon.ico      ← App icon
 │
 ├── docs/                    ← This documentation
-├── ROADMAP.md               ← Phased roadmap + detailed implementation log
+├── scripts/
+│   ├── log_shipper.py       ← SIEM audit log forwarding sidecar
+│   └── validate_yaml.py     ← OpenAPI YAML validation
+├── ROADMAP.md               ← Implementation status — all completed features
 ├── ARCHITECTURE.md          ← System architecture (Mermaid)
 ├── SECURITY.md              ← Security policy + hardening checklist
 └── THREAT_MODEL.md          ← Attack surface and privacy controls
@@ -110,23 +140,48 @@ Intelli/
 
 | Module | Purpose |
 |---|---|
-| `app.py` | FastAPI app — all ~40 HTTP routes |
+| `app.py` | FastAPI app — all 60+ HTTP routes |
 | `supervisor.py` | Schema validation, risk scoring, manifest-driven approval routing |
 | `auth.py` | PBKDF2 user auth, RBAC, sign-in, access/refresh/revoke token lifecycle, user management |
 | `rate_limit.py` | Sliding-window per-IP + per-user rate limiting; runtime config API |
 | `scheduler.py` | Interval-based recurring tool-call tasks; background daemon; run history |
 | `agent_memory.py` | Thread-safe JSON per-agent KV store; TTL prune; export/import |
+| `memory_store.py` | Vector / semantic memory store for long-term recall |
 | `content_filter.py` | Literal + regex deny-list; recursive string check; runtime admin API |
 | `webhooks.py` | Webhook registry; HMAC signing; exponential-back-off delivery; delivery log |
 | `metrics.py` | In-process counter/gauge/histogram registry; Prometheus text output |
 | `consent_log.py` | Append-only JSONL consent timeline; GDPR export/erase |
 | `tab_bridge.py` | DOM snapshot serializer + per-origin field redaction |
-| `gateway_ctl.py` | Operator CLI — all admin commands (21 subcommands, 55+ sub-actions) |
+| `tab_snapshot.py` | In-process active-tab HTML snapshot store |
+| `addons.py` | Addon JS-injection manager + persistence |
+| `failover.py` | Provider failover — automatic fallback across LLM providers |
+| `compaction.py` | Context compaction — auto-summarise long conversation windows |
+| `personas.py` | Named agent personas with configurable system prompts |
+| `sessions.py` | Per-session conversation history — store, retrieve, search |
+| `a2a.py` | Agent-to-agent task routing across personas; async task queue |
+| `notifier.py` | Outbound push notifications to Telegram / Discord / Slack |
+| `notes.py` | Local Markdown knowledge base; full-text search |
+| `credential_store.py` | OS keychain + AES-256-GCM named credential store |
+| `plugin_loader.py` | Plugin installer (pip / zip / GitHub); dynamic tool registration |
+| `voice.py` | Voice I/O — speech-to-text and text-to-speech |
+| `canvas_manager.py` | Canvas / structured multi-block output |
+| `mcp_client.py` | MCP client — Model Context Protocol tool and resource integration |
+| `watcher.py` | Page diff watcher — monitor URLs for content changes |
+| `workspace_manager.py` | Workspace and skill manifest management |
+| `approval_gate.py` | Approval gate helpers |
+| `gateway_ctl.py` | Operator CLI — 20 subcommands covering all admin APIs |
 | `providers/provider_adapter.py` | ProviderKeyStore (keyring / env / file fallback) |
 | `providers/adapters.py` | Concrete adapters: OpenAI, Anthropic, OpenRouter, Ollama |
 | `providers/key_rotation.py` | Key TTL metadata, `rotate_key()`, `list_expiring()` |
 | `providers/vault_adapter.py` | HashiCorp Vault KV v2 integration |
 | `tools/capability.py` | CapabilityVerifier + ToolManifest (13 capability manifests) |
+| `tools/tool_runner.py` | Agent tool dispatcher |
+| `tools/browser_tools.py` | Headless browser automation |
+| `tools/web_tools.py` | Web fetch, search, summarise |
+| `tools/pdf_reader.py` | PDF text + structure extraction |
+| `tools/video_frames.py` | ffmpeg frame extraction + vision model description |
+| `tools/coding_tools.py` | Code generation, execution, linting |
+| `tools/fuzzer.py` | Security fuzzing harness |
 | `sandbox/worker.py` | Single-shot subprocess worker (action whitelist) |
 | `sandbox/worker_persistent.py` | Long-lived pool worker with IPC |
 | `sandbox/proxy.py` | Dispatch: subprocess vs persistent worker |
@@ -140,7 +195,7 @@ Intelli/
 
 | Page | URL | Description |
 |---|---|---|
-| `index.html` | `/ui/` | Searchable nav hub |
+| `index.html` | `/ui/` | Searchable nav hub — live status bar |
 | `status.html` | `/ui/status.html` | Live gateway dashboard |
 | `audit.html` | `/ui/audit.html` | Audit log — sort, filter, group-by, CSV |
 | `approvals.html` | `/ui/approvals.html` | Approval queue — SSE live updates |
@@ -154,7 +209,16 @@ Intelli/
 | `webhooks.html` | `/ui/webhooks.html` | Webhook registration + delivery history |
 | `capabilities.html` | `/ui/capabilities.html` | Tool capability manifest browser |
 | `consent.html` | `/ui/consent.html` | Context-sharing consent timeline |
-| `tab_permission.html` | `/ui/tab_permission.html` | Tab snapshot permission request |
+| `tab_permission.html` | `/ui/tab_permission.html` | Tab snapshot permission + per-origin redaction |
+| `chat.html` | `/ui/chat.html` | Streaming AI chat panel |
+| `canvas.html` | `/ui/canvas.html` | Structured multi-block canvas output |
+| `personas.html` | `/ui/personas.html` | Agent persona management |
+| `mcp.html` | `/ui/mcp.html` | MCP tool and resource browser |
+| `sessions.html` | `/ui/sessions.html` | Per-session conversation history |
+| `analytics.html` | `/ui/analytics.html` | Usage analytics and session stats |
+| `watchers.html` | `/ui/watchers.html` | Page diff watcher management |
+| `setup.html` | `/ui/setup.html` | First-run setup wizard |
+| `workspace.html` | `/ui/workspace.html` | Workspace and skill management |
 
 ---
 
@@ -365,9 +429,9 @@ all other URLs open in the system browser via `shell.openExternal()`.
 
 ## Running Tests
 
-```powershell
+```bash
 # From repo root
-python -m pytest -q                        # full suite
+python -m pytest -q                        # full suite (1100+ tests)
 python -m pytest agent-gateway/tests/ -v  # verbose
 python -m pytest -s test_sandbox_manager   # capture off
 python -m pytest -k "test_audit"           # keyword filter

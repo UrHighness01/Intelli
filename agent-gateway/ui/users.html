@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Intelli Gateway — User Management</title>
   <style>
@@ -209,8 +210,8 @@
 <!-- Login wall overlay — shown when not authenticated -->
 <div id="login-wall" style="display:none">
   <div class="login-card">
-    <h2>Admin sign-in</h2>
-    <p>User management requires an admin account.</p>
+    <h2>Re-authenticate</h2>
+    <p>User management is a sensitive area. Confirm your password every time you access this page.</p>
 
     <div class="lfield">
       <label for="login-username">Username</label>
@@ -603,13 +604,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (data.needs_setup) { location.replace('/ui/setup.html'); return; }
   } catch { /* gateway may be unreachable — continue to login wall */ }
 
-  const saved = localStorage.getItem('gw_token');
-  if (saved) {
-    _token = saved;
-    await loadUsers();  // shows login wall automatically on 401
-  } else {
-    showLoginWall();
-  }
+  // Always demand re-authentication on every visit — this page can change
+  // passwords and delete users, so a cached token is never enough.
+  const savedUser = localStorage.getItem('gw_remember_user') || 'admin';
+  const unameEl = document.getElementById('login-username');
+  if (unameEl) unameEl.value = savedUser;
+  showLoginWall();
 });
 </script>
   <script type="module" src="i18n.js"></script>

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Intelli · AI Chat</title>
   <style>
@@ -66,11 +67,13 @@
     }
     #login-bar.hidden { display: none; }
     #login-bar label { color: var(--muted); font-size: .75rem; white-space: nowrap; }
-    #login-token {
-      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    #login-user, #login-pass {
+      background: var(--surface2); border: 1px solid var(--border);
       color: var(--text); border-radius: 5px; padding: 4px 8px; font-size: .8rem;
     }
-    #login-token:focus { outline: none; border-color: var(--accent); }
+    #login-user { width: 90px; }
+    #login-pass { flex: 1; }
+    #login-user:focus, #login-pass:focus { outline: none; border-color: var(--accent); }
     .btn-sm {
       background: var(--accent); color: #fff; border: none; border-radius: 5px;
       padding: 4px 12px; font-size: .78rem; cursor: pointer; font-weight: 600;
@@ -103,9 +106,79 @@
       outline: none; border-color: var(--accent);
     }
     #sel-provider { min-width: 110px; }
-    #inp-model    { width: 130px; }
+    #inp-model    { width: 115px; }
     #inp-model::placeholder { color: var(--muted); }
+    #model-wrap   { display: flex; align-items: center; gap: 2px; }
+    #btn-clear-model {
+      display: none; background: transparent; border: none;
+      color: var(--muted); font-size: .9rem; line-height: 1;
+      padding: 2px 4px; border-radius: 3px; cursor: pointer;
+    }
+    #btn-clear-model:hover { color: var(--red); }
+    #inp-model:not(:placeholder-shown) ~ #btn-clear-model,
+    #model-wrap:focus-within #btn-clear-model { display: block; }
     .spacer { flex: 1; }
+
+    /* ── Context bar ──────────────────────────────────────────────── */
+    #context-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 4px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .ctx-label { font-size: .68rem; color: var(--muted); white-space: nowrap; }
+    .ctx-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--muted); padding: 3px 8px;
+      font-size: .72rem; cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .ctx-btn:hover { color: var(--text); border-color: var(--accent); }
+    .ctx-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .ctx-pill {
+      font-size: .68rem; padding: 2px 7px; border-radius: 10px;
+      background: rgba(108,99,255,.12); color: var(--accent2);
+      border: 1px solid rgba(108,99,255,.3); max-width: 240px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ws-pill {
+      font-size: .68rem; padding: 2px 7px; border-radius: 10px;
+      background: rgba(61,220,132,.1); color: var(--green);
+      border: 1px solid rgba(61,220,132,.3);
+    }
+
+    /* ── Code blocks & addon button ───────────────────────────────── */
+    .msg-body pre {
+      background: #12141e; border: 1px solid var(--border);
+      border-radius: 7px; padding: 10px 12px;
+      font-size: .78rem; overflow-x: auto; margin: 6px 0;
+      white-space: pre; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    }
+    .msg-body code {
+      background: rgba(108,99,255,.13); border-radius: 3px;
+      padding: 1px 4px; font-family: monospace; font-size: .82em;
+    }
+    .msg-body pre code { background: transparent; padding: 0; }
+    .addon-create-bar {
+      margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .addon-create-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 5px; padding: 4px 10px; font-size: .73rem;
+      cursor: pointer; font-weight: 600; transition: background .15s;
+    }
+    .addon-create-btn:hover { background: var(--accent2); }
+    .addon-name-inp {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 5px; padding: 3px 7px;
+      font-size: .73rem; width: 130px;
+    }
+    .addon-name-inp:focus { outline: none; border-color: var(--accent); }
 
     /* ── Messages area ────────────────────────────────────────────── */
     #messages {
@@ -196,9 +269,14 @@
       border-top: 1px solid var(--border);
       padding: 8px 12px;
       display: flex;
-      align-items: flex-end;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
       flex-shrink: 0;
+    }
+    #input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
     }
     #msg-input {
       flex: 1;
@@ -245,10 +323,340 @@
       flex-shrink: 0;
     }
     .token-stat { display: flex; gap: 3px; }
-    .token-stat .val { color: var(--text); font-weight: 600; }
+    .token-stat .val { color: var(--text); font-weight: 600; }    /* context-fill bar */
+    #ctx-fill-wrap {
+      display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+    }
+    #ctx-fill-bar {
+      width: 80px; height: 5px; background: var(--surface2);
+      border-radius: 3px; overflow: hidden; border: 1px solid var(--border);
+    }
+    #ctx-fill-inner {
+      height: 100%; width: 0%; background: var(--green);
+      border-radius: 3px; transition: width .4s, background .4s;
+    }
+    #ctx-fill-pct { font-size: .65rem; color: var(--muted); min-width: 28px; }
+    /* ── Tool steps ───────────────────────────────────────────── */
+    .tool-steps {
+      display: flex; flex-direction: column; gap: 4px;
+      margin-bottom: 8px;
+    }
+    .tool-step {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 8px; font-size: .72rem;
+      color: var(--muted);
+    }
+    .tool-step .ts-icon { font-size: .9rem; }
+    .tool-step .ts-name { color: var(--accent2); font-weight: 600; flex-shrink: 0; }
+    .tool-step .ts-info { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .tool-step.done { border-color: var(--green); color: var(--text); }
+    .tool-step.done .ts-icon { color: var(--green); }
+    .tool-step.error { border-color: var(--red); }
+    .tool-steps-summary {
+      font-size: .7rem; color: var(--muted); cursor: pointer;
+      margin-bottom: 6px; display: flex; align-items: center; gap: 4px;
+    }
+
+    /* Coding-agent: terminal output block */
+    .tool-terminal {
+      font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      background: #0d1117;
+      color: #3ddc84;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: .76rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      overflow-y: auto;
+      max-height: 300px;
+      margin: 6px 0 0;
+    }
+    .tool-terminal.error { color: #f97583; border-color: #f97583; }
+    .tool-file-header {
+      font-size: .72rem;
+      color: var(--muted);
+      font-family: monospace;
+      margin: 6px 0 0;
+      padding: 2px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Image preview bar */
+    #img-preview-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 6px;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      display: none;   /* hidden until images are attached */
+    }
+    .img-pill {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .img-pill img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .img-pill .rm-btn {
+      position: absolute;
+      top: 1px; right: 2px;
+      background: rgba(0,0,0,.65);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 16px; height: 16px;
+      font-size: 10px;
+      line-height: 16px;
+      text-align: center;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    /* Drop overlay */
+    #messages.drag-over::after {
+      content: '📎 Drop images here';
+      position: absolute;
+      inset: 0;
+      background: rgba(88,166,255,.15);
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      color: var(--accent);
+      pointer-events: none;
+      z-index: 20;
+    }
+    #messages { position: relative; }  /* needed for ::after overlay */
+
+    /* ── Voice I/O ────────────────────────────────────────────────── */
+    #btn-mic {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 12px;
+      height: 36px;
+      font-size: 1rem;
+      transition: .15s;
+      flex-shrink: 0;
+    }
+    #btn-mic:hover { border-color: var(--accent); color: var(--text); }
+    #btn-mic.recording {
+      border-color: var(--red);
+      color: var(--red);
+      animation: mic-pulse 1s infinite;
+    }
+    @keyframes mic-pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,107,107,.6); }
+      50%      { box-shadow: 0 0 0 6px rgba(255,107,107,0); }
+    }
+    .speak-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .85rem;
+      padding: 2px 4px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity .15s, color .15s;
+    }
+    .msg:hover .speak-btn { opacity: 1; }
+    .speak-btn:hover { color: var(--accent2); }
+    .speak-btn.playing { color: var(--green); opacity: 1; animation: mic-pulse 1s infinite; }
+    #btn-autospeak.active { color: var(--green); }
+
+    /* ── Tool Approval Banner ─────────────────────────────────── */
+    #approval-banner {
+      position: sticky; top: 0; z-index: 100;
+      background: #1a0f1a; border: 1.5px solid var(--red);
+      border-radius: 8px; margin: 8px 12px 0;
+      padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      animation: approval-slide-in .2s ease;
+    }
+    #approval-banner.hidden { display: none; }
+    @keyframes approval-slide-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .approval-header { display: flex; align-items: center; gap: 8px; }
+    .approval-icon { font-size: 1.1rem; }
+    .approval-title { font-weight: 700; color: var(--red); font-size: .88rem; flex: 1; }
+    .approval-timer { font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .approval-body { font-size: .78rem; color: var(--muted); }
+    .approval-tool { color: var(--yellow); font-weight: 600; }
+    .approval-args {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; padding: 6px 8px; font-family: monospace;
+      font-size: .72rem; color: var(--text); max-height: 80px;
+      overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .approval-btns { display: flex; gap: 8px; }
+    .approval-btn {
+      flex: 1; border: none; border-radius: 6px; padding: 6px 0;
+      font-size: .82rem; font-weight: 700; cursor: pointer;
+    }
+    .approval-btn.allow { background: var(--green); color: #000; }
+    .approval-btn.deny  { background: #7f2a2a; color: var(--text); }
+    .approval-btn:hover { opacity: .85; }
+    .approval-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Skill-Created Toast ──────────────────────────────────── */
+    .skill-toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 200;
+      background: #122b1f; border: 1.5px solid var(--green);
+      border-radius: 10px; padding: 12px 18px;
+      font-size: .85rem; color: var(--text); max-width: 340px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.5);
+      animation: toast-in .25s ease;
+    }
+    .skill-toast a { color: var(--green); text-decoration: underline; }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Inline session history overlay ─────────────────────────── */
+    #history-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    #history-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    #history-overlay .ho-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    #history-overlay .ho-title {
+      font-size: .85rem;
+      font-weight: 600;
+      flex: 1;
+    }
+    #history-overlay .ho-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    #history-overlay .ho-close:hover { color: var(--text); background: var(--surface2); }
+    #history-overlay .ho-search {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 10px;
+      flex-shrink: 0;
+    }
+    #history-overlay .ho-search input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 5px;
+      padding: 5px 9px;
+      font-size: .8rem;
+      outline: none;
+    }
+    #history-overlay .ho-search input:focus { border-color: var(--accent); }
+    #history-overlay .ho-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    #history-overlay .ho-empty {
+      padding: 30px 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+    .ho-session {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .ho-session:hover { background: var(--surface2); }
+    .ho-session-top {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 3px;
+    }
+    .ho-session-date {
+      font-size: .65rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .ho-session-preview {
+      font-size: .8rem;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ho-session-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 5px;
+    }
+    .ho-btn {
+      font-size: .68rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: none;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .ho-btn:hover { color: var(--text); border-color: var(--accent); }
+    .ho-btn.resume { color: var(--accent); border-color: var(--accent); }
+    .ho-btn.resume:hover { background: var(--accent); color: #fff; }
+    .ho-btn.del:hover { border-color: var(--red); color: var(--red); }
+    .ho-msg-count { font-size: .63rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
   </style>
 </head>
 <body>
+
+  <!-- ── Inline session history overlay ────────────────────────── -->
+  <div id="history-overlay" role="dialog" aria-label="Session history">
+    <div class="ho-header">
+      <span class="ho-title">&#128196; Chat History</span>
+      <button class="ho-close" id="ho-close-btn" title="Close">&#10005;</button>
+    </div>
+    <div class="ho-search">
+      <input id="ho-search-input" type="text" placeholder="Search sessions&#8230;" autocomplete="off" />
+    </div>
+    <div class="ho-list" id="ho-list">
+      <div class="ho-empty">Loading&#8230;</div>
+    </div>
+  </div>
 
   <!-- ── Header ─────────────────────────────────────────────────── -->
   <header role="banner">
@@ -258,6 +666,9 @@
       <button class="header-btn" id="btn-clear" title="Clear conversation" aria-label="Clear conversation">
         &#128465; Clear
       </button>
+      <button class="header-btn" id="btn-history" title="Session history" aria-label="Session history" onclick="openHistoryOverlay()">
+        &#128196; History
+      </button>
       <a href="index.html" class="header-btn" title="Admin Hub" aria-label="Go to Admin Hub">
         &#9881; Hub
       </a>
@@ -266,10 +677,13 @@
 
   <!-- ── Login bar ──────────────────────────────────────────────── -->
   <div id="login-bar" role="form" aria-label="Authentication">
-    <label for="login-token">API Token:</label>
-    <input id="login-token" type="password" placeholder="Bearer token from /admin/login" aria-label="Bearer token" />
-    <button class="btn-sm" id="btn-login">Connect</button>
+    <label for="login-user">User:</label>
+    <input id="login-user" type="text" placeholder="admin" autocomplete="username" aria-label="Username" />
+    <label for="login-pass">Password:</label>
+    <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" />
+    <button class="btn-sm" id="btn-login" onclick="doLogin()">Connect</button>
   </div>
+  <div id="login-err" style="display:none;color:var(--red);font-size:.85rem;font-weight:600;padding:6px 12px;background:rgba(255,107,107,.15);border-radius:6px;border:1px solid rgba(255,107,107,.4);margin-top:6px"></div>
 
   <!-- ── Config bar ─────────────────────────────────────────────── -->
   <div id="config-bar" aria-label="Chat configuration">
@@ -278,15 +692,63 @@
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="openrouter">OpenRouter</option>
+      <option value="github_copilot">GitHub Copilot</option>
       <option value="ollama">Ollama</option>
     </select>
     <label for="inp-model">Model</label>
-    <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
+    <div id="model-wrap">
+      <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
+      <button id="btn-clear-model" title="Clear model" tabindex="-1">&#10005;</button>
+    </div>
+    <label for="sel-persona" style="margin-left:4px">Persona</label>
+    <select id="sel-persona" aria-label="Select persona" style="min-width:110px"></select>
     <div class="spacer"></div>
     <span id="status-pill" style="font-size:.72rem;color:var(--muted)" aria-live="polite"></span>
   </div>
 
+  <!-- ── Context bar ───────────────────────────────────────────────── -->
+  <div id="context-bar" aria-label="Context controls">
+    <span class="ctx-label">Context:</span>
+    <button class="ctx-btn" id="btn-page-ctx" title="Attach active tab HTML source to this message">
+      📄 Page
+    </button>
+    <button class="ctx-btn" id="btn-workspace" title="Inject agent workspace (AGENTS.md + SOUL.md) as system prompt">
+      🗂️ Workspace
+    </button>
+    <a href="workspace.html" class="ctx-btn" title="Manage workspace files and skills" style="text-decoration:none">
+      ✏️ Edit workspace
+    </a>    <button class="ctx-btn" id="btn-canvas" title="Open Canvas panel" onclick="openCanvas()">
+      🎨 Canvas
+    </button>
+    <button class="ctx-btn" id="btn-memory" title="Browse vector memory" onclick="openMemory()">
+      🧠 Memory
+    </button>
+    <button class="ctx-btn" id="btn-coderoot" title="Open coding workspace folder" onclick="openCodeRoot()" style="font-family:monospace;font-size:.68rem">
+      💻 Code
+    </button>    <span id="page-ctx-pill" class="ctx-pill" style="display:none"></span>
+    <span id="ws-pill" class="ws-pill" style="display:none">🟢 workspace active</span>
+    <div class="spacer"></div>
+    <span id="ctx-info" style="font-size:.68rem;color:var(--muted)"></span>
+  </div>
+
   <!-- ── Messages ───────────────────────────────────────────────── -->
+  <!-- Approval Banner (shows when agent needs permission to run a risky tool) -->
+  <div id="approval-banner" class="hidden" role="alertdialog" aria-label="Tool approval required">
+    <div class="approval-header">
+      <span class="approval-icon">🔐</span>
+      <span class="approval-title">Approval Required</span>
+      <span class="approval-timer" id="approval-timer">60s</span>
+    </div>
+    <div class="approval-body">
+      The agent wants to run <span class="approval-tool" id="approval-tool-name">tool</span>:
+    </div>
+    <div class="approval-args" id="approval-args"></div>
+    <div class="approval-btns">
+      <button class="approval-btn allow" id="approval-allow-btn" onclick="handleApproval(true)">✓ Allow</button>
+      <button class="approval-btn deny"  id="approval-deny-btn"  onclick="handleApproval(false)">✗ Deny</button>
+    </div>
+  </div>
+
   <div id="messages" role="log" aria-live="polite" aria-label="Conversation messages">
     <div id="empty-state">
       <div class="big-icon">&#129302;</div>
@@ -297,9 +759,13 @@
 
   <!-- ── Input area ─────────────────────────────────────────────── -->
   <div id="input-area">
-    <textarea id="msg-input" rows="1" placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
-              aria-label="Message input" aria-multiline="true"></textarea>
-    <button id="btn-send" aria-label="Send message">&#9654; Send</button>
+    <div id="img-preview-bar" aria-label="Attached images"></div>
+    <div id="input-row">
+      <textarea id="msg-input" rows="1" placeholder="Ask anything… (Enter / drag & drop images)"
+                aria-label="Message input" aria-multiline="true"></textarea>
+      <button id="btn-mic" title="Hold to record voice input (Whisper STT)" aria-label="Record voice"> 🎤 </button>
+      <button id="btn-send" aria-label="Send message">&#9654; Send</button>
+    </div>
   </div>
 
   <!-- ── Token counter ──────────────────────────────────────────── -->
@@ -307,6 +773,17 @@
     <div class="token-stat">Messages: <span class="val" id="stat-msgs">0</span></div>
     <div class="token-stat">Tokens&nbsp;in: <span class="val" id="stat-in">—</span></div>
     <div class="token-stat">Tokens&nbsp;out: <span class="val" id="stat-out">—</span></div>
+    <div id="ctx-fill-wrap" title="Estimated context window usage">
+      <span>Context:</span>
+      <div id="ctx-fill-bar"><div id="ctx-fill-inner"></div></div>
+      <span id="ctx-fill-pct">0%</span>
+    </div>
+    <button class="ctx-btn" id="btn-compact" title="Summarize conversation history to free up context" onclick="compactHistory()" style="font-size:.65rem;padding:2px 7px">
+      🗅 Compact
+    </button>
+    <button class="ctx-btn" id="btn-autospeak" title="Auto-speak AI responses" onclick="toggleAutoSpeak()" style="font-size:.65rem;padding:2px 7px">
+      🔊 Auto-speak
+    </button>
     <div class="spacer"></div>
     <span id="stat-model" style="color:var(--muted)"></span>
   </div>
@@ -323,46 +800,452 @@
     /* ── State ─────────────────────────────────────────────────── */
     let _token    = localStorage.getItem('gw_token') || '';
     let _msgs     = [];   // [{role, content}]
+    // Restore last-used provider+model immediately (before session fetch completes)
+    (() => {
+      const p = localStorage.getItem('intelli_last_provider');
+      const m = localStorage.getItem('intelli_last_model');
+      if (p) { const el = document.getElementById('sel-provider'); if (el) el.value = p; }
+      if (m) { const el = document.getElementById('inp-model');    if (el) el.value = m; }
+    })();
     let _busy     = false;
     let _totalIn  = 0;
     let _totalOut = 0;
+    let _usePageCtx   = false;
+    let _useWorkspace  = false;
+    let _pageSnapshot  = null; // cached tab snapshot
+    let _attachedImages = []; // [{dataUri, mimeType}] pending attached images
+    let _autoSpeak     = localStorage.getItem('intelli_autospeak') === '1';
+    let _mediaRecorder = null;
+    let _isRecording   = false;
+    let _currentAudio  = null; // currently playing HTMLAudioElement
+    let _persona       = localStorage.getItem('intelli_persona') || 'intelli';
+    let _sessionId     = localStorage.getItem('intelli_session_id') || generateUUID();
+    // Persist session_id across page reloads so history is continuous
+    localStorage.setItem('intelli_session_id', _sessionId);
+
+    function generateUUID() {
+      return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,
+        c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    }
+
+    /* ── Global error reporter ──────────────────────────────────── */
+    window.onerror = (msg, src, line, col, err) => {
+      const el = document.getElementById('login-err');
+      if (el) { el.textContent = `JS Error: ${msg} (line ${line})`; el.style.display = 'block'; }
+      console.error('Global JS error:', msg, src, line, err);
+      return false; // do not suppress errors
+    };
+    window.addEventListener('unhandledrejection', ev => {
+      console.error('Unhandled promise rejection:', ev.reason);
+    });
 
     /* ── DOM refs ───────────────────────────────────────────────── */
     const $loginBar   = document.getElementById('login-bar');
-    const $loginToken = document.getElementById('login-token');
+    const $loginUser  = document.getElementById('login-user');
+    const $loginPass  = document.getElementById('login-pass');
+    const $loginErr   = document.getElementById('login-err');
     const $btnLogin   = document.getElementById('btn-login');
     const $messages   = document.getElementById('messages');
     const $emptyState = document.getElementById('empty-state');
-    const $msgInput   = document.getElementById('msg-input');
+    const $msgInput       = document.getElementById('msg-input');
+    const $imgPreviewBar  = document.getElementById('img-preview-bar');
     const $btnSend    = document.getElementById('btn-send');
     const $btnClear   = document.getElementById('btn-clear');
     const $selProv    = document.getElementById('sel-provider');
     const $inpModel   = document.getElementById('inp-model');
+    const $selPersona = document.getElementById('sel-persona');
     const $statusPill = document.getElementById('status-pill');
     const $statMsgs   = document.getElementById('stat-msgs');
     const $statIn     = document.getElementById('stat-in');
     const $statOut    = document.getElementById('stat-out');
     const $statModel  = document.getElementById('stat-model');
+    const $btnPageCtx  = document.getElementById('btn-page-ctx');
+    const $btnWorkspace = document.getElementById('btn-workspace');
+    const $pageCtxPill = document.getElementById('page-ctx-pill');
+    const $wsPill      = document.getElementById('ws-pill');
+    const $ctxInfo     = document.getElementById('ctx-info');
 
     /* ── Auth ───────────────────────────────────────────────────── */
     function applyToken(tok) {
-      _token = tok.trim();
+      _token = (tok || '').trim();
       if (_token) {
         localStorage.setItem('gw_token', _token);
-        $loginBar.classList.add('hidden');
+        $loginBar?.classList.add('hidden');
+        if ($loginErr) $loginErr.style.display = 'none';
       } else {
-        $loginBar.classList.remove('hidden');
+        $loginBar?.classList.remove('hidden');
       }
     }
 
+    function _showLoginErr(msg) {
+      if (!$loginErr) { console.error('[login]', msg); return; }
+      $loginErr.textContent = msg;
+      $loginErr.style.display = 'block';
+      setTimeout(() => { $loginErr.style.display = 'none'; }, 8000);
+    }
+
+    async function doLogin() {
+      const user = (($loginUser?.value || '').trim() || 'admin');
+      const pass = $loginPass?.value || '';
+      if (!pass) { _showLoginErr('Enter your password'); return; }
+      if ($loginErr) $loginErr.style.display = 'none';
+      const origText = $btnLogin?.textContent || 'Connect';
+      if ($btnLogin) { $btnLogin.textContent = 'Connecting…'; $btnLogin.disabled = true; }
+      try {
+        const r = await fetch(`${GW}/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          localStorage.setItem('gw_remember_user', user);
+          if ($btnLogin) { $btnLogin.textContent = '✓ Connected'; $btnLogin.style.background = 'var(--green)'; }
+          setTimeout(() => {
+            if ($btnLogin) { $btnLogin.style.background = ''; $btnLogin.textContent = origText; }
+          }, 2000);
+          applyToken(d.token);
+          loadPersonas();
+          tryResumeSession();
+        } else {
+          const detail = await r.json().catch(() => ({}));
+          _showLoginErr(`Login failed (${r.status}): ${detail.detail || 'wrong credentials'}`);
+          if ($btnLogin) $btnLogin.textContent = origText;
+        }
+      } catch (e) {
+        _showLoginErr('Cannot reach gateway — is it running?');
+        if ($btnLogin) $btnLogin.textContent = origText;
+      } finally {
+        if ($btnLogin) $btnLogin.disabled = false;
+      }
+    }
+
+    // Expose on window so onclick= attributes and Electron injection always reach them
+    window.applyToken = applyToken;
+    window.doLogin    = doLogin;
+
+    // Pre-fill username from last successful login
+    if ($loginUser) $loginUser.value = localStorage.getItem('gw_remember_user') || 'admin';
+
     applyToken(_token);
 
-    $btnLogin.addEventListener('click', () => {
-      applyToken($loginToken.value);
+    // Poll for token injected by Electron shell (arrives after did-finish-load)
+    if (!_token) {
+      let _pollCount = 0;
+      const _tokenPoll = setInterval(() => {
+        const t = localStorage.getItem('gw_token');
+        if (t) { applyToken(t); loadPersonas(); clearInterval(_tokenPoll); }
+        if (++_pollCount > 25) clearInterval(_tokenPoll); // stop after 5 s
+      }, 200);
+    }
+
+    /* ── Persona selector ────────────────────────────────────────── */
+    async function loadPersonas() {
+      if (!_token) return;
+      try {
+        const r = await fetch(`${GW}/personas`, {
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) return;
+        const list = await r.json();
+        $selPersona.innerHTML = list.map(p =>
+          `<option value="${p.slug}" data-avatar="${p.avatar || '🤖'}"${p.slug === _persona ? ' selected' : ''}>
+            ${p.avatar || '🤖'} ${p.name}
+          </option>`
+        ).join('');
+      } catch (e) {
+        // Persona load is non-critical
+      }
+    }
+    loadPersonas();
+
+    $selPersona.addEventListener('change', () => {
+      _persona = $selPersona.value;
+      localStorage.setItem('intelli_persona', _persona);
     });
-    $loginToken.addEventListener('keydown', e => {
-      if (e.key === 'Enter') applyToken($loginToken.value);
+
+    // Model ×-clear button
+    document.getElementById('btn-clear-model').addEventListener('click', () => {
+      $inpModel.value = '';
+      localStorage.removeItem('intelli_last_model');
+      $inpModel.focus();
     });
+    $inpModel.addEventListener('input', () => {
+      const btn = document.getElementById('btn-clear-model');
+      btn.style.display = $inpModel.value ? 'block' : 'none';
+    });
+    // Show × immediately if a model was restored from localStorage
+    if ($inpModel.value) document.getElementById('btn-clear-model').style.display = 'block';
+
+    /* ── Resume session from history page (or inline overlay) ────── */
+    async function tryResumeSession(id) {
+      // Fall back to the saved resume id, then to the ongoing session (for browser restart restore)
+      const explicitResume = id || localStorage.getItem('intelli_resume_session_id');
+      const resumeId = explicitResume || _sessionId;
+      if (!resumeId || !_token) return;
+      localStorage.removeItem('intelli_resume_session_id');
+      try {
+        const r = await fetch(`${GW}/sessions/${encodeURIComponent(resumeId)}`, {
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
+        if (!msgs.length) return;
+        _msgs = msgs.map(m => ({ role: m.role, content: m.content }));
+        _sessionId = resumeId;
+        localStorage.setItem('intelli_session_id', _sessionId);
+        // Restore provider/model from the last assistant message that recorded them
+        const lastWithMeta = [...msgs].reverse().find(m => m.role === 'assistant' && m.provider);
+        if (lastWithMeta) {
+          if (lastWithMeta.provider) {
+            $selProv.value = lastWithMeta.provider;
+            localStorage.setItem('intelli_last_provider', lastWithMeta.provider);
+          }
+          if (lastWithMeta.model) {
+            $inpModel.value = lastWithMeta.model;
+            localStorage.setItem('intelli_last_model', lastWithMeta.model);
+          }
+        }
+        // Render them
+        $emptyState.style.display = 'none';
+        $messages.innerHTML = '';
+        for (const m of _msgs) appendMsg(m.role, m.content);
+        const label = explicitResume ? 'Resumed' : 'Restored last';
+        setStatus(`${label} session (${_msgs.length} messages)`, 'ok');
+      } catch (e) { /* best-effort */ }
+    }
+    // Delay slightly so token is applied first
+    setTimeout(() => tryResumeSession(), 200);
+
+    /* ── Inline session history overlay ─────────────────────────── */
+    let _hoSessions = [];
+    let _hoSearchTimer = null;
+
+    function _hoFmtDate(ts) {
+      if (!ts) return '';
+      const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+      return isNaN(d) ? '' : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function _hoEsc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function openHistoryOverlay() {
+      const overlay = document.getElementById('history-overlay');
+      overlay.classList.add('open');
+      document.getElementById('ho-search-input').value = '';
+      document.getElementById('ho-list').innerHTML = '<div class="ho-empty">Loading\u2026</div>';
+      await _hoLoad('');
+      document.getElementById('ho-search-input').focus();
+    }
+
+    function closeHistoryOverlay() {
+      document.getElementById('history-overlay').classList.remove('open');
+    }
+
+    async function _hoLoad(q) {
+      try {
+        const url = q
+          ? `${GW}/sessions?limit=100&q=${encodeURIComponent(q)}`
+          : `${GW}/sessions?limit=100`;
+        const r = await fetch(url, { headers: { 'Authorization': `Bearer ${_token}` } });
+        if (!r.ok) throw new Error(await r.text());
+        _hoSessions = await r.json();
+        _hoRender(_hoSessions);
+      } catch (e) {
+        document.getElementById('ho-list').innerHTML =
+          `<div class="ho-empty" style="color:var(--red)">Failed to load: ${_hoEsc(e.message)}</div>`;
+      }
+    }
+
+    function _hoRender(list) {
+      const $list = document.getElementById('ho-list');
+      if (!list.length) {
+        $list.innerHTML = '<div class="ho-empty">No sessions yet.</div>';
+        return;
+      }
+      $list.innerHTML = '';
+      for (const s of list) {
+        const div = document.createElement('div');
+        div.className = 'ho-session';
+        div.dataset.id = s.id;
+        div.innerHTML = `
+          <div class="ho-session-top">
+            <span class="ho-session-preview">${_hoEsc(s.preview || '(no messages)')}</span>
+            <span class="ho-msg-count">${s.msg_count || '?'} msg</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="ho-session-date">${_hoFmtDate(s.last_ts || s.created_at)}</span>
+            <div class="ho-session-actions">
+              <button class="ho-btn resume" data-id="${_hoEsc(s.id)}">&#8629; Resume</button>
+              <button class="ho-btn del"    data-id="${_hoEsc(s.id)}">&#128465; Delete</button>
+            </div>
+          </div>`;
+        div.querySelector('.resume').addEventListener('click', e => {
+          e.stopPropagation();
+          closeHistoryOverlay();
+          tryResumeSession(s.id);
+        });
+        div.querySelector('.del').addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm('Delete this session permanently?')) return;
+          try {
+            const dr = await fetch(`${GW}/sessions/${encodeURIComponent(s.id)}`,
+              { method: 'DELETE', headers: { 'Authorization': `Bearer ${_token}` } });
+            if (!dr.ok) throw new Error(await dr.text());
+            div.remove();
+            _hoSessions = _hoSessions.filter(x => x.id !== s.id);
+            if (!document.querySelectorAll('.ho-session').length)
+              document.getElementById('ho-list').innerHTML = '<div class="ho-empty">No sessions yet.</div>';
+          } catch (err) {
+            alert('Delete failed: ' + err.message);
+          }
+        });
+        $list.appendChild(div);
+      }
+    }
+
+    // Close button
+    document.getElementById('ho-close-btn').addEventListener('click', closeHistoryOverlay);
+
+    // Search with debounce
+    document.getElementById('ho-search-input').addEventListener('input', () => {
+      clearTimeout(_hoSearchTimer);
+      _hoSearchTimer = setTimeout(() => {
+        _hoLoad(document.getElementById('ho-search-input').value.trim());
+      }, 320);
+    });
+
+    // Escape key closes overlay
+    document.getElementById('history-overlay').addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeHistoryOverlay();
+    });
+
+    $btnLogin.addEventListener('click', doLogin);
+    $loginPass.addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+    $loginUser.addEventListener('keydown', e => {
+      if (e.key === 'Enter') $loginPass.focus();
+    });
+
+    /* ── Page context toggle ─────────────────────────────────────── */
+    async function togglePageCtx() {
+      _usePageCtx = !_usePageCtx;
+      $btnPageCtx.classList.toggle('active', _usePageCtx);
+      if (_usePageCtx) {
+        await refreshPageSnapshot();
+      } else {
+        _pageSnapshot = null;
+        $pageCtxPill.style.display = 'none';
+        updateCtxInfo();
+      }
+    }
+
+    async function refreshPageSnapshot() {
+      try {
+        const r = await fetch(`${GW}/tab/snapshot`);
+        if (r.status === 204) {
+          $pageCtxPill.textContent = '⚠ no snapshot yet';
+          $pageCtxPill.style.display = 'inline';
+          _pageSnapshot = null;
+        } else if (r.ok) {
+          _pageSnapshot = await r.json();
+          const title = _pageSnapshot.title || _pageSnapshot.url || 'Current page';
+          $pageCtxPill.textContent = `📄 ${title.slice(0, 50)}`;
+          $pageCtxPill.style.display = 'inline';
+        }
+      } catch (e) {
+        $pageCtxPill.textContent = '⚠ fetch error';
+        $pageCtxPill.style.display = 'inline';
+      }
+      updateCtxInfo();
+    }
+
+    /* ── Workspace toggle ────────────────────────────────────────── */
+    function toggleWorkspace() {
+      _useWorkspace = !_useWorkspace;
+      $btnWorkspace.classList.toggle('active', _useWorkspace);
+      $wsPill.style.display = _useWorkspace ? 'inline' : 'none';
+      updateCtxInfo();
+    }
+
+    function updateCtxInfo() {
+      const parts = [];
+      if (_useWorkspace) parts.push('workspace');
+      if (_usePageCtx && _pageSnapshot) parts.push('page HTML');
+      $ctxInfo.textContent = parts.length ? `Injecting: ${parts.join(', ')}` : '';
+    }
+
+    $btnPageCtx.addEventListener('click', togglePageCtx);
+    $btnWorkspace.addEventListener('click', toggleWorkspace);
+
+    /* ── Code block detection & addon creation ───────────────────── */
+    function parseCodeBlocks(text) {
+      // Returns array of {lang, code} from ```lang\n...\n``` blocks
+      const blocks = [];
+      const re = /```(\w*)\n([\s\S]*?)```/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        blocks.push({ lang: m[1] || 'text', code: m[2] });
+      }
+      return blocks;
+    }
+
+    function renderMessageBody(text) {
+      // Render markdown-ish: code fences, inline code, newlines
+      const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return escaped
+        .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+          `<pre><code class="lang-${lang || 'text'}">${code}</code></pre>`)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br/>');
+    }
+
+    async function createAddonFromCode(code, name, descr) {
+      if (!name) { toast('Enter an addon name', 'err'); return; }
+      try {
+        const r = await fetch(`${GW}/admin/addons`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description: descr || 'Generated by AI chat', code_js: code }),
+        });
+        if (!r.ok) { const e = await r.json(); toast(e.detail || 'Error creating addon', 'err'); return; }
+        toast(`Addon "${name}" created ✓`, 'ok');
+        // Optionally auto-activate
+        await fetch(`${GW}/admin/addons/${encodeURIComponent(name)}/activate`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        toast(`Addon "${name}" activated ✓`, 'ok');
+      } catch (e) { toast(e.message, 'err'); }
+    }
+
+    function attachAddonButtons(bodyEl, assistantText) {
+      const blocks = parseCodeBlocks(assistantText);
+      const jsBlocks = blocks.filter(b => b.lang === 'js' || b.lang === 'javascript');
+      if (!jsBlocks.length) return;
+      jsBlocks.forEach((b, i) => {
+        const bar = document.createElement('div');
+        bar.className = 'addon-create-bar';
+        const nameInp = document.createElement('input');
+        nameInp.className = 'addon-name-inp';
+        nameInp.placeholder = `addon-name-${i + 1}`;
+        nameInp.type = 'text';
+        const btn = document.createElement('button');
+        btn.className = 'addon-create-btn';
+        btn.textContent = '⚡ Create & Activate Addon';
+        btn.onclick = () => createAddonFromCode(b.code, nameInp.value.trim(), '');
+        bar.appendChild(nameInp);
+        bar.appendChild(btn);
+        bodyEl.appendChild(bar);
+      });
+    }
 
     /* ── Message rendering ──────────────────────────────────────── */
     function renderEmpty() {
@@ -379,7 +1262,10 @@
       if (role === 'assistant') {
         const badge = document.createElement('span');
         badge.className = 'provider-badge';
-        badge.textContent = meta.provider || $selProv.value;
+        // Show persona avatar if set
+        const personaAvatar = ($selPersona && $selPersona.selectedOptions[0])
+          ? ($selPersona.selectedOptions[0].dataset.avatar || '🤖') : '🤖';
+        badge.textContent = `${personaAvatar} ${meta.provider || $selProv.value}`;
         metaDiv.appendChild(badge);
         if (meta.model) {
           const m = document.createElement('span');
@@ -392,7 +1278,19 @@
 
       const body = document.createElement('div');
       body.className = 'msg-body';
-      body.textContent = content;
+      if (role === 'assistant' && content) {
+        body.innerHTML = renderMessageBody(content);
+        attachAddonButtons(body, content);
+        // Add speaker button for TTS
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'speak-btn';
+        speakBtn.title = 'Read aloud';
+        speakBtn.textContent = '🔊';
+        speakBtn.onclick = () => speakText(content, speakBtn);
+        metaDiv.appendChild(speakBtn);
+      } else {
+        body.textContent = content;
+      }
 
       wrap.appendChild(metaDiv);
       wrap.appendChild(body);
@@ -413,6 +1311,11 @@
       badge.textContent = $selProv.value;
       metaDiv.appendChild(badge);
 
+      // Tool steps container (populated during streaming)
+      const toolSteps = document.createElement('div');
+      toolSteps.className = 'tool-steps';
+      toolSteps.style.display = 'none';
+
       const body = document.createElement('div');
       body.className = 'msg-body thinking';
       body.textContent = 'Thinking';
@@ -422,19 +1325,20 @@
       body.appendChild(cursor);
 
       wrap.appendChild(metaDiv);
+      wrap.appendChild(toolSteps);
       wrap.appendChild(body);
       $messages.appendChild(wrap);
       $messages.scrollTop = $messages.scrollHeight;
-      return { wrap, body };
+      return { wrap, body, toolSteps };
     }
 
     /* ── Send ───────────────────────────────────────────────────── */
     async function sendMessage() {
       const text = $msgInput.value.trim();
-      if (!text || _busy) return;
+      if ((!text && _attachedImages.length === 0) || _busy) return;
       if (!_token) {
         setStatus('⚠ Connect a token first', 'warn');
-        $loginBar.classList.remove('hidden');
+        $loginBar?.classList.remove('hidden');
         return;
       }
 
@@ -443,11 +1347,28 @@
       $msgInput.value = '';
       autoResize();
 
-      _msgs.push({ role: 'user', content: text });
-      appendMsg('user', text);
+      // Build user message — vision content array if images attached
+      let userContent;
+      if (_attachedImages.length > 0) {
+        const parts = [];
+        if (text) parts.push({ type: 'text', text });
+        _attachedImages.forEach(img => parts.push({
+          type: 'image_url',
+          image_url: { url: img.dataUri },
+        }));
+        userContent = parts;
+      } else {
+        userContent = text;
+      }
+      const attachCount = _attachedImages.length;
+      _attachedImages = [];
+      _renderImagePreviewBar();
+
+      _msgs.push({ role: 'user', content: userContent });
+      appendMsg('user', attachCount > 0 ? `🖼️×${attachCount}  ${text}` : text);
       updateStats();
 
-      const { wrap: thinkingEl, body: thinkingBody } = appendThinking();
+      const { wrap: thinkingEl, body: thinkingBody, toolSteps: toolStepsEl } = appendThinking();
       setStatus('Streaming…', '');
 
       const provider = $selProv.value;
@@ -466,6 +1387,11 @@
             model:       model || '',
             temperature: 0.7,
             max_tokens:  2048,
+            use_workspace:    _useWorkspace,
+            use_page_context: _usePageCtx,
+            use_tools:        true,
+            persona:          _persona,
+            session_id:       _sessionId,
           }),
         });
 
@@ -514,8 +1440,62 @@
               thinkingBody.textContent = `Error: ${ev.error}`;
               thinkingBody.classList.add('error-msg');
               setStatus('Error from provider', 'err');
+              // Remove the user message we pushed so retries don't stack
+              _msgs.pop();
               finalResult = null;
               break outer;
+            }
+
+            // Tool call / result events
+            if (ev.type === 'tool_call') {
+              toolStepsEl.style.display = 'flex';
+              setStatus(`🔧 Calling ${ev.tool}…`, '');
+              const step = document.createElement('div');
+              step.className = 'tool-step';
+              step.id = `ts-${ev.tool}-${Date.now()}`;
+              const argSummary = ev.args ? Object.entries(ev.args).map(([k,v]) => `${k}: ${String(v).slice(0,60)}`).join(', ') : '';
+              step.innerHTML = `<span class="ts-icon">⏳</span><span class="ts-name">${ev.tool}</span><span class="ts-info">${argSummary}</span>`;
+              toolStepsEl.appendChild(step);
+              $messages.scrollTop = $messages.scrollHeight;
+              continue;
+            }
+
+            if (ev.type === 'tool_result') {
+              // Mark last matching tool-call step as done
+              const _TERMINAL_TOOLS = new Set(['shell_exec', 'file_read', 'file_write', 'file_patch', 'file_delete', 'file_list']);
+              const steps = toolStepsEl.querySelectorAll('.tool-step');
+              for (let i = steps.length - 1; i >= 0; i--) {
+                if (steps[i].querySelector('.ts-name')?.textContent === ev.tool) {
+                  steps[i].classList.add('done');
+                  steps[i].querySelector('.ts-icon').textContent = '✓';
+                  const result = ev.result || '';
+                  const preview = result.replace(/\n/g, ' ').slice(0, 80);
+                  steps[i].querySelector('.ts-info').textContent = preview;
+                  // Render expanded terminal/file block below the step
+                  if (_TERMINAL_TOOLS.has(ev.tool) && result.length > 0) {
+                    const block = document.createElement('div');
+                    block.className = 'tool-terminal' +
+                      (result.startsWith('[ERROR]') || result.startsWith('[TIMEOUT]') || result.startsWith('[BLOCKED]') ? ' error' : '');
+                    block.textContent = result.slice(0, 4000);
+                    steps[i].insertAdjacentElement('afterend', block);
+                  }
+                  break;
+                }
+              }
+              setStatus('Streaming…', '');
+              continue;
+            }
+
+            // Tool approval required — show inline consent banner
+            if (ev.type === 'approval_required') {
+              showApprovalBanner(ev);
+              continue;
+            }
+
+            // Skill created by agent — show toast notification
+            if (ev.type === 'skill_created') {
+              showSkillToast(ev.name, ev.slug);
+              continue;
             }
 
             if (!ev.done) {
@@ -537,29 +1517,64 @@
         cursor.remove();
         if (finalResult && !finalResult.error) {
           const assistantContent = finalResult.content || fullContent;
-          thinkingBody.textContent = assistantContent;
+          thinkingBody.innerHTML = renderMessageBody(assistantContent);
+          attachAddonButtons(thinkingBody, assistantContent);
           _msgs.push({ role: 'assistant', content: assistantContent });
+
+          // Add speaker button to this streamed message
+          const metaDivStreamed = thinkingEl.querySelector('.msg-meta');
+          if (metaDivStreamed) {
+            const speakBtn = document.createElement('button');
+            speakBtn.className = 'speak-btn';
+            speakBtn.title = 'Read aloud';
+            speakBtn.textContent = '🔊';
+            speakBtn.onclick = () => speakText(assistantContent, speakBtn);
+            metaDivStreamed.appendChild(speakBtn);
+          }
+
+          // Auto-speak if enabled
+          if (_autoSpeak) speakText(assistantContent);
 
           // Update provider badge & model
           const badge = thinkingEl.querySelector('.provider-badge');
-          if (badge) badge.textContent = finalResult.provider || provider;
+          const shownProvider = finalResult.actual_provider || finalResult.provider || provider;
+          if (badge) badge.textContent = shownProvider;
+          // model: prefer what the API returned, fall back to actual_model (failover) then user input
+          const shownModel = finalResult.model || finalResult.actual_model || model;
           const metaDiv = thinkingEl.querySelector('.msg-meta');
-          if (metaDiv && finalResult.model) {
+          if (metaDiv && shownModel) {
             let modelSpan = metaDiv.querySelector('.model-name');
             if (!modelSpan) {
               modelSpan = document.createElement('span');
               modelSpan.className = 'model-name';
               metaDiv.appendChild(modelSpan);
             }
-            modelSpan.textContent = finalResult.model;
-            $statModel.textContent = finalResult.model;
+            modelSpan.textContent = shownModel;
+            $statModel.textContent = shownModel;
           }
+          // Persist last-used provider+model so they survive browser restart
+          localStorage.setItem('intelli_last_provider', shownProvider);
+          if (shownModel) localStorage.setItem('intelli_last_model', shownModel);
 
           // Update token counts
           const usage = finalResult.usage || {};
           if (usage.prompt_tokens)     { _totalIn  += usage.prompt_tokens;     }
           if (usage.completion_tokens) { _totalOut += usage.completion_tokens; }
           updateStats();
+
+          // Failover warning: notify user if provider switched mid-stream
+          if (finalResult.failover_used) {
+            const fo = finalResult;
+            setStatus(
+              `⚠ Switched to ${fo.actual_provider}/${fo.actual_model} — ${(fo.failover_reason || '').slice(0, 80)}`,
+              'warn'
+            );
+            // Also show a subtle note under the message
+            const foNote = document.createElement('div');
+            foNote.style.cssText = 'font-size:.65rem;color:var(--yellow);margin-top:4px;';
+            foNote.textContent = `⚡ Failover: responded via ${fo.actual_provider}`;
+            thinkingBody.appendChild(foNote);
+          }
         }
 
         setStatus('Ready', 'ok');
@@ -588,6 +1603,40 @@
       $statMsgs.textContent = _msgs.filter(m => m.role === 'user').length;
       $statIn.textContent   = _totalIn  || '—';
       $statOut.textContent  = _totalOut || '—';
+      updateContextFill();
+    }
+
+    // Rough token estimate: 4 chars ≈ 1 token
+    function estimateTokens(msgs) {
+      return msgs.reduce((t, m) => t + 4 + Math.ceil((m.content || '').length / 4), 0);
+    }
+
+    const _MODEL_LIMITS = {
+      'gpt-4o': 128000, 'gpt-4o-mini': 128000, 'gpt-4': 8192, 'gpt-4-turbo': 128000,
+      'gpt-4.1': 128000, 'gpt-4.1-mini': 128000, 'o1': 200000, 'o1-mini': 128000, 'o3-mini': 200000,
+      'claude-sonnet-4.5': 200000, 'claude-sonnet-4.6': 200000, 'claude-3-opus-20240229': 200000,
+      'llama3': 8192, 'mistral': 32000, 'gemini-1.5-pro': 1000000,
+    };
+
+    function contextLimit() {
+      const m = ($inpModel.value.trim() || '').toLowerCase();
+      for (const [key, lim] of Object.entries(_MODEL_LIMITS)) {
+        if (m.includes(key) || key.includes(m.split('-')[0])) return lim;
+      }
+      return 32000;
+    }
+
+    function updateContextFill() {
+      const used  = estimateTokens(_msgs);
+      const limit = contextLimit();
+      const pct   = Math.min(100, Math.round((used / limit) * 100));
+      const inner = document.getElementById('ctx-fill-inner');
+      const pctEl = document.getElementById('ctx-fill-pct');
+      if (!inner) return;
+      inner.style.width = pct + '%';
+      inner.style.background = pct >= 85 ? 'var(--red)' : pct >= 65 ? 'var(--yellow)' : 'var(--green)';
+      pctEl.textContent = pct + '%';
+      if (pctEl) pctEl.style.color = pct >= 85 ? 'var(--red)' : pct >= 65 ? 'var(--yellow)' : 'var(--muted)';
     }
 
     function autoResize() {
@@ -607,10 +1656,205 @@
 
     $msgInput.addEventListener('input', autoResize);
 
+    /* ── Image drag-drop & paste ────────────────────────────────── */
+    function _addImages(files) {
+      [...files].forEach(f => {
+        if (!f.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          _attachedImages.push({ dataUri: e.target.result, mimeType: f.type });
+          _renderImagePreviewBar();
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+
+    function _renderImagePreviewBar() {
+      $imgPreviewBar.innerHTML = '';
+      if (_attachedImages.length === 0) {
+        $imgPreviewBar.style.display = 'none';
+        return;
+      }
+      $imgPreviewBar.style.display = 'flex';
+      _attachedImages.forEach((img, idx) => {
+        const pill = document.createElement('div');
+        pill.className = 'img-pill';
+        const im = document.createElement('img');
+        im.src = img.dataUri;
+        im.alt = `attachment ${idx + 1}`;
+        const rm = document.createElement('button');
+        rm.className = 'rm-btn';
+        rm.textContent = '×';
+        rm.title = 'Remove image';
+        rm.onclick = () => {
+          _attachedImages.splice(idx, 1);
+          _renderImagePreviewBar();
+        };
+        pill.appendChild(im);
+        pill.appendChild(rm);
+        $imgPreviewBar.appendChild(pill);
+      });
+    }
+
+    // Drag over messages area
+    $messages.addEventListener('dragover', e => {
+      if ([...e.dataTransfer.items].some(i => i.kind === 'file' && i.type.startsWith('image/'))) {
+        e.preventDefault();
+        $messages.classList.add('drag-over');
+      }
+    });
+    $messages.addEventListener('dragleave', () => $messages.classList.remove('drag-over'));
+    $messages.addEventListener('drop', e => {
+      e.preventDefault();
+      $messages.classList.remove('drag-over');
+      _addImages(e.dataTransfer.files);
+    });
+
+    // Paste images from clipboard
+    document.addEventListener('paste', e => {
+      const items = [...(e.clipboardData?.items || [])].filter(i => i.kind === 'file' && i.type.startsWith('image/'));
+      if (items.length > 0) {
+        e.preventDefault();
+        _addImages(items.map(i => i.getAsFile()));
+      }
+    });
+
+    /* ── Voice I/O ──────────────────────────────────────────────── */
+    const $btnMic       = document.getElementById('btn-mic');
+    const $btnAutoSpeak = document.getElementById('btn-autospeak');
+    if (_autoSpeak) $btnAutoSpeak?.classList.add('active');
+
+    function toggleAutoSpeak() {
+      _autoSpeak = !_autoSpeak;
+      localStorage.setItem('intelli_autospeak', _autoSpeak ? '1' : '0');
+      $btnAutoSpeak?.classList.toggle('active', _autoSpeak);
+      setStatus(_autoSpeak ? '🔊 Auto-speak on' : '🔇 Auto-speak off', '');
+    }
+
+    async function speakText(text, btn = null) {
+      if (!_token) return;
+      // Strip markdown-like syntax from text before speaking
+      const clean = text
+        .replace(/```[\s\S]*?```/g, 'code block')
+        .replace(/`[^`]+`/g, '')
+        .replace(/[*_~#>]/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .trim()
+        .slice(0, 3000);
+      if (!clean) return;
+
+      // Stop any currently playing audio
+      if (_currentAudio) {
+        _currentAudio.pause();
+        _currentAudio = null;
+      }
+
+      if (btn) { btn.classList.add('playing'); btn.textContent = '⏹'; }
+
+      try {
+        const resp = await fetch(`${GW}/voice/speak`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+          body: JSON.stringify({ text: clean }),
+        });
+        if (!resp.ok) {
+          setStatus('TTS failed', 'err');
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+          return;
+        }
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        _currentAudio = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          _currentAudio = null;
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+        };
+        audio.onerror = () => {
+          _currentAudio = null;
+          if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+        };
+        audio.play();
+      } catch (e) {
+        setStatus('TTS error: ' + e.message, 'err');
+        if (btn) { btn.classList.remove('playing'); btn.textContent = '🔊'; }
+      }
+    }
+
+    // Mic button — hold to record, release to transcribe
+    if ($btnMic) {
+      let _chunks = [];
+      let _stream = null;
+
+      async function startRecording() {
+        if (_isRecording) return;
+        try {
+          _stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          _chunks = [];
+          _mediaRecorder = new MediaRecorder(_stream);
+          _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _chunks.push(e.data); };
+          _mediaRecorder.onstop = async () => {
+            _stream?.getTracks().forEach(t => t.stop());
+            $btnMic.classList.remove('recording');
+            $btnMic.textContent = '🎙';
+            setStatus('Transcribing…', '');
+            const blob = new Blob(_chunks, { type: 'audio/webm' });
+            const form = new FormData();
+            form.append('file', blob, 'recording.webm');
+            try {
+              const r = await fetch(`${GW}/voice/transcribe`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${_token}` },
+                body: form,
+              });
+              if (r.ok) {
+                const d = await r.json();
+                if (d.text) {
+                  $msgInput.value = ($msgInput.value + ' ' + d.text).trim();
+                  autoResize();
+                  setStatus('✓ Transcribed', 'ok');
+                }
+              } else {
+                const e = await r.json().catch(() => ({ detail: r.status }));
+                setStatus('Transcription failed: ' + (e.detail || r.status), 'err');
+              }
+            } catch (err) {
+              setStatus('Transcription error: ' + err.message, 'err');
+            }
+            _isRecording = false;
+            _mediaRecorder = null;
+          };
+          _mediaRecorder.start();
+          _isRecording = true;
+          $btnMic.classList.add('recording');
+          $btnMic.textContent = '⏹';
+          setStatus('🎙 Recording… (click to stop)', '');
+        } catch (e) {
+          setStatus('Mic error: ' + e.message, 'err');
+        }
+      }
+
+      function stopRecording() {
+        if (_mediaRecorder && _isRecording) {
+          _mediaRecorder.stop();
+        }
+      }
+
+      // Toggle on click
+      $btnMic.addEventListener('click', () => {
+        if (_isRecording) stopRecording();
+        else startRecording();
+      });
+    }
+
     $btnClear.addEventListener('click', () => {
       _msgs      = [];
       _totalIn   = 0;
       _totalOut  = 0;
+      // Start a fresh session for the next conversation
+      _sessionId = generateUUID();
+      localStorage.setItem('intelli_session_id', _sessionId);
       $messages.innerHTML = '';
       $messages.appendChild($emptyState);
       $emptyState.style.display = 'flex';
@@ -641,6 +1885,161 @@
     /* ── Init ───────────────────────────────────────────────────── */
     setStatus('Ready', 'ok');
     $msgInput.focus();
+    /* ── Canvas ───────────────────────────────────────────── */
+    function openCanvas() {
+      // Open canvas in a new tab (Electron tab via IPC, or plain window.open fallback)
+      const url = `${GW}/ui/canvas.html`;
+      if (window.intelliAPI?.newTab) {
+        window.intelliAPI.newTab(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    function openMemory() {
+      const url = `${GW}/ui/memory.html`;
+      if (window.intelliAPI?.newTab) {
+        window.intelliAPI.newTab(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    async function openCodeRoot() {
+      // Show the coding workspace path; fetch it from the gateway
+      try {
+        const r = await fetch(`${GW}/coding/info`, {
+          headers: { Authorization: `Bearer ${_token}` },
+        });
+        if (r.ok) {
+          const d = await r.json();
+          setStatus(`💻 Workspace: ${d.root}`, '');
+        } else {
+          setStatus('💻 Coding workspace (path unknown — connect first)', '');
+        }
+      } catch {
+        setStatus('💻 Coding workspace active', '');
+      }
+    }
+
+    /* ── Session compaction ───────────────────────────────── */
+    async function compactHistory() {
+      if (!_token) { setStatus('⚠ Connect first', 'warn'); return; }
+      if (_msgs.length < 4) { setStatus('Not enough history to compact', 'warn'); return; }
+      if (_busy) return;
+
+      const btn = document.getElementById('btn-compact');
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Compacting…';
+      setStatus('Compacting history…', '');
+
+      try {
+        const r = await fetch(`${GW}/chat/compact`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
+          body: JSON.stringify({
+            messages: _msgs,
+            provider: $selProv.value,
+            model:    $inpModel.value.trim() || '',
+          }),
+        });
+        if (!r.ok) {
+          const e = await r.json();
+          setStatus(`Compact failed: ${e.detail || r.status}`, 'err');
+          return;
+        }
+        const d = await r.json();
+        _msgs = d.compacted_messages;
+
+        // Show a system note in the chat UI
+        const note = document.createElement('div');
+        note.style.cssText = 'text-align:center;padding:6px;font-size:.72rem;color:var(--muted);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:4px 0;';
+        note.textContent = `🗅 History compacted — saved ~${d.tokens_saved.toLocaleString()} tokens (${Math.round(d.usage_before*100)}% → ${Math.round(d.usage_after*100)}%)`;
+        $messages.appendChild(note);
+        $messages.scrollTop = $messages.scrollHeight;
+
+        updateStats();
+        setStatus('✓ Compacted', 'ok');
+      } catch (err) {
+        setStatus(`Compact error: ${err.message}`, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    }
+
+    // ── Tool Approval Banner ──────────────────────────────────────
+    let _approvalId   = null;
+    let _approvalTimer = null;
+
+    function showApprovalBanner(ev) {
+      _approvalId = ev.id;
+      const banner    = document.getElementById('approval-banner');
+      const toolName  = document.getElementById('approval-tool-name');
+      const argsEl    = document.getElementById('approval-args');
+      const timerEl   = document.getElementById('approval-timer');
+
+      toolName.textContent = ev.tool || '?';
+      argsEl.textContent   = JSON.stringify(ev.args || {}, null, 2);
+      banner.classList.remove('hidden');
+      banner.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      // Countdown
+      let remaining = Math.round(ev.expires_in ?? 60);
+      timerEl.textContent = remaining + 's';
+      clearInterval(_approvalTimer);
+      _approvalTimer = setInterval(() => {
+        remaining--;
+        timerEl.textContent = remaining + 's';
+        if (remaining <= 0) {
+          clearInterval(_approvalTimer);
+          dismissApprovalBanner();
+        }
+      }, 1000);
+    }
+
+    function dismissApprovalBanner() {
+      document.getElementById('approval-banner').classList.add('hidden');
+      clearInterval(_approvalTimer);
+      _approvalId = null;
+      // Re-enable buttons
+      document.getElementById('approval-allow-btn').disabled = false;
+      document.getElementById('approval-deny-btn').disabled  = false;
+    }
+
+    async function handleApproval(allow) {
+      if (!_approvalId) return;
+      const aid = _approvalId;
+      document.getElementById('approval-allow-btn').disabled = true;
+      document.getElementById('approval-deny-btn').disabled  = true;
+
+      const action = allow ? 'approve' : 'deny';
+      try {
+        const r = await fetch(`/agent/approvals/${aid}/${action}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (!r.ok) console.warn('Approval request failed:', await r.text());
+      } catch (e) {
+        console.warn('Approval fetch error:', e);
+      } finally {
+        dismissApprovalBanner();
+      }
+    }
+
+    // ── Skill-Created Toast ───────────────────────────────────────
+    function showSkillToast(name, slug) {
+      const toast = document.createElement('div');
+      toast.className = 'skill-toast';
+      const workspaceUrl = `/ui/workspace.html`;
+      toast.innerHTML = `🛠 New skill created: <strong>${name || slug}</strong>&nbsp;&nbsp;<a href="${workspaceUrl}" target="_blank">Open workspace →</a>`;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'toast-in .25s ease reverse';
+        setTimeout(() => toast.remove(), 250);
+      }, 7000);
+    }
   </script>
 </body>
 </html>

@@ -1,22 +1,431 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Intelli Gateway — Agent Memory</title>
-  <style>
-    :root {
-      --bg:      #0f1117;
-      --surface: #1a1d27;
-      --surface2: #21253a;
-      --border:  #2d3145;
-      --accent:  #6c63ff;
-      --green:   #3ddc84;
-      --red:     #ff6b6b;
-      --yellow:  #ffd166;
-      --text:    #e2e4f0;
-      --muted:   #7b7f9e;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intelli Memory</title>
+<style>
+  :root {
+    --surface:  #1a1d27;
+    --surface2: #21253a;
+    --border:   #2d3145;
+    --accent:   #6e9ef5;
+    --green:    #3ddc84;
+    --red:      #ff6b6b;
+    --yellow:   #ffd166;
+    --text:     #e2e4f0;
+    --muted:    #7b7f9e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--surface);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  #header h1 { font-size: 1rem; font-weight: 600; flex: 1; }
+  #stat-count { font-size: .72rem; color: var(--muted); }
+  #backend-pill {
+    font-size: .65rem; padding: 2px 7px;
+    border-radius: 10px; border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  #search-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #search-bar input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: .85rem;
+    outline: none;
+  }
+  #search-bar input:focus { border-color: var(--accent); }
+  #search-bar input::placeholder { color: var(--muted); }
+  .btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font-size: .8rem;
+    padding: 5px 12px;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); }
+  #tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
+  .tab {
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    transition: color .15s;
+  }
+  .tab.active { color: var(--accent); border-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  #list-pane {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .memory-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: border-color .15s;
+  }
+  .memory-card:hover { border-color: var(--accent); }
+  .memory-card.pinned { border-left: 3px solid var(--yellow); }
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .source-badge {
+    font-size: .62rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .source-badge.page   { border-color: var(--accent); color: var(--accent); }
+  .source-badge.chat   { border-color: var(--green);  color: var(--green);  }
+  .source-badge.manual { border-color: var(--yellow); color: var(--yellow); }
+  .card-url {
+    font-size: .72rem;
+    color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    text-decoration: none;
+  }
+  .card-url:hover { text-decoration: underline; }
+  .card-age { font-size: .65rem; color: var(--muted); flex-shrink: 0; }
+  .card-text {
+    font-size: .8rem;
+    color: var(--text);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-text.expanded { display: block; -webkit-line-clamp: unset; }
+  .card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .score-pill {
+    font-size: .62rem;
+    color: var(--green);
+    border: 1px solid var(--green);
+    border-radius: 10px;
+    padding: 1px 5px;
+  }
+  .spacer { flex: 1; }
+  .del-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: .75rem;
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+  .del-btn:hover { color: var(--red); }
+  .expand-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: .72rem;
+    padding: 0 3px;
+  }
+  .expand-btn:hover { color: var(--text); }
+  #add-pane {
+    display: none;
+    flex: 1;
+    padding: 14px;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+  #add-pane.visible { display: flex; }
+  #add-pane label { font-size: .78rem; color: var(--muted); margin-bottom: 2px; }
+  #add-pane textarea, #add-pane input[type=text] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: .82rem;
+    padding: 7px 10px;
+    width: 100%;
+    outline: none;
+  }
+  #add-pane textarea { height: 120px; resize: vertical; }
+  #add-pane textarea:focus, #add-pane input:focus { border-color: var(--accent); }
+  .empty { text-align: center; color: var(--muted); font-size: .85rem; padding: 40px 0; }
+  #status-bar {
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    padding: 4px 12px;
+    font-size: .7rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>🧠 Vector Memory</h1>
+  <span id="stat-count">— memories</span>
+  <span id="backend-pill">…</span>
+</div>
+
+<div id="search-bar">
+  <input id="inp-search" type="text" placeholder="Search memories semantically…" />
+  <button class="btn primary" onclick="doSearch()">Search</button>
+  <button class="btn" onclick="loadRecent()">Recent</button>
+</div>
+
+<div id="tabs">
+  <div class="tab active" data-tab="list"   onclick="switchTab('list')">All</div>
+  <div class="tab"        data-tab="page"   onclick="switchTab('page')">Pages</div>
+  <div class="tab"        data-tab="chat"   onclick="switchTab('chat')">Chats</div>
+  <div class="tab"        data-tab="manual" onclick="switchTab('manual')">Pinned</div>
+  <div class="tab"        data-tab="add"    onclick="switchTab('add')">+ Pin new</div>
+</div>
+
+<div id="list-pane">
+  <div class="empty">Loading…</div>
+</div>
+
+<div id="add-pane">
+  <div>
+    <label>Text / Fact to remember *</label>
+    <textarea id="add-text" placeholder="Anything the agent should recall across sessions…"></textarea>
+  </div>
+  <div>
+    <label>Title (optional)</label>
+    <input id="add-title" type="text" placeholder="Short label">
+  </div>
+  <div>
+    <label>URL (optional)</label>
+    <input id="add-url" type="text" placeholder="https://…">
+  </div>
+  <button class="btn primary" onclick="pinMemory()" style="align-self:flex-start">📌 Save memory</button>
+</div>
+
+<div id="status-bar">Ready</div>
+
+<script>
+  const GW     = 'http://127.0.0.1:8080';
+  const _token = localStorage.getItem('gw_token') || '';
+  let _activeTab = 'list';
+
+  const $list    = document.getElementById('list-pane');
+  const $addPane = document.getElementById('add-pane');
+  const $status  = document.getElementById('status-bar');
+  const $count   = document.getElementById('stat-count');
+  const $backend = document.getElementById('backend-pill');
+  const $search  = document.getElementById('inp-search');
+
+  function hdr() { return { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' }; }
+  function setStatus(msg) { $status.textContent = msg; }
+
+  async function loadStats() {
+    try {
+      const r = await fetch(`${GW}/memory/stats`, { headers: hdr() });
+      if (!r.ok) return;
+      const d = await r.json();
+      $count.textContent   = `${d.count} memor${d.count === 1 ? 'y' : 'ies'}`;
+      $backend.textContent = d.backend;
+    } catch (_) {}
+  }
+
+  function switchTab(tab) {
+    _activeTab = tab;
+    $search.value = '';
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    $addPane.classList.toggle('visible', tab === 'add');
+    $list.style.display = tab === 'add' ? 'none' : '';
+    if (tab === 'add') return;
+    tab === 'list' ? loadRecent() : loadBySource(tab);
+  }
+
+  async function loadRecent() {
+    setStatus('Loading…');
+    try {
+      const r = await fetch(`${GW}/memory/list?n=40`, { headers: hdr() });
+      if (!r.ok) { renderError(r.status); return; }
+      const d = await r.json();
+      renderCards(d.memories, false);
+      setStatus(`${d.memories.length} recent memories`);
+    } catch (e) { renderError(e.message); }
+    loadStats();
+  }
+
+  async function loadBySource(source) {
+    setStatus('Loading…');
+    try {
+      const r = await fetch(`${GW}/memory/search?q=the&n=40&source=${source}`, { headers: hdr() });
+      if (!r.ok) { renderError(r.status); return; }
+      const d = await r.json();
+      renderCards(d.results, false);
+      setStatus(`${d.results.length} ${source} memories`);
+    } catch (e) { renderError(e.message); }
+  }
+
+  async function doSearch() {
+    const q = $search.value.trim();
+    if (!q) { loadRecent(); return; }
+    setStatus('Searching…');
+    try {
+      const src = (_activeTab !== 'list' && _activeTab !== 'add') ? `&source=${_activeTab}` : '';
+      const r = await fetch(`${GW}/memory/search?q=${encodeURIComponent(q)}&n=10${src}`, { headers: hdr() });
+      if (!r.ok) { renderError(r.status); return; }
+      const d = await r.json();
+      renderCards(d.results, true);
+      setStatus(`${d.results.length} results for "${q}"`);
+    } catch (e) { renderError(e.message); }
+  }
+
+  $search.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+  function renderCards(items, showScore) {
+    $list.innerHTML = '';
+    if (!items.length) { $list.innerHTML = '<div class="empty">No memories found.</div>'; return; }
+    items.forEach(item => {
+      const meta   = item.metadata || {};
+      const source = meta.source  || 'manual';
+      const url    = meta.url     || '';
+      const title  = meta.title   || '';
+      const pinned = !!meta.pinned;
+      const ts     = meta.timestamp_unix || 0;
+      const docId  = meta.doc_id || item.id || '';
+      const text   = item.text   || '';
+      const score  = item.score;
+      const textId = 'txt_' + docId.replace(/[^a-z0-9]/gi, '_');
+
+      const card = document.createElement('div');
+      card.className = 'memory-card' + (pinned ? ' pinned' : '');
+      card.dataset.id = docId;
+      card.innerHTML = `
+        <div class="card-top">
+          <span class="source-badge ${source}">${source}</span>
+          ${url
+            ? `<a class="card-url" href="${esc(url)}" target="_blank">${esc(url)}</a>`
+            : `<span class="card-url" style="color:var(--muted)">${esc(title) || '(no url)'}</span>`}
+          <span class="card-age">${fmtAge(ts)}</span>
+        </div>
+        <div class="card-text" id="${textId}">${esc(text)}</div>
+        <div class="card-footer">
+          ${pinned ? '<span style="font-size:.75rem;color:var(--yellow)">📌</span>' : ''}
+          ${showScore && score != null ? `<span class="score-pill">${(score*100).toFixed(0)}%</span>` : ''}
+          <span class="spacer"></span>
+          <button class="expand-btn" onclick="toggleExpand('${textId}',this)">▼ more</button>
+          <button class="del-btn" title="Forget" onclick="delMem('${esc(docId)}',this)">✕</button>
+        </div>`;
+      $list.appendChild(card);
+    });
+  }
+
+  function toggleExpand(id, btn) {
+    const el = document.getElementById(id);
+    el.classList.toggle('expanded');
+    btn.textContent = el.classList.contains('expanded') ? '▲ less' : '▼ more';
+  }
+
+  async function delMem(docId, btn) {
+    if (!confirm('Forget this memory?')) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch(`${GW}/memory/${encodeURIComponent(docId)}`, { method: 'DELETE', headers: hdr() });
+      if (r.ok) {
+        document.querySelector(`.memory-card[data-id="${docId}"]`)?.remove();
+        setStatus('Memory forgotten'); loadStats();
+      } else { btn.disabled = false; setStatus('Delete failed'); }
+    } catch (e) { btn.disabled = false; setStatus(`Error: ${e.message}`); }
+  }
+
+  async function pinMemory() {
+    const text  = document.getElementById('add-text').value.trim();
+    const title = document.getElementById('add-title').value.trim();
+    const url   = document.getElementById('add-url').value.trim();
+    if (!text) { setStatus('Text is required'); return; }
+    try {
+      const r = await fetch(`${GW}/memory/add`, {
+        method: 'POST', headers: hdr(),
+        body: JSON.stringify({ text, title, url, source: 'manual', pinned: true }),
+      });
+      if (r.ok) {
+        document.getElementById('add-text').value = '';
+        document.getElementById('add-title').value = '';
+        document.getElementById('add-url').value = '';
+        setStatus('✓ Memory saved'); loadStats();
+      } else { const e = await r.json(); setStatus(`Failed: ${e.detail}`); }
+    } catch (e) { setStatus(`Error: ${e.message}`); }
+  }
+
+  function renderError(code) {
+    $list.innerHTML = `<div class="empty" style="color:var(--red)">Error ${code} — check login token.</div>`;
+  }
+
+  function fmtAge(ts) {
+    if (!ts) return '';
+    const age = Date.now() / 1000 - ts;
+    if (age < 3600)  return `${Math.round(age/60)}m ago`;
+    if (age < 86400) return `${Math.round(age/3600)}h ago`;
+    return `${Math.round(age/86400)}d ago`;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  loadStats();
+  loadRecent();
+</script>
+</body>
+</html>
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }

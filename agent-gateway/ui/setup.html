@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Intelli — First-run Setup</title>
   <style>
@@ -125,6 +126,19 @@
       border-radius: 6px;
     }
 
+    .warn-box {
+      background: rgba(255,209,102,.07);
+      border: 1px solid rgba(255,209,102,.35);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .warn-box-icon { font-size: 1.1rem; flex-shrink: 0; line-height: 1.4; }
+    .warn-box-text { font-size: .8rem; color: var(--yellow); line-height: 1.55; }
+    .warn-box-text strong { font-weight: 700; display: block; margin-bottom: 3px; }
+
     #submit-btn {
       background: var(--accent);
       color: #fff;
@@ -189,6 +203,17 @@
       Set a secure admin password to protect the gateway. You'll use this
       to log in to all admin pages.
     </p>
+  </div>
+
+  <div class="warn-box">
+    <span class="warn-box-icon">⚠️</span>
+    <div class="warn-box-text">
+      <strong>There is no password recovery.</strong>
+      If you forget this password, the only way to regain access is to
+      delete <code style="font-size:.78rem;background:rgba(255,255,255,.07);padding:1px 4px;border-radius:3px">agent-gateway/users.json</code>
+      and the matching system keyring entry, which wipes all user accounts.
+      Write this password down or save it in a password manager before continuing.
+    </div>
   </div>
 
   <div class="field">

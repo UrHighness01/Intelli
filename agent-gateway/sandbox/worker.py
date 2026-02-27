@@ -9,6 +9,7 @@ isolation. A production worker must enforce OS-level sandboxing.
 """
 import sys
 import json
+import subprocess
 from typing import Any, Dict
 
 
@@ -31,9 +32,41 @@ def _handle_echo(params: Dict[str, Any]):
     return {"status": "ok", "echo": safe}
 
 
+def _handle_shell(params: Dict[str, Any]):
+    """Run a shell command inside the sandbox with hard limits."""
+    cmd     = params.get("cmd", "")
+    timeout = int(params.get("timeout", 30))
+    cwd     = params.get("cwd", "/workspace")
+    max_out = int(params.get("max_output", 8000))
+    if not cmd:
+        return {"error": "cmd is required"}
+    # Hard cap timeout inside worker so container can't be cheated
+    timeout = min(timeout, 120)
+    try:
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        combined = proc.stdout or ""
+        if proc.stderr.strip():
+            combined += "\n[stderr]\n" + proc.stderr
+        if len(combined) > max_out:
+            combined = combined[:max_out] + f"\n… (truncated, {len(combined)} chars total)"
+        return {"exit_code": proc.returncode, "output": combined}
+    except subprocess.TimeoutExpired:
+        return {"error": f"Command timed out after {timeout}s"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 _ALLOWED = {
-    "noop": _handle_noop,
-    "echo": _handle_echo,
+    "noop":  _handle_noop,
+    "echo":  _handle_echo,
+    "shell": _handle_shell,
 }
 
 

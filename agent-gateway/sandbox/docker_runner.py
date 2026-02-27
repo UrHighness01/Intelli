@@ -53,7 +53,7 @@ class DockerSandboxRunner:
     Falls back to the bundled subprocess worker when Docker is unavailable.
     """
 
-    ALLOWED = {'noop', 'echo'}
+    ALLOWED = {'noop', 'echo', 'shell'}
 
     def __init__(self):
         self._image = os.environ.get('SANDBOX_DOCKER_IMAGE', 'python:3.11-slim')
@@ -73,6 +73,15 @@ class DockerSandboxRunner:
     def _run_docker(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute worker via docker run with resource limits and hardened security."""
         assert self._client is not None
+
+        # For shell actions use the command's own timeout (capped at 120 s);
+        # for everything else fall back to the global gateway default.
+        effective_timeout = (
+            min(int(params.get('timeout', self._timeout)), 120)
+            if action == 'shell'
+            else self._timeout
+        )
+
         payload = json.dumps({'id': 'docker', 'action': action, 'params': params})
         # Read worker source to inject via stdin into the container
         with open(self._worker_path, 'r', encoding='utf-8') as f:
@@ -80,6 +89,19 @@ class DockerSandboxRunner:
 
         # Pass worker source and payload through stdin, separated by a null byte
         cmd = ['sh', '-c', f'echo \'{worker_src}\' > /tmp/worker.py && echo \'{payload}\' | python /tmp/worker.py']
+
+        # Workspace bind mount — mount the coding workspace as /workspace so that
+        # shell commands can read/write project files inside the container.
+        workspace_dir = str(params.get('_workspace_dir', '')).strip()
+        volumes: Dict[str, Any] = {}
+        if workspace_dir and os.path.isdir(workspace_dir):
+            volumes[workspace_dir] = {'bind': '/workspace', 'mode': 'rw'}
+
+        # Shell needs a writable root FS (for apt caches, etc.) or at least the
+        # workspace mount; all other actions keep the root FS read-only.
+        read_only = (action != 'shell')
+        # Larger tmpfs for shell (builds write temp artefacts)
+        tmpfs_size = '64m' if action == 'shell' else '16m'
 
         # Build security_opt list: always disable privilege escalation.
         # Optionally apply a custom seccomp profile; if unset Docker's default
@@ -108,12 +130,13 @@ class DockerSandboxRunner:
                 nano_cpus=int(self._cpus * 1e9),
                 pids_limit=self._pids_limit,
                 network_disabled=True,
-                read_only=True,
-                tmpfs={'/tmp': 'size=16m,mode=1777'},
+                read_only=read_only,
+                tmpfs={'/tmp': f'size={tmpfs_size},mode=1777'},
                 cap_drop=['ALL'],
                 security_opt=security_opt,
                 ulimits=ulimits,
-                timeout=self._timeout,
+                volumes=volumes or None,
+                timeout=effective_timeout + 5,  # container wall-clock > cmd timeout
             )
             out = result.decode('utf-8') if isinstance(result, bytes) else result
             data = json.loads(out)
@@ -129,13 +152,18 @@ class DockerSandboxRunner:
         """Fallback: plain subprocess worker."""
         if not os.path.exists(self._worker_path):
             raise DockerSandboxError('worker not found')
+        effective_timeout = (
+            min(int(params.get('timeout', self._timeout)), 120)
+            if action == 'shell'
+            else self._timeout
+        )
         payload = json.dumps({'id': 'subprocess', 'action': action, 'params': params})
         proc = subprocess.Popen(
             [sys.executable, self._worker_path],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         try:
-            out, err = proc.communicate(payload, timeout=self._timeout)
+            out, err = proc.communicate(payload, timeout=effective_timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             raise DockerSandboxError('subprocess worker timeout')

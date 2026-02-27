@@ -99,7 +99,7 @@ try {
 // ─── Tab state ────────────────────────────────────────────────────────────────
 // tabs[id] = { view: BrowserView, id: number }
 let tabs        = {};
-let tabOrder    = [];   // ordered array of tab IDs (for drag-to-reorder)
+let tabOrder    = [];   // ordered list of tab IDs — drives the tab bar order
 let activeTabId = null;
 let splitPairs  = [];  // [{ leftId, rightId, paused }] — all active split pairs
 let nextTabId   = 1;
@@ -265,6 +265,20 @@ function startGateway() {
     ];
 
     console.log(`[gateway] spawning: ${python} ${args.join(' ')} in ${gwDir}`);
+
+    // Kill any stale process already bound to our port (happens when Electron
+    // is quit and restarted before the previous gateway process fully exits).
+    // This ensures our new process gets the port AND that our BOOTSTRAP_SECRET
+    // matches the running gateway (otherwise the bootstrap-token call would 403).
+    try {
+      const { execSync } = require('child_process');
+      if (process.platform === 'win32') {
+        execSync(`FOR /F "tokens=5" %P IN ('netstat -ano ^| findstr :${GATEWAY_PORT}') DO taskkill /PID %P /F`, { stdio: 'ignore', shell: true });
+      } else {
+        // fuser -k kills any process on the port; sleep gives the OS time to release it
+        execSync(`fuser -k ${GATEWAY_PORT}/tcp 2>/dev/null; sleep 0.5; true`, { stdio: 'ignore', shell: true });
+      }
+    } catch (_) { /* ignore — port may not have been in use */ }
 
     gatewayProcess = spawn(python, args, {
       cwd:   gwDir,
@@ -443,6 +457,59 @@ function _existingAdminHubId() {
 }
 
 /**
+ * Navigation guard — synchronous private-IP / dangerous-scheme check.
+ * Returns null if the URL is allowed, or a reason string if it should be blocked.
+ */
+function _isBlockedURL(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    const proto = u.protocol;
+
+    // Always allow the gateway admin UI
+    if (urlStr.startsWith(GATEWAY_ORIGIN + '/')) return null;
+
+    // Block inherently dangerous schemes
+    if (['javascript:', 'data:', 'vbscript:'].includes(proto)) {
+      return `Blocked scheme: ${proto.slice(0, -1)}`;
+    }
+
+    // Only apply host checks for http/https/ftp
+    if (!['http:', 'https:', 'ftp:'].includes(proto)) return null;
+
+    const h = u.hostname.toLowerCase();
+
+    // Loopback hostnames (but allow 127.0.0.1:8080 = gateway)
+    if (h === 'localhost' || h === '::1' || h === '0.0.0.0') {
+      if (h === 'localhost' && String(u.port) === String(GATEWAY_PORT)) return null;
+      return `Loopback host blocked: ${h}`;
+    }
+
+    // Private IPv4 ranges
+    const ipv4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipv4) {
+      const [, a, b] = ipv4.map(Number);
+      if (a === 127) {
+        if (String(u.port) === String(GATEWAY_PORT)) return null; // gateway
+        return `Loopback IP blocked: ${h}`;
+      }
+      if (a === 10)                              return `Private IP (10.x) blocked`;
+      if (a === 172 && b >= 16 && b <= 31)      return `Private IP (172.16-31.x) blocked`;
+      if (a === 192 && b === 168)               return `Private IP (192.168.x) blocked`;
+      if (a === 169 && b === 254)               return `Link-local IP blocked`;
+    }
+
+    // .internal / .local / .lan hostnames
+    if (h.endsWith('.internal') || h.endsWith('.local') || h.endsWith('.lan')) {
+      return `Internal hostname blocked: ${h}`;
+    }
+
+    return null; // allowed
+  } catch {
+    return null; // malformed URL — let the browser handle it
+  }
+}
+
+/**
  * Create a new tab and attach it to the window.
  * Returns the tab id.
  */
@@ -479,6 +546,19 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   view.webContents.on('page-title-updated', (_, title) => {
     notifyChrome('tab-title-updated', { id, title });
   });
+
+  // Navigation guard: block private IPs and dangerous schemes synchronously.
+  view.webContents.on('will-navigate', (event, navUrl) => {
+    const reason = _isBlockedURL(navUrl);
+    if (reason) {
+      event.preventDefault();
+      const warningURL = `${GATEWAY_ORIGIN}/ui/index.html#blocked`;
+      view.webContents.loadURL(warningURL);
+      notifyChrome('nav-blocked', { id, url: navUrl, reason });
+      console.warn(`[NavGuard] Blocked navigation to ${navUrl}: ${reason}`);
+    }
+  });
+
   view.webContents.on('did-navigate', (_, navUrl) => {
     if (activeTabId === id) {
       notifyChrome('url-changed', { id, url: navUrl });
@@ -575,14 +655,93 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
     view.webContents.executeJavaScript(`
       (function(tok) {
         try { localStorage.setItem('gw_token', tok); } catch(e) {}
-        var inp = document.getElementById('token-input');
-        if (inp) inp.value = tok;
-        if (typeof connect === 'function') connect();
+        if (typeof applyToken === 'function') {
+          applyToken(tok);
+          if (typeof loadPersonas === 'function') loadPersonas();
+        }
       })(${JSON.stringify(adminToken)})
     `).catch(() => {});
   });
 
-  tabs[id] = { id, view, parentId: fromTabId || null };
+  // Re-inject all active addons on every real page load so they survive
+  // navigation and hard refreshes.  For SPAs (React, Vue, etc.) the framework
+  // may render elements AFTER did-finish-load, so we re-run at 500 ms, 1.5 s,
+  // and 3 s post-load to ensure the addon catches any late-rendered DOM.
+  view.webContents.on('did-finish-load', () => {
+    if (!gatewayReady) return;
+    const _addonUrl = view.webContents.getURL();
+    if (!_addonUrl || _addonUrl === 'about:blank' || _addonUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+    if (view !== tabs[activeTabId]?.view) return;
+
+    function _reInjectAddons(delay) {
+      setTimeout(() => {
+        // Guard: view may have navigated away during the delay
+        const currentUrl = view.webContents.getURL();
+        if (currentUrl !== _addonUrl) return;
+        http.get(`${GATEWAY_ORIGIN}/tab/active-addons`, res => {
+          let _addonData = '';
+          res.on('data', d => { _addonData += d; });
+          res.on('end', async () => {
+            try {
+              const addons = JSON.parse(_addonData);
+              if (!Array.isArray(addons) || addons.length === 0) return;
+              for (const addon of addons) {
+                // Skip if addon has a URL pattern that doesn't match current page
+                if (addon.url_pattern && !currentUrl.includes(addon.url_pattern)) {
+                  console.log(`[addon] skip "${addon.name}" — url_pattern "${addon.url_pattern}" not in ${currentUrl}`);
+                  continue;
+                }
+                try {
+                  // Wrap in try/catch so JS errors surface as real messages
+                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] ${addon.name.replace(/'/g, "'")}:', e.message, e.stack);}})();`;
+                  await view.webContents.executeJavaScript(wrapped);
+                  console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
+                } catch (err) {
+                  console.error(`[addon] re-inject "${addon.name}" CRASHED:`, err.message);
+                }
+              }
+            } catch (e) {
+              console.error('[active-addons] parse error:', e.message);
+            }
+          });
+        }).on('error', () => {});
+      }, delay);
+    }
+
+    // Fire immediately and at SPA render milestones
+    _reInjectAddons(200);
+    _reInjectAddons(1000);
+    _reInjectAddons(3000);
+  });
+
+  // Auto-push a tab snapshot to the gateway after every real page load so
+  // the AI chat always has fresh page context when the user enables "Page" context.
+  view.webContents.on('did-finish-load', async () => {
+    const url = view.webContents.getURL();
+    // Skip blank, new-tab, and gateway admin pages
+    if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+    // Only push for the currently active tab
+    if (view !== tabs[activeTabId]?.view) return;
+    try {
+      const html  = await view.webContents.executeJavaScript('document.documentElement.outerHTML').catch(() => '');
+      const title = view.webContents.getTitle();
+      const payload = JSON.stringify({ url, title, html });
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/tab/snapshot',
+        method:   'PUT',
+        headers:  {
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      });
+      req.on('error', () => {}); // silently ignore if gateway not yet up
+      req.end(payload);
+    } catch (_) {}
+  });
+
+  tabs[id] = { id, view };
   tabOrder.push(id);
   switchTab(id, win);
   return id;
@@ -656,6 +815,28 @@ function switchTab(id, win = mainWin) {
   notifyChrome('url-changed', { id, url: wc.getURL() });
   notifyChrome('nav-state', { id, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
   notifyTabsUpdated();
+
+  // Push a fresh snapshot for the newly-active tab so "Page" context always
+  // reflects the page the user is actually looking at.
+  const snapUrl = wc.getURL();
+  if (snapUrl && snapUrl !== 'about:blank' && !snapUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) {
+    wc.executeJavaScript('document.documentElement.outerHTML').then(html => {
+      const title   = wc.getTitle();
+      const payload = JSON.stringify({ url: snapUrl, title, html });
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/tab/snapshot',
+        method:   'PUT',
+        headers:  {
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      });
+      req.on('error', () => {}); // silently ignore if gateway not yet up
+      req.end(payload);
+    }).catch(() => {});
+  }
 }
 
 /**
@@ -676,7 +857,7 @@ function closeTab(id, win = mainWin) {
   win.removeBrowserView(tab.view);
   tab.view.webContents.destroy();
   delete tabs[id];
-  tabOrder = tabOrder.filter(x => x !== id);
+  tabOrder = tabOrder.filter(tid => tid !== id);
 
   if (Object.keys(tabs).length === 0) {
     // No tabs left — open a fresh one
@@ -709,24 +890,11 @@ function notifyTabsUpdated() {
   const list = tabOrder.filter(id => tabs[id]).map(id => {
     const t = tabs[id];
     return {
-    id:          t.id,
-    url:         t.view.webContents.getURL(),
-    title:       t.view.webContents.getTitle(),
-    favicon:     null,           // favicon updates arrive via separate event
-    active:      t.id === activeTabId,
-    muted:       t.view.webContents.isAudioMuted(),
-    audible:     t.view.webContents.isCurrentlyAudible(),
-    pairId:      (() => { const p = getPairOf(t.id); return p ? splitPairs.indexOf(p) : null; })(),
-    pairLeft:    (() => { const p = getPairOf(t.id); return p ? t.id === p.leftId : false; })(),
-    pairPaused:  (() => { const p = getPairOf(t.id); return p ? p.paused : false; })(),
-    // legacy flags kept for any remaining references
-    split:       (() => { const p = getPairOf(t.id); return p ? t.id === p.rightId : false; })(),
-    splitLeft:   (() => { const p = getPairOf(t.id); return p ? t.id === p.leftId : false; })(),
-    splitPaused: (() => { const p = getPairOf(t.id); return p ? p.paused : false; })(),
-    parentId:    t.parentId || null,
-    parentTitle: t.parentId && tabs[t.parentId]
-                   ? (tabs[t.parentId].view.webContents.getTitle() || null)
-                   : null,
+      id:      t.id,
+      url:     t.view.webContents.getURL(),
+      title:   t.view.webContents.getTitle(),
+      favicon: null,           // favicon updates arrive via separate event
+      active:  t.id === activeTabId,
     };
   });
   notifyChrome('tabs-updated', list);
@@ -927,12 +1095,26 @@ function registerIPC() {
   });
 
   ipcMain.handle('get-tabs', () => {
-    return Object.values(tabs).map(t => ({
-      id:    t.id,
-      url:   t.view.webContents.getURL(),
-      title: t.view.webContents.getTitle(),
-      active: t.id === activeTabId,
-    }));
+    return tabOrder.filter(id => tabs[id]).map(id => {
+      const t = tabs[id];
+      return {
+        id:     t.id,
+        url:    t.view.webContents.getURL(),
+        title:  t.view.webContents.getTitle(),
+        active: t.id === activeTabId,
+      };
+    });
+  });
+
+  ipcMain.handle('reorder-tab', (_, { fromId, toId }) => {
+    const fi = tabOrder.indexOf(fromId);
+    const ti = tabOrder.indexOf(toId);
+    if (fi === -1 || ti === -1 || fi === ti) return;
+    tabOrder.splice(fi, 1);
+    // Re-find ti after removal since index may have shifted
+    const newTi = tabOrder.indexOf(toId);
+    tabOrder.splice(newTi, 0, fromId);
+    notifyTabsUpdated();
   });
 
   ipcMain.handle('get-gateway-status', () => ({
@@ -1346,6 +1528,209 @@ function registerIPC() {
   ipcMain.handle('win-close',        () => mainWin?.close());
   ipcMain.handle('win-is-maximized', () => mainWin?.isMaximized() ?? false);
 
+  // ── Browser automation command handlers ─────────────────────────────────
+  // These execute commands from the agent gateway's browser_tools.py queue.
+  // The gateway enqueues commands; Electron polls, executes, and posts results.
+
+  async function executeBrowserCommand(cmd) {
+    const { id, command, args } = cmd;
+    const tab = tabs[activeTabId];
+    if (!tab) {
+      return { id, result: { error: 'No active tab' } };
+    }
+    const wc = tab.view.webContents;
+
+    try {
+      switch (command) {
+        case 'click': {
+          const { selector, button = 'left' } = args;
+          const code = `
+            (function() {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { error: 'Element not found: ${selector}' };
+              el.scrollIntoView({ block: 'center' });
+              const rect = el.getBoundingClientRect();
+              el.click();
+              return { success: true, bounds: { x: rect.x, y: rect.y, w: rect.width, h: rect.height } };
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'type': {
+          const { selector, text, clear = true } = args;
+          const code = `
+            (function() {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { error: 'Element not found: ${selector}' };
+              el.scrollIntoView({ block: 'center' });
+              el.focus();
+              if (${clear}) el.value = '';
+              el.value += ${JSON.stringify(text)};
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return { success: true };
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'scroll': {
+          const { pixels = 0, to_bottom = false } = args;
+          const code = to_bottom
+            ? 'window.scrollTo(0, document.body.scrollHeight); ({ success: true })'
+            : `window.scrollBy(0, ${pixels}); ({ success: true })`;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        case 'navigate': {
+          const { url } = args;
+          await wc.loadURL(url);
+          return { id, result: { success: true, url } };
+        }
+
+        case 'screenshot': {
+          const img = await wc.capturePage();
+          const b64 = img.toPNG().toString('base64');
+          return { id, result: { success: true, image: b64 } };
+        }
+
+        case 'eval': {
+          const { code } = args;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: { success: true, result: res } };
+        }
+
+        case 'wait': {
+          const { selector, timeout = 10 } = args;
+          const startTime = Date.now();
+          const code = `
+            (function() {
+              return new Promise((resolve) => {
+                const check = () => {
+                  const el = document.querySelector(${JSON.stringify(selector)});
+                  if (el) {
+                    resolve({ success: true });
+                  } else if (Date.now() - ${startTime} > ${timeout * 1000}) {
+                    resolve({ error: 'Timeout waiting for ${selector}' });
+                  } else {
+                    setTimeout(check, 100);
+                  }
+                };
+                check();
+              });
+            })()
+          `;
+          const res = await wc.executeJavaScript(code);
+          return { id, result: res };
+        }
+
+        default:
+          return { id, result: { error: `Unknown command: ${command}` } };
+      }
+    } catch (err) {
+      return { id, result: { error: err.message } };
+    }
+  }
+
+  // Poll the gateway for browser automation commands every 500ms
+  async function pollBrowserCommands() {
+    if (!gatewayReady || !adminToken) return;
+
+    try {
+      const body = JSON.stringify({});
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/browser/command-queue',
+        method:   'GET',
+        headers:  {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type':  'application/json',
+        },
+      }, res => {
+        let data = '';
+        res.on('data', d => data += d);
+        res.on('end', async () => {
+          try {
+            const json = JSON.parse(data);
+            if (json.command && json.id) {
+              // Execute the command
+              const result = await executeBrowserCommand(json);
+              // Post result back to gateway
+              const resultBody = JSON.stringify(result);
+              const postReq = http.request({
+                hostname: GATEWAY_HOST,
+                port:     GATEWAY_PORT,
+                path:     '/browser/result',
+                method:   'POST',
+                headers:  {
+                  'Authorization':  `Bearer ${adminToken}`,
+                  'Content-Type':   'application/json',
+                  'Content-Length': Buffer.byteLength(resultBody),
+                },
+              });
+              postReq.write(resultBody);
+              postReq.end();
+            }
+          } catch (e) {
+            console.error('[browser-commands] parse error:', e.message);
+          }
+        });
+      });
+      req.on('error', () => { /* silent fail — gateway might be restarting */ });
+      req.end();
+    } catch (e) {
+      console.error('[browser-commands] poll error:', e.message);
+    }
+  }
+
+  // Start polling loop
+  setInterval(pollBrowserCommands, 500);
+
+  // ── Addon injection queue ───────────────────────────────────────────────
+  // Polls /tab/inject-queue every 2 s.  Each item returned is a JS snippet
+  // written by an agent (or activated via the Addons admin UI).  We run it
+  // inside the currently-active browser tab — NOT the sidebar or any gateway
+  // UI page.
+  function pollInjectQueue() {
+    if (!gatewayReady) return;
+    http.get(`${GATEWAY_ORIGIN}/tab/inject-queue`, res => {
+      let data = '';
+      res.on('data', d => { data += d; });
+      res.on('end', async () => {
+        try {
+          const items = JSON.parse(data);          // [{name, code_js}, …]
+          if (!Array.isArray(items) || items.length === 0) return;
+
+          const tab = tabs[activeTabId];
+          if (!tab) return;
+          const url = tab.view.webContents.getURL();
+          // Only inject into real external pages, not gateway admin UI
+          if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+
+          for (const item of items) {
+            try {
+              // Wrap in try/catch so JS errors surface in the log rather than crashing silently
+              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] ${(item.name||'').replace(/'/g,"'")}:', e.message);}})();`;
+              await tab.view.webContents.executeJavaScript(wrapped);
+              console.log(`[addon] injected "${item.name}" into ${url}`);
+            } catch (err) {
+              console.error(`[addon] inject "${item.name}" CRASHED:`, err.message);
+            }
+          }
+        } catch (e) {
+          console.error('[inject-queue] parse error:', e.message);
+        }
+      });
+    }).on('error', () => { /* gateway may be restarting */ });
+  }
+
+  setInterval(pollInjectQueue, 2000);
+
   // ── Sidebar toggle ──────────────────────────────────────────────────────
   // Creates the sidebar BrowserView lazily on first use, then shows/hides it
   // by adding/removing it from the window and resizing the active tab view.
@@ -1361,7 +1746,9 @@ function registerIPC() {
           webviewTag:       false,
         },
       });
-      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/chat.html`);
+      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/chat.html`, {
+        extraHeaders: 'Cache-Control: no-cache\r\nPragma: no-cache\r\n',
+      });
     }
 
     sidebarOpen = !sidebarOpen;
@@ -1399,8 +1786,9 @@ function buildAppMenu() {
     {
       label: 'View',
       submenu: [
-        { label: 'Reload Tab',       accelerator: 'CmdOrCtrl+R', click: () => tabs[activeTabId]?.view.webContents.reload() },
-        { label: 'Force Reload',     accelerator: 'CmdOrCtrl+Shift+R', click: () => tabs[activeTabId]?.view.webContents.reloadIgnoringCache() },
+        { label: 'Reload Tab',   accelerator: 'CmdOrCtrl+R', click: () => tabs[activeTabId]?.view.webContents.reload() },
+        { label: 'Reload Tab',   accelerator: 'F5',           click: () => tabs[activeTabId]?.view.webContents.reload(), visible: false },
+        { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => tabs[activeTabId]?.view.webContents.reloadIgnoringCache() },
         { type: 'separator' },
         { label: 'Toggle DevTools (page)',  accelerator: 'F12', click: () => tabs[activeTabId]?.view.webContents.toggleDevTools() },
         { label: 'Toggle DevTools (chrome)', click: () => mainWin?.webContents.toggleDevTools() },

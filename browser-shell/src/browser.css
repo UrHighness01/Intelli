@@ -43,6 +43,27 @@ html, body {
   -webkit-app-region: drag;
 }
 
+/* ── Intelli logo pill — top-left of tab bar ─────────────────────── */
+#intelli-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  margin-bottom: 4px;
+  margin-right: 4px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.12s;
+  -webkit-app-region: no-drag;
+  opacity: 0.9;
+}
+#intelli-logo:hover {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
 /* Holds the individual .tab elements horizontally */
 #tabs {
   display: flex;
@@ -76,98 +97,8 @@ html, body {
 }
 .tab:hover         { background: var(--surface); color: var(--text); }
 .tab.active        { background: var(--surface); color: var(--text); }
-.tab.dragging      { opacity: 0.5; }
-.tab.drag-over     { border-left: 2px solid var(--accent, #60a5fa); background: rgba(96,165,250,.15); }
-/* Admin Hub tab — shrinks to fit its label, never grows */
-.tab.admin-hub {
-  flex: 0 0 auto;
-  min-width: unset;
-  max-width: unset;
-  padding: 0 12px;
-  white-space: nowrap;
-}
-/* ── Merged split tab ─────────────────────────────────────────────────────── */
-.tab.split-merged {
-  /* Exactly the same footprint as one normal tab */
-  flex: 0 1 var(--tab-max);
-  width: var(--tab-max);
-  min-width: var(--tab-min);
-  max-width: var(--tab-max);
-  display: flex;
-  align-items: center;
-  padding: 0;
-  gap: 0;
-  background: var(--surface);
-  border-top: 2px solid var(--accent, #60a5fa);
-  overflow: hidden;
-  cursor: default;
-}
-/* Paused split: dimmed pill while viewing another tab solo */
-.tab.split-merged.paused {
-  opacity: 0.55;
-  border-top-color: var(--muted, #888);
-  position: relative;
-}
-.tab.split-merged.paused::after {
-  content: '⏸';
-  font-size: 9px;
-  position: absolute;
-  bottom: 2px;
-  right: 4px;
-  opacity: 0.75;
-  pointer-events: none;
-}
-.split-side {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  flex: 1;
-  min-width: 0;
-  max-width: 50%;
-  overflow: hidden;
-  height: 100%;
-  cursor: pointer;
-  pointer-events: auto;
-}
-.split-side:hover { background: rgba(96,165,250,.18); }
-/* Drag-to-swap visual feedback */
-.split-side.split-drop-over {
-  background: rgba(96,165,250,.40);
-  outline: 2px dashed var(--accent, #60a5fa);
-  outline-offset: -2px;
-}
-.split-side.split-dragging { opacity: 0.40; }
-.split-side .tab-title {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  pointer-events: none;
-}
-.split-side .split-fav {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  pointer-events: none;
-}
-.split-divider {
-  color: var(--border, #444);
-  font-size: 14px;
-  padding: 0 2px;
-  pointer-events: none;
-  user-select: none;
-  flex-shrink: 0;
-}
-/* Empêche les éléments enfants (titre, favicon…) d'intercepter les events drag,
-   sinon dragleave se déclenche sur le .tab parent quand la souris passe sur un child. */
-.tab > *           { pointer-events: none; }
-/* Le bouton fermer doit rester cliquable */
-.tab > .tab-close  { pointer-events: auto; }
-/* Les côtés du split pill doivent rester cliquables (spécificité > .tab > *) */
-.tab.split-merged > .split-side { pointer-events: auto; }
-/* Paused split pill: curseur pointer pour indiquer qu'il est cliquable */
-.tab.split-merged.paused { cursor: pointer; }
+.tab.dragging      { opacity: 0.4; }
+.tab.drag-over     { box-shadow: -3px 0 0 0 var(--accent); }
 .tab.active::after {
   content: '';
   position: absolute;

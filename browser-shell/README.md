@@ -18,7 +18,7 @@ When you open the app the gateway starts automatically in the background; when y
 | Search fallback | Non-URL address bar input queries DuckDuckGo |
 | Home URL | `http://127.0.0.1:8080/ui/` (Intelli Admin Hub) |
 | Windows packaging | NSIS `.exe` installer via electron-builder |
-| Linux packaging | `.deb` + AppImage (planned) |
+| Linux packaging | `.deb` + AppImage via `npm run build:linux` |
 
 ---
 

@@ -285,14 +285,29 @@ function renderTabs(tabs) {
       }
       _dragTabId = null;
     });
-    el.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      window.electronAPI.showTabCtx(t.id, t.url || '', _chromGroups);
+
+    // ── Drag-to-reorder ────────────────────────────────────────────────
+    el.draggable = true;
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(t.id));
+      el.classList.add('dragging');
     });
-    if (t.id !== _activeId) {
-      el.addEventListener('mouseenter', () => _scheduleTabPreview(el, t));
-      el.addEventListener('mouseleave',  _cancelTabPreview);
-    }
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      const fromId = Number(e.dataTransfer.getData('text/plain'));
+      const toId   = t.id;
+      if (fromId !== toId) window.electronAPI.reorderTab(fromId, toId);
+    });
+
     $tabs.appendChild(el);
   }
 }
@@ -453,6 +468,7 @@ $newTab.addEventListener('click', () => window.electronAPI.newTab());
 $back.addEventListener('click',   () => window.electronAPI.goBack());
 $fwd.addEventListener('click',    () => window.electronAPI.goForward());
 $home.addEventListener('click',   () => window.electronAPI.goHome());
+document.getElementById('intelli-logo')?.addEventListener('click', () => window.electronAPI.goHome());
 $reload.addEventListener('click', () => window.electronAPI.reload());
 
 /* ── Address bar input ──────────────────────────────────────────── */
@@ -1599,3 +1615,11 @@ window.electronAPI.getSettings().then(s => {
 });
 
 init();
+
+/* ── F5 to reload active tab ────────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'F5') {
+    e.preventDefault();
+    window.electronAPI.reload();
+  }
+});
