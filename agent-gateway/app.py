@@ -2841,7 +2841,9 @@ def browser_command_queue(request: Request = None):
             return cmd
         return {'command': None}
     except Exception as exc:
-        return {'command': None, 'error': str(exc)}
+        # Log the exception internally but do not expose details to the client
+        print("Error while fetching browser command queue:", repr(exc))
+        return {'command': None, 'error': 'internal_error'}
 
 
 @app.post('/browser/result')
