@@ -41,6 +41,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
+from cryptography.fernet import Fernet, InvalidToken
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -97,6 +98,41 @@ def _save() -> None:
     WEBHOOKS_FILE.write_text(json.dumps(_hooks, indent=2), encoding='utf-8')
 
 
+def _get_encryption_key() -> Optional[bytes]:
+    """Return the Fernet key for encrypting webhook secrets, or None if unset."""
+    key = os.getenv('INTELLI_WEBHOOK_SECRET_KEY')
+    if not key:
+        return None
+    # Fernet keys are URL-safe base64-encoded 32-byte keys, so keep as str->bytes.
+    return key.encode('utf-8')
+
+
+def _encrypt_secret(secret: str) -> str:
+    """Encrypt a webhook secret using Fernet.
+
+    The caller is responsible for ensuring a key is configured.
+    """
+    key = _get_encryption_key()
+    if not key:
+        raise RuntimeError('INTELLI_WEBHOOK_SECRET_KEY must be set to register signed webhooks')
+    f = Fernet(key)
+    token = f.encrypt(secret.encode('utf-8'))
+    return token.decode('utf-8')
+
+
+def _decrypt_secret(token: str) -> str:
+    """Decrypt a stored webhook secret token using Fernet.
+
+    Returns the clear-text secret. If decryption fails, raises InvalidToken.
+    """
+    key = _get_encryption_key()
+    if not key:
+        raise RuntimeError('INTELLI_WEBHOOK_SECRET_KEY must be set to use signed webhooks')
+    f = Fernet(key)
+    clear = f.decrypt(token.encode('utf-8'))
+    return clear.decode('utf-8')
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -144,11 +180,15 @@ def register_webhook(url: str, events: Optional[List[str]] = None, secret: str =
             raise ValueError(f'unknown events: {unknown}; valid: {VALID_EVENTS}')
 
     hook_id = str(uuid.uuid4())
+    # Encrypt the HMAC secret before persisting so it is never stored in clear text.
+    stored_secret: str = ''
+    if secret:
+        stored_secret = _encrypt_secret(secret)
     hook = {
         'id': hook_id,
         'url': url,
         'events': sorted(events),
-        'secret': secret,
+        'secret': stored_secret,
         'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     with _lock:
