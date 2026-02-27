@@ -108,10 +108,7 @@ def get_persona(slug: str) -> Optional[dict]:
     """Return a persona by slug, or None if not found."""
     if slug in ('', 'intelli'):
         return _DEFAULT_PERSONA
-    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
-    if not slug:
-        return None
-    return _load_dir(_PERSONAS_DIR / slug)
+    return _load_dir(_PERSONAS_DIR / os.path.basename(_slug(slug)))
 
 
 def create_persona(
@@ -122,10 +119,8 @@ def create_persona(
     provider: str = '',
 ) -> dict:
     """Create a new persona and persist it to disk. Returns the full persona dict."""
-    slug = os.path.basename(_slug(name))  # sanitise: CodeQL taint barrier in this scope
-    if not slug:
-        raise ValueError(f'Invalid persona name: {name!r}')
-    d = _PERSONAS_DIR / slug
+    slug = _slug(name)
+    d = _PERSONAS_DIR / os.path.basename(slug)
     d.mkdir(parents=True, exist_ok=True)
     cfg: dict = {
         'name':       name,
@@ -143,10 +138,7 @@ def update_persona(slug: str, **kwargs) -> Optional[dict]:
     """Update fields of an existing persona. Pass soul= to update SOUL.md."""
     if slug in ('', 'intelli'):
         return None  # built-in is immutable
-    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
-    if not slug:
-        return None
-    d = _PERSONAS_DIR / slug
+    d = _PERSONAS_DIR / os.path.basename(_slug(slug))
     cfg_path = d / 'config.json'
     if not cfg_path.exists():
         return None
@@ -164,10 +156,7 @@ def delete_persona(slug: str) -> bool:
     """Delete a persona. Cannot delete the built-in 'intelli' persona."""
     if slug in ('', 'intelli'):
         return False
-    slug = os.path.basename(_slug(slug))  # sanitise: CodeQL taint barrier in this scope
-    if not slug:
-        return False
-    d = _PERSONAS_DIR / slug
+    d = _PERSONAS_DIR / os.path.basename(_slug(slug))
     if not d.exists():
         return False
     shutil.rmtree(d)

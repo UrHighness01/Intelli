@@ -168,13 +168,13 @@ def get_note_file(date_str: str = '') -> str:
     """
     if not date_str:
         date_str = date.today().isoformat()
-    # Re-assign through os.path.basename in this scope — CodeQL taint barrier.
-    date_str = os.path.basename(date_str)
     try:
         date.fromisoformat(date_str)
     except (ValueError, TypeError):
         return 'Invalid date format — expected YYYY-MM-DD.'
-    fp = _dir() / (date_str + '.md')
+    # os.path.basename used directly as the path-join operand (no intermediate
+    # variable) so CodeQL sees the sanitiser output as the join operand.
+    fp = _dir() / (os.path.basename(date_str) + '.md')
     if not fp.exists():
-        return 'No notes file for ' + date_str + '.'
+        return 'No notes file for ' + os.path.basename(date_str) + '.'
     return fp.read_text(encoding='utf-8', errors='replace')

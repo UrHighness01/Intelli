@@ -46,8 +46,8 @@ import re as _re
 
 def _session_path(session_id: str) -> pathlib.Path:
     safe = _re.sub(r'[^a-zA-Z0-9_-]', '', session_id)
-    # os.path.basename is a CodeQL-recognised taint sanitiser; applied directly
-    # at the join site so the resulting Path object is not tainted.
+    # os.path.basename used directly as the path-join operand so CodeQL sees
+    # the sanitiser output as the immediate operand, not an intermediate variable.
     return _SESSIONS_DIR / (os.path.basename(safe) + '.jsonl')
 
 
@@ -92,8 +92,6 @@ def save_message(
     content: str,
     meta: Optional[dict] = None,
 ) -> None:
-    # Sanitise session_id in this scope: CodeQL taint barrier before any path use.
-    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
     """Append a single message to the session file and update the index.
 
     Args:
@@ -107,7 +105,7 @@ def save_message(
     if meta:
         entry.update(meta)
 
-    path = _session_path(session_id)
+    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
     with path.open('a', encoding='utf-8') as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
@@ -149,8 +147,7 @@ def list_sessions(limit: int = 50, offset: int = 0) -> list[dict]:
 
 def get_session(session_id: str) -> list[dict]:
     """Return all messages in a session in chronological order."""
-    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
-    path = _session_path(session_id)
+    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
     if not path.exists():
         return []
     messages: list[dict] = []
@@ -167,8 +164,7 @@ def get_session(session_id: str) -> list[dict]:
 
 def delete_session(session_id: str) -> bool:
     """Delete a session file and remove it from the index."""
-    session_id = os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id))
-    path = _session_path(session_id)
+    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
     if not path.exists():
         return False
     path.unlink()

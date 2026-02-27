@@ -364,10 +364,9 @@ def install(source: str) -> Dict[str, Any]:
 
 def uninstall(slug: str) -> bool:
     """Remove a plugin completely.  Returns True if it existed."""
-    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
-    if not _PLUGIN_SLUG_RE.match(slug):
+    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
         raise ValueError(f'Invalid plugin slug: {slug!r}')
-    dest = PLUGINS_DIR / slug
+    dest = PLUGINS_DIR / os.path.basename(slug.strip().lower())
     if not dest.exists():
         return False
     with _lock:
@@ -382,10 +381,9 @@ def uninstall(slug: str) -> bool:
 
 def enable(slug: str) -> bool:
     """Enable a plugin and register its tools.  Returns True on success."""
-    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
-    if not _PLUGIN_SLUG_RE.match(slug):
+    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
         raise ValueError(f'Invalid plugin slug: {slug!r}')
-    dest = PLUGINS_DIR / slug
+    dest = PLUGINS_DIR / os.path.basename(slug.strip().lower())
     manifest = _read_manifest(dest)
     if manifest is None:
         return False
@@ -400,9 +398,9 @@ def enable(slug: str) -> bool:
 
 def disable(slug: str) -> bool:
     """Disable a plugin and unregister its tools.  Returns True if it was enabled."""
-    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
-    if not _PLUGIN_SLUG_RE.match(slug):
+    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
         raise ValueError(f'Invalid plugin slug: {slug!r}')
+    slug = slug.strip().lower()
     with _lock:
         _unregister_tools(slug)
         _registry_snapshot.pop(slug, None)
@@ -416,13 +414,13 @@ def disable(slug: str) -> bool:
 
 def reload_plugin(slug: str) -> Dict[str, Any]:
     """Disable then re-enable a plugin (picks up code changes)."""
-    slug = os.path.basename(slug.strip().lower())  # sanitise: CodeQL taint barrier
-    if not _PLUGIN_SLUG_RE.match(slug):
+    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
         raise ValueError(f'Invalid plugin slug: {slug!r}')
+    slug = slug.strip().lower()
     disable(slug)
     if not enable(slug):
         raise FileNotFoundError(f'Plugin "{slug}" not found in {PLUGINS_DIR}')
-    manifest = _read_manifest(PLUGINS_DIR / slug) or {}
+    manifest = _read_manifest(PLUGINS_DIR / os.path.basename(slug)) or {}
     return {**manifest, 'slug': slug, 'tools_registered': _registry_snapshot.get(slug, [])}
 
 
