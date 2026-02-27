@@ -1911,7 +1911,7 @@ function createMainWindow() {
       sandbox:          false,  // preload needs non-sandboxed for IPC
     },
     show: false,
-    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
   });
 
   mainWin.loadFile(path.join(__dirname, 'src', 'browser.html'));
