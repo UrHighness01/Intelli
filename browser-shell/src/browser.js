@@ -314,6 +314,8 @@ function renderTabs(tabs) {
     el.className = 'tab' + (t.id === _activeId ? ' active' : '') + (_cggN ? ' in-group' : '');
     if (_cggN) el.style.setProperty('--tg-color', _cggN.color);
     el.dataset.id = t.id;
+    // Stamp the chrome-group id so drag validation can read it from the DOM
+    el.dataset.groupId = _cggN ? String(_cggN.id) : '';
 
     const fav = document.createElement('img');
     fav.className = 'tab-favicon' + (t.favicon ? '' : ' hidden');
@@ -380,19 +382,76 @@ function renderTabs(tabs) {
 let _tpTimer  = null;
 
 /* ── Tab drag-to-reorder — mouse-based (Chrome-style ghost + drop line) ─── */
+
+/** Returns the chrome-group that contains tabId, or null if ungrouped. */
+function _cgOf(tabId) {
+  return _chromGroups.find(g => g.tabIds.includes(Number(tabId))) ?? null;
+}
+
+/**
+ * Returns the groupId string stamped on a rendered tab element, or '' if ungrouped.
+ * Reading from the DOM is more reliable than looking up _chromGroups at drag time.
+ */
+function _domGroupId(tabId) {
+  return $tabs.querySelector(`.tab[data-id="${tabId}"]`)?.dataset.groupId ?? '';
+}
+
+/**
+ * Returns true if dropping before targetId is allowed for the current drag.
+ * Rules:
+ *  – A grouped tab may only be reordered within its own group.
+ *  – A tab must not be dropped BETWEEN two consecutive members of a group it
+ *    doesn't belong to (that would visually split the group).
+ *  – A grouped tab may only be appended at the end if the last tab is in the
+ *    same group (otherwise the tab would leave its group's contiguous block).
+ */
+function _dragDropIsValid(targetId) {
+  const allTabs = Array.from($tabs.querySelectorAll('.tab:not(.dragging)'));
+
+  // --- Appending at the very end ---
+  if (targetId === null) {
+    if (_dragTabGroupId === '') return true; // ungrouped tab can always go last
+    // Grouped tab: only valid if the current last visible tab is in the same group
+    if (allTabs.length === 0) return true;
+    const lastGid = allTabs[allTabs.length - 1].dataset.groupId ?? '';
+    return lastGid === _dragTabGroupId;
+  }
+
+  const targetGrpId = _domGroupId(targetId);
+
+  // Rule 1: a grouped tab may only be reordered within its own group
+  if (_dragTabGroupId !== '' && _dragTabGroupId !== targetGrpId) return false;
+
+  // Rule 2: the gap (prev_tab → targetId) must not be INSIDE a foreign group.
+  // If the tab just before the drop position is in the same group as targetId,
+  // and that group is not the dragged tab's group, inserting here would split it.
+  const idx = allTabs.findIndex(el => el.dataset.id == String(targetId));
+  if (idx > 0) {
+    const prevGid = allTabs[idx - 1].dataset.groupId ?? '';
+    if (prevGid !== '' && prevGid === targetGrpId && _dragTabGroupId !== targetGrpId) {
+      return false; // would split the group
+    }
+  }
+
+  return true;
+}
+
 let _dragTabId       = null;   // id of tab being dragged
 let _dragTabEl       = null;   // its DOM element
 let _dragGhost       = null;   // floating visual clone
 let _dragActive      = false;  // true once movement threshold passed
+let _dragTabGroupId  = '';     // data-group-id of the dragged tab ('' = ungrouped)
 let _dragStartX      = 0;
 let _dragDropX       = 0;
 let _tabDragWasActive = false; // suppresses the residual click after a drag
 
 function _initTabDrag(tabId, el, startX) {
-  _dragTabId  = tabId;
-  _dragTabEl  = el;
-  _dragStartX = startX;
-  _dragActive = false;
+  _dragTabId       = tabId;
+  _dragTabEl       = el;
+  _dragStartX      = startX;
+  _dragActive      = false;
+  // Capture the group id from the DOM element right now — reliable snapshot
+  _dragTabGroupId  = el.dataset.groupId ?? '';
 }
 
 function _getTabDropTarget(x) {
@@ -417,7 +476,10 @@ function _updateTabDropLine(x) {
     document.body.appendChild(line);
   }
   const tid = _getTabDropTarget(x);
-  if (tid === null) { line.style.display = 'none'; return; }
+  // Hide line when no target or when the drop would cross a group boundary
+  if (tid === null || (_dragTabId !== null && !_dragDropIsValid(tid))) {
+    line.style.display = 'none'; return;
+  }
   const targetEl = $tabs.querySelector(`[data-id="${tid}"]`);
   if (!targetEl) { line.style.display = 'none'; return; }
   const r = targetEl.getBoundingClientRect();
@@ -431,6 +493,7 @@ function _cleanupTabDrag() {
   _dragGhost?.remove();
   document.getElementById('_tdi')?.remove();
   _dragTabId = null; _dragTabEl = null; _dragGhost = null;
+  _dragTabGroupId = '';
   _dragActive = false; _dragStartX = 0; _dragDropX = 0;
 }
 
@@ -470,7 +533,7 @@ document.addEventListener('mouseup', function _onTabDragUp() {
   if (_dragActive) {
     _tabDragWasActive = true;
     const targetId = _getTabDropTarget(_dragDropX);
-    if (targetId !== null && targetId !== _dragTabId) {
+    if (targetId !== null && targetId !== _dragTabId && _dragDropIsValid(targetId)) {
       window.electronAPI.reorderTab(_dragTabId, targetId);
     }
   }
@@ -931,6 +994,37 @@ const $bookmarksBar    = document.getElementById('bookmarks-bar');
       .forEach(el => { el.classList.remove('chip-drag-over-left', 'chip-drag-over-right'); });
   }
 
+  /**
+   * Returns true if dropping the dragged chip at this position is valid.
+   * Blocks if the drop would insert the group BETWEEN two consecutive tabs
+   * that both belong to the same foreign group (which would split it).
+   */
+  function _chipDropIsValid(tabEl, clientX, dragGrpId) {
+    const r = tabEl.getBoundingClientRect();
+    const onRightHalf = clientX > r.left + r.width / 2;
+    const dragGrpIdStr = String(dragGrpId);
+    if (onRightHalf) {
+      // Gap between tabEl and its next .tab
+      let next = tabEl.nextElementSibling;
+      while (next && !next.classList.contains('tab')) next = next.nextElementSibling;
+      if (next) {
+        const leftGid  = tabEl.dataset.groupId ?? '';
+        const rightGid = next.dataset.groupId ?? '';
+        if (leftGid !== '' && leftGid === rightGid && leftGid !== dragGrpIdStr) return false;
+      }
+    } else {
+      // Gap between prev .tab and tabEl
+      let prev = tabEl.previousElementSibling;
+      while (prev && !prev.classList.contains('tab')) prev = prev.previousElementSibling;
+      if (prev) {
+        const leftGid  = prev.dataset.groupId ?? '';
+        const rightGid = tabEl.dataset.groupId ?? '';
+        if (leftGid !== '' && leftGid === rightGid && leftGid !== dragGrpIdStr) return false;
+      }
+    }
+    return true;
+  }
+
   tabsEl.addEventListener('dragover', e => {
     if (_dragChipGrpId === null) return;
     const tabEl = e.target.closest('.tab');
@@ -939,6 +1033,8 @@ const $bookmarksBar    = document.getElementById('bookmarks-bar');
     if (!dragGrp) return;
     const tabId = Number(tabEl.dataset.id ?? tabEl.dataset.leftId ?? -1);
     if (dragGrp.tabIds.includes(tabId)) return;
+    // Block drop that would insert the group between two tabs of a foreign group
+    if (!_chipDropIsValid(tabEl, e.clientX, _dragChipGrpId)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     _clearChipTabHighlight();
@@ -962,6 +1058,8 @@ const $bookmarksBar    = document.getElementById('bookmarks-bar');
     const dragGrp = _chromGroups.find(x => x.id === _dragChipGrpId);
     const tabId   = Number(tabEl.dataset.id ?? tabEl.dataset.leftId ?? -1);
     if (!dragGrp || dragGrp.tabIds.includes(tabId)) return;
+    // Block drop that would insert the group between two tabs of a foreign group
+    if (!_chipDropIsValid(tabEl, e.clientX, _dragChipGrpId)) return;
     e.preventDefault();
     e.stopPropagation();
     _clearChipTabHighlight();
