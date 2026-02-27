@@ -1,6 +1,6 @@
-# Intelli — AI-native browser prototype
+# Intelli — AI-native browser
 
-Intelli is a research prototype for a privacy-first browser with native AI/agent integration.
+Intelli is a privacy-first browser with native AI/agent integration.
 It combines a **Tab Context Bridge**, a hardened **Agent Gateway**, an Electron desktop browser
 shell with multi-tab support, a live admin sidebar, and a hybrid supervisor pipeline that
 validates, redacts, approves, and audits every AI tool call before execution.

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Intelli · Canvas</title>
   <style>
@@ -79,13 +80,19 @@
     #history-list {
       flex: 1; overflow-y: auto; padding: 6px 0;
     }
-    .hist-item {
-      padding: 6px 14px; cursor: pointer; font-size: .75rem;
+    .hist-item { display: flex; align-items: center; padding: 0 6px 0 14px; font-size: .75rem;
       color: var(--muted); border-left: 2px solid transparent;
-    }
+      transition: background .15s; }
     .hist-item:hover { color: var(--text); border-color: var(--accent); background: var(--surface2); }
-    .hist-item .hi-title { color: var(--text); font-weight: 600; margin-bottom: 2px; }
+    .hi-body { flex: 1; padding: 6px 0; cursor: pointer; min-width: 0; }
+    .hist-item .hi-title { color: var(--text); font-weight: 600; margin-bottom: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .hist-item .hi-time  { font-size: .68rem; color: var(--muted); }
+    .hi-del { background: none; border: none; color: var(--muted); font-size: .85rem;
+      cursor: pointer; padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+      line-height: 1; opacity: 0; transition: opacity .15s, color .15s; }
+    .hist-item:hover .hi-del { opacity: 1; }
+    .hi-del:hover { color: var(--red); }
   </style>
 </head>
 <body>
@@ -103,7 +110,10 @@
           srcdoc=""></iframe>
 
   <div id="history-drawer">
-    <div class="drawer-title">Canvas History</div>
+    <div class="drawer-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Canvas History</span>
+      <button class="tb-btn" style="font-size:.66rem;padding:2px 7px" onclick="_history.length&&(_history.length=0,renderHistory())" title="Clear all history">Clear all</button>
+    </div>
     <div id="history-list"></div>
   </div>
 
@@ -126,18 +136,35 @@
 
     function renderHistory() {
       const list = document.getElementById('history-list');
+      if (!_history.length) {
+        list.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:.72rem">No history yet.</div>';
+        return;
+      }
       list.innerHTML = _history.map((item, i) => `
-        <div class="hist-item" onclick="loadHistory(${i})">
-          <div class="hi-title">${escHtml(item.title || 'Canvas')}</div>
-          <div class="hi-time">${new Date(item.ts).toLocaleTimeString()}</div>
+        <div class="hist-item">
+          <div class="hi-body" onclick="loadHistory(${i})">
+            <div class="hi-title">${escHtml(item.title || 'Canvas')}</div>
+            <div class="hi-time">${new Date(item.ts).toLocaleTimeString()}</div>
+          </div>
+          <button class="hi-del" onclick="deleteHistory(${i})" title="Remove from history">✕</button>
         </div>`).join('');
     }
 
     function loadHistory(i) {
       const item = _history[i];
-      if (!item) return;
-      frame.srcdoc = item.html;
-      title.textContent = item.title || 'Canvas';
+      if (!item || !item.html) return;
+      // Reset srcdoc to '' first — Electron won't reload if value is unchanged
+      frame.srcdoc = '';
+      setTimeout(() => {
+        frame.srcdoc = item.html;
+        title.textContent = item.title || 'Canvas';
+        dot.className = 'live';
+      }, 20);
+    }
+
+    function deleteHistory(i) {
+      _history.splice(i, 1);
+      renderHistory();
     }
 
     function toggleHistory() {

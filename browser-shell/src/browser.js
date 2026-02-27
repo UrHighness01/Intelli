@@ -162,6 +162,7 @@ $newTab.addEventListener('click', () => window.electronAPI.newTab());
 $back.addEventListener('click',   () => window.electronAPI.goBack());
 $fwd.addEventListener('click',    () => window.electronAPI.goForward());
 $home.addEventListener('click',   () => window.electronAPI.goHome());
+document.getElementById('intelli-logo')?.addEventListener('click', () => window.electronAPI.goHome());
 $reload.addEventListener('click', () => window.electronAPI.reload());
 
 /* ── Address bar input ──────────────────────────────────────────── */

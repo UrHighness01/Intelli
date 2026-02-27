@@ -42,6 +42,27 @@ html, body {
   -webkit-app-region: drag;
 }
 
+/* ── Intelli logo pill — top-left of tab bar ─────────────────────── */
+#intelli-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  margin-bottom: 4px;
+  margin-right: 4px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.12s;
+  -webkit-app-region: no-drag;
+  opacity: 0.9;
+}
+#intelli-logo:hover {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
 /* Holds the individual .tab elements horizontally */
 #tabs {
   display: flex;

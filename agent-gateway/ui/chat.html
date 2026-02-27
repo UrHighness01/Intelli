@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/intelli-logo.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Intelli · AI Chat</title>
   <style>
@@ -105,8 +106,17 @@
       outline: none; border-color: var(--accent);
     }
     #sel-provider { min-width: 110px; }
-    #inp-model    { width: 130px; }
+    #inp-model    { width: 115px; }
     #inp-model::placeholder { color: var(--muted); }
+    #model-wrap   { display: flex; align-items: center; gap: 2px; }
+    #btn-clear-model {
+      display: none; background: transparent; border: none;
+      color: var(--muted); font-size: .9rem; line-height: 1;
+      padding: 2px 4px; border-radius: 3px; cursor: pointer;
+    }
+    #btn-clear-model:hover { color: var(--red); }
+    #inp-model:not(:placeholder-shown) ~ #btn-clear-model,
+    #model-wrap:focus-within #btn-clear-model { display: block; }
     .spacer { flex: 1; }
 
     /* ── Context bar ──────────────────────────────────────────────── */
@@ -686,7 +696,10 @@
       <option value="ollama">Ollama</option>
     </select>
     <label for="inp-model">Model</label>
-    <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
+    <div id="model-wrap">
+      <input id="inp-model" type="text" placeholder="optional… (e.g. gpt-4o)" aria-label="Model name (optional)" />
+      <button id="btn-clear-model" title="Clear model" tabindex="-1">&#10005;</button>
+    </div>
     <label for="sel-persona" style="margin-left:4px">Persona</label>
     <select id="sel-persona" aria-label="Select persona" style="min-width:110px"></select>
     <div class="spacer"></div>
@@ -950,6 +963,19 @@
       _persona = $selPersona.value;
       localStorage.setItem('intelli_persona', _persona);
     });
+
+    // Model ×-clear button
+    document.getElementById('btn-clear-model').addEventListener('click', () => {
+      $inpModel.value = '';
+      localStorage.removeItem('intelli_last_model');
+      $inpModel.focus();
+    });
+    $inpModel.addEventListener('input', () => {
+      const btn = document.getElementById('btn-clear-model');
+      btn.style.display = $inpModel.value ? 'block' : 'none';
+    });
+    // Show × immediately if a model was restored from localStorage
+    if ($inpModel.value) document.getElementById('btn-clear-model').style.display = 'block';
 
     /* ── Resume session from history page (or inline overlay) ────── */
     async function tryResumeSession(id) {
@@ -1414,6 +1440,8 @@
               thinkingBody.textContent = `Error: ${ev.error}`;
               thinkingBody.classList.add('error-msg');
               setStatus('Error from provider', 'err');
+              // Remove the user message we pushed so retries don't stack
+              _msgs.pop();
               finalResult = null;
               break outer;
             }
@@ -1509,21 +1537,24 @@
 
           // Update provider badge & model
           const badge = thinkingEl.querySelector('.provider-badge');
-          if (badge) badge.textContent = finalResult.provider || provider;
+          const shownProvider = finalResult.actual_provider || finalResult.provider || provider;
+          if (badge) badge.textContent = shownProvider;
+          // model: prefer what the API returned, fall back to actual_model (failover) then user input
+          const shownModel = finalResult.model || finalResult.actual_model || model;
           const metaDiv = thinkingEl.querySelector('.msg-meta');
-          if (metaDiv && finalResult.model) {
+          if (metaDiv && shownModel) {
             let modelSpan = metaDiv.querySelector('.model-name');
             if (!modelSpan) {
               modelSpan = document.createElement('span');
               modelSpan.className = 'model-name';
               metaDiv.appendChild(modelSpan);
             }
-            modelSpan.textContent = finalResult.model;
-            $statModel.textContent = finalResult.model;
+            modelSpan.textContent = shownModel;
+            $statModel.textContent = shownModel;
           }
           // Persist last-used provider+model so they survive browser restart
-          localStorage.setItem('intelli_last_provider', finalResult.provider || provider);
-          if (finalResult.model || model) localStorage.setItem('intelli_last_model', finalResult.model || model);
+          localStorage.setItem('intelli_last_provider', shownProvider);
+          if (shownModel) localStorage.setItem('intelli_last_model', shownModel);
 
           // Update token counts
           const usage = finalResult.usage || {};

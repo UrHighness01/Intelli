@@ -228,6 +228,8 @@ class OpenAIAdapter(BaseAdapter):
         if not key:
             raise RuntimeError('OpenAI API key not configured')
         _check_outbound_url(self.BASE_URL)
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
@@ -236,11 +238,12 @@ class OpenAIAdapter(BaseAdapter):
                 'messages': messages,
                 'temperature': temperature,
                 'max_tokens': max_tokens,
-                **kwargs,
+                **oai_kwargs,
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f'OpenAI API error {resp.status_code}: {resp.text[:500]}')
         data = resp.json()
         choice = data['choices'][0]['message']['content']
         return self._standard_reply(choice, data.get('model', model), data.get('usage'))
@@ -345,6 +348,8 @@ class OpenRouterAdapter(BaseAdapter):
         key = _resolve_key('openrouter', [])
         if not key:
             raise RuntimeError('OpenRouter API key not configured')
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
         _check_outbound_url(self.BASE_URL)
         resp = _requests.post(
             f'{self.BASE_URL}/chat/completions',
@@ -359,11 +364,12 @@ class OpenRouterAdapter(BaseAdapter):
                 'messages': messages,
                 'temperature': temperature,
                 'max_tokens': max_tokens,
-                **kwargs,
+                **oai_kwargs,
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f'OpenRouter API error {resp.status_code}: {resp.text[:500]}')
         data = resp.json()
         choice = data['choices'][0]['message']['content']
         return self._standard_reply(choice, data.get('model', model), data.get('usage'))
@@ -473,9 +479,14 @@ class GitHubCopilotAdapter(BaseAdapter):
         'gpt-4o-mini',
         'gpt-4.1',
         'gpt-4.1-mini',
+        'gpt-4.5',
+        'gpt-5',
+        'gpt-5-mini',
         'o1',
         'o1-mini',
+        'o3',
         'o3-mini',
+        'o4-mini',
         'claude-sonnet-4.5',
         'claude-sonnet-4.6',
     ]
@@ -578,13 +589,38 @@ class GitHubCopilotAdapter(BaseAdapter):
         cop_tok, base_url = self._resolve_copilot_token(github_token)
         _check_outbound_url(base_url)
 
-        # o1/o3-family models don't accept a temperature parameter
-        _o_series = model.startswith(('o1', 'o3'))
+        # o1/o3/o4-family models don't accept a temperature parameter
+        _o_series = model.startswith(('o1', 'o3', 'o4'))
+        # Strip Anthropic-only 'system' key — it's already in messages as role:system
+        oai_kwargs = {k: v for k, v in kwargs.items() if k != 'system'}
+
+        # Normalise messages: Copilot does not support vision content arrays.
+        # If any message has a list content, flatten to text-only.
+        def _flatten_content(c: Any) -> str:
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                parts = []
+                for item in c:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        parts.append(item.get('text', ''))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                return '\n'.join(p for p in parts if p)
+            return str(c) if c is not None else ''
+
+        normalised_msgs = [
+            {**m, 'content': _flatten_content(m.get('content'))}
+            if isinstance(m.get('content'), list)
+            else m
+            for m in messages
+        ]
+
         body: Dict[str, Any] = {
             'model': model,
-            'messages': messages,
+            'messages': normalised_msgs,
             'max_tokens': max_tokens,
-            **kwargs,
+            **oai_kwargs,
         }
         if not _o_series:
             body['temperature'] = temperature
@@ -605,8 +641,26 @@ class GitHubCopilotAdapter(BaseAdapter):
             json=body,
             timeout=60,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            import logging as _logging
+            _log = _logging.getLogger('intelli.copilot')
+            # Summarise each message: role + content type + length
+            msg_summary = [
+                {
+                    'role': m.get('role'),
+                    'content_type': type(m.get('content')).__name__,
+                    'content_len': len(str(m.get('content', ''))),
+                }
+                for m in normalised_msgs
+            ]
+            _log.warning(
+                'Copilot %s — model=%s body_keys=%s messages=%s resp=%s',
+                resp.status_code, model, list(body.keys()), msg_summary, resp.text[:800],
+            )
+            raise RuntimeError(f'GitHub Copilot API error {resp.status_code}: {resp.text[:800]}')
         data = resp.json()
+        if not data.get('choices'):
+            raise RuntimeError(f'GitHub Copilot returned no choices: {str(data)[:400]}')
         choice = data['choices'][0]['message']['content']
         return self._standard_reply(choice, data.get('model', model), data.get('usage'))
 

@@ -1005,7 +1005,13 @@ def run_tool_loop(
         calls = _extract_tool_calls(content)
 
         if not calls:
-            # No tool call — we're done
+            # No tool call — we're done.
+            # Still strip any TOOL_CALL lines the model may have echoed
+            # in its final response (some models repeat the format).
+            clean = _TOOL_CALL_STRIP_RE.sub('', content).strip()
+            if clean != content:
+                result = dict(result)
+                result['content'] = clean
             return result
 
         # Remove TOOL_CALL lines from the displayed content for cleanliness

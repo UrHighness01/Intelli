@@ -50,7 +50,7 @@ import a2a as _a2a
 import plugin_loader as _plugins
 _canvas = _canvas_mgr.get_canvas()
 
-app = FastAPI(title="Intelli Agent Gateway (prototype)")
+app = FastAPI(title="Intelli Agent Gateway")
 
 # ---------------------------------------------------------------------------
 # CORS — restrict to localhost by default; override via env var
@@ -1385,6 +1385,71 @@ class ChatRequest(BaseModel):
     session_id: str = ''           # persist this conversation to disk for session history
 
 
+# ---------------------------------------------------------------------------
+# Context-window budget helper
+# ---------------------------------------------------------------------------
+# Char budgets per provider. Code/markdown tokenizes at roughly 3.5 chars/token,
+# so to safely fit under each limit we target ~90% of the token ceiling × 3.5.
+# This leaves headroom for the model response (typically 4K tokens).
+_PROVIDER_CTX_CHARS: dict[str, int] = {
+    'github_copilot': 310_000,   # 128K tok limit → target 88K tok → 88K×3.5=308K
+    'openai':         310_000,   # same 128K context window
+    'openrouter':     310_000,   # conservative default
+    'anthropic':      620_000,   # 200K tok limit → target 176K tok → 616K chars
+    'ollama':         310_000,
+}
+_DEFAULT_CTX_CHARS = 310_000
+_MAX_SYSTEM_CHARS  = 60_000    # ~17K tokens max for the system prompt alone
+
+
+def _fit_to_context(
+    provider: str,
+    messages: list,
+) -> list:
+    """Trim *messages* so the estimated prompt size fits within the provider's
+    context window.  Oldest non-system messages are dropped first.  The final
+    user message is always preserved.
+
+    Estimation: 1 token ≈ 4 chars (conservative).
+    """
+    budget = _PROVIDER_CTX_CHARS.get(provider, _DEFAULT_CTX_CHARS)
+
+    def _msg_chars(m: dict) -> int:
+        c = m.get('content', '')
+        return len(c) if isinstance(c, str) else len(str(c))
+
+    def _total(msgs: list) -> int:
+        return sum(_msg_chars(m) for m in msgs)
+
+    if _total(messages) <= budget:
+        return messages
+
+    # Separate system message from conversation messages
+    if messages and messages[0].get('role') == 'system':
+        sys_msgs  = messages[:1]
+        conv_msgs = list(messages[1:])
+    else:
+        sys_msgs  = []
+        conv_msgs = list(messages)
+
+    # Hard-cap the system message itself
+    if sys_msgs and _msg_chars(sys_msgs[0]) > _MAX_SYSTEM_CHARS:
+        truncated = sys_msgs[0]['content'][:_MAX_SYSTEM_CHARS]
+        sys_msgs = [{'role': 'system', 'content': truncated + '\n\n[system prompt truncated to fit context window]'}]
+
+    # Drop oldest conversation messages until we fit (always keep last message)
+    while conv_msgs and len(conv_msgs) > 1 and _total(sys_msgs + conv_msgs) > budget:
+        conv_msgs.pop(0)
+
+    import logging as _logging
+    _logging.getLogger('intelli.context').info(
+        'Context trim for %s: kept %d/%d conv messages (budget %d chars)',
+        provider, len(conv_msgs), len(messages) - len(sys_msgs),
+        budget,
+    )
+    return sys_msgs + conv_msgs
+
+
 @app.post('/chat/complete')
 def chat_complete(
     req: ChatRequest,
@@ -1470,6 +1535,10 @@ def chat_complete(
         system_parts.append(build_tool_system_block())
     if system_parts:
         combined_system = '\n\n---\n\n'.join(system_parts)
+        # Hard-cap system prompt size — prevents single overly large workspace/page
+        # context from consuming the entire context window.
+        if len(combined_system) > _MAX_SYSTEM_CHARS:
+            combined_system = combined_system[:_MAX_SYSTEM_CHARS] + '\n\n[system prompt truncated to fit context window]'
         # Inject as a leading system message if the provider supports it
         # (OpenAI/Ollama: role=system; Anthropic: top-level system field)
         kwargs['system'] = combined_system
@@ -1477,6 +1546,9 @@ def chat_complete(
         messages_with_sys = [{'role': 'system', 'content': combined_system}] + list(req.messages)
     else:
         messages_with_sys = list(req.messages)
+
+    # Trim conversation to fit within the provider's context window
+    messages_with_sys = _fit_to_context(req.provider, messages_with_sys)
 
     if stream:
         # SSE streaming: runs the tool loop in a background thread and pushes

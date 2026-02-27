@@ -83,10 +83,7 @@ class BaseProviderAdapter:
 
 
 class OpenAIAdapter(BaseProviderAdapter):
-    """Minimal OpenAI adapter scaffold that returns a request-ready dict.
-
-    Note: This is a scaffold; it does not perform network calls in the prototype.
-    """
+    """Minimal OpenAI adapter scaffold that returns a request-ready dict."""
     def __init__(self):
         super().__init__('openai')
 
