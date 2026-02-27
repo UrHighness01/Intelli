@@ -56,10 +56,10 @@ def pop_inject_queue() -> list[dict]:
     return items
 
 def get_active_addons() -> list[dict]:
-    """Return all currently active addons (name + code_js) without draining anything."""
+    """Return all currently active addons (name + code_js + url_pattern) without draining anything."""
     with _lock:
         store = _load()
-    return [{'name': a['name'], 'code_js': a['code_js']}
+    return [{'name': a['name'], 'code_js': a['code_js'], 'url_pattern': a.get('url_pattern', '')}
             for a in store.values() if a.get('active')]
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ def get_addon(name: str) -> Optional[dict]:
         return _load().get(name)
 
 
-def create_addon(name: str, description: str, code_js: str) -> dict:
+def create_addon(name: str, description: str, code_js: str, url_pattern: str = '') -> dict:
     with _lock:
         store = _load()
         if name in store:
@@ -84,6 +84,7 @@ def create_addon(name: str, description: str, code_js: str) -> dict:
             'name':        name,
             'description': description,
             'code_js':     code_js,
+            'url_pattern': url_pattern,
             'active':      False,
             'created_at':  datetime.now(timezone.utc).isoformat(),
             'updated_at':  datetime.now(timezone.utc).isoformat(),
@@ -94,7 +95,8 @@ def create_addon(name: str, description: str, code_js: str) -> dict:
 
 
 def update_addon(name: str, description: Optional[str] = None,
-                 code_js: Optional[str] = None) -> dict:
+                 code_js: Optional[str] = None,
+                 url_pattern: Optional[str] = None) -> dict:
     with _lock:
         store = _load()
         if name not in store:
@@ -103,6 +105,8 @@ def update_addon(name: str, description: Optional[str] = None,
             store[name]['description'] = description
         if code_js is not None:
             store[name]['code_js'] = code_js
+        if url_pattern is not None:
+            store[name]['url_pattern'] = url_pattern
         store[name]['updated_at'] = datetime.now(timezone.utc).isoformat()
         _save(store)
         return store[name]

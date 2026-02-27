@@ -238,13 +238,14 @@ def addon_list() -> str:
         return f'[ERROR] addon_list: {e}'
 
 
-def addon_create(name: str, description: str, code_js: str) -> str:
+def addon_create(name: str, description: str, code_js: str, url_pattern: str = '') -> str:
     """Create a new Intelli addon.
 
     Args:
         name: Short slug (no spaces) for the addon.
         description: What the addon does.
         code_js: JavaScript snippet run inside the active browser tab on activation.
+        url_pattern: Optional URL substring this addon should only run on.
     """
     try:
         import sys, os, re
@@ -253,7 +254,7 @@ def addon_create(name: str, description: str, code_js: str) -> str:
             sys.path.insert(0, _gw)
         import addons as _addons
         slug = re.sub(r'[^a-zA-Z0-9_-]', '-', name.strip())
-        addon = _addons.create_addon(slug, description, code_js)
+        addon = _addons.create_addon(slug, description, code_js, url_pattern=url_pattern)
         return f'Addon "{slug}" created successfully. Use addon_activate to inject it into the active tab.'
     except ValueError as e:
         return f'[ERROR] addon_create: {e}'
@@ -284,19 +285,19 @@ def addon_activate(name: str) -> str:
         return f'[ERROR] addon_activate: {e}'
 
 
-def addon_create_and_activate(name: str, description: str, code_js: str) -> str:
+def addon_create_and_activate(name: str, description: str, code_js: str, url_pattern: str = '') -> str:
     """Create an addon and immediately activate it — injects JS into the active tab in one step.
 
     Args:
         name: Short slug for the addon (no spaces).
         description: What the addon does.
         code_js: JavaScript snippet to inject into the active browser tab.
+        url_pattern: Optional URL substring the addon should run on. Empty = all pages.
     """
     import re as _re
     slug = _re.sub(r'[^a-zA-Z0-9_-]', '-', name.strip())
 
     # If the addon already exists, update its code instead of erroring out.
-    # This allows re-running the same request with improved code.
     try:
         import sys, os
         _gw = os.path.dirname(os.path.dirname(__file__))
@@ -305,9 +306,9 @@ def addon_create_and_activate(name: str, description: str, code_js: str) -> str:
         import addons as _addons
         existing = _addons.get_addon(slug)
         if existing is not None:
-            _addons.update_addon(slug, description=description, code_js=code_js)
+            _addons.update_addon(slug, description=description, code_js=code_js, url_pattern=url_pattern)
         else:
-            _addons.create_addon(slug, description, code_js)
+            _addons.create_addon(slug, description, code_js, url_pattern=url_pattern)
     except Exception as e:
         return f'[ERROR] addon_create_and_activate (create/update): {e}'
 
@@ -375,7 +376,8 @@ ADDON_TOOLS: Dict[str, Any] = {
         'args': {
             'name':        {'type': 'string', 'required': True,  'description': 'Addon slug, e.g. pink-x-logo (no spaces, hyphens ok)'},
             'description': {'type': 'string', 'required': False, 'description': 'Human description of what the addon does'},
-            'code_js':     {'type': 'string', 'required': True,  'description': 'Valid JS wrapped in IIFE. Example: (function(){var s=document.createElement(\'style\');s.id=\'my-addon\';s.textContent=\'svg{color:pink}\';\ document.head.appendChild(s);})();'},
+            'code_js':     {'type': 'string', 'required': True,  'description': 'Valid JS wrapped in IIFE. Example: (function(){var s=document.createElement(\'style\');s.id=\'my-addon\';s.textContent=\'svg{color:pink}\'; document.head.appendChild(s);})();'},
+            'url_pattern': {'type': 'string', 'required': False, 'description': 'URL substring this addon should only run on, e.g. "taxiroussillon.com". Empty = all pages.'},
         },
     },
     'addon_activate': {
@@ -416,6 +418,7 @@ ADDON_TOOLS: Dict[str, Any] = {
             'name':        {'type': 'string', 'required': True,  'description': 'Addon slug, e.g. pink-x-logo (hyphens ok, no spaces)'},
             'description': {'type': 'string', 'required': False, 'description': 'What the addon does'},
             'code_js':     {'type': 'string', 'required': True,  'description': 'Valid JS IIFE that manipulates the DOM. Do not check location.href. Use style.textContent for CSS injection.'},
+            'url_pattern': {'type': 'string', 'required': False, 'description': 'URL substring the addon should only run on, e.g. "taxiroussillon.com" or "x.com". Leave empty to run on all pages. ALWAYS set this when the user says "only on this page" or "only on this site".'},
         },
     },
     'addon_deactivate': {

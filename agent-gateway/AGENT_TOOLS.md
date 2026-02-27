@@ -1,4 +1,16 @@
-## JavaScript Addon Rules for SPAs (React / Vue / Angular pages)
+## URL-Specific Addons
+
+When the user says **"only on this page"**, **"only on this site"**, or **"just for this URL"**,
+always pass the `url_pattern` argument to `addon_create_and_activate`.
+
+Examples:
+- User on `https://taxiroussillon.com/booking` → `url_pattern: "taxiroussillon.com"`
+- User on `https://x.com/home` → `url_pattern: "x.com"`
+- No restriction mentioned → leave `url_pattern` empty (runs on all pages)
+
+The addon will be silently skipped on any page whose URL does not contain the pattern.
+
+---
 
 Pages like x.com, Twitter, GitHub, YouTube, Instagram are **Single-Page Apps** — the
 framework renders elements *after* the page load event. Plain CSS injection works for

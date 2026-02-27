@@ -462,11 +462,18 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
               const addons = JSON.parse(_addonData);
               if (!Array.isArray(addons) || addons.length === 0) return;
               for (const addon of addons) {
+                // Skip if addon has a URL pattern that doesn't match current page
+                if (addon.url_pattern && !currentUrl.includes(addon.url_pattern)) {
+                  console.log(`[addon] skip "${addon.name}" — url_pattern "${addon.url_pattern}" not in ${currentUrl}`);
+                  continue;
+                }
                 try {
-                  await view.webContents.executeJavaScript(addon.code_js);
-                  console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${_addonUrl}`);
+                  // Wrap in try/catch so JS errors surface as real messages
+                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] ${addon.name.replace(/'/g, "'")}:', e.message, e.stack);}})();`;
+                  await view.webContents.executeJavaScript(wrapped);
+                  console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
                 } catch (err) {
-                  console.error(`[addon] re-inject "${addon.name}" failed:`, err.message);
+                  console.error(`[addon] re-inject "${addon.name}" CRASHED:`, err.message);
                 }
               }
             } catch (e) {
@@ -1169,10 +1176,12 @@ function registerIPC() {
 
           for (const item of items) {
             try {
-              await tab.view.webContents.executeJavaScript(item.code_js);
+              // Wrap in try/catch so JS errors surface in the log rather than crashing silently
+              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] ${(item.name||'').replace(/'/g,"'")}:', e.message);}})();`;
+              await tab.view.webContents.executeJavaScript(wrapped);
               console.log(`[addon] injected "${item.name}" into ${url}`);
             } catch (err) {
-              console.error(`[addon] inject "${item.name}" failed:`, err.message);
+              console.error(`[addon] inject "${item.name}" CRASHED:`, err.message);
             }
           }
         } catch (e) {
