@@ -515,9 +515,138 @@
       from { opacity: 0; transform: translateY(12px); }
       to   { opacity: 1; transform: translateY(0); }
     }
+
+    /* ── Inline session history overlay ─────────────────────────── */
+    #history-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    #history-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    #history-overlay .ho-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    #history-overlay .ho-title {
+      font-size: .85rem;
+      font-weight: 600;
+      flex: 1;
+    }
+    #history-overlay .ho-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    #history-overlay .ho-close:hover { color: var(--text); background: var(--surface2); }
+    #history-overlay .ho-search {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 10px;
+      flex-shrink: 0;
+    }
+    #history-overlay .ho-search input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 5px;
+      padding: 5px 9px;
+      font-size: .8rem;
+      outline: none;
+    }
+    #history-overlay .ho-search input:focus { border-color: var(--accent); }
+    #history-overlay .ho-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    #history-overlay .ho-empty {
+      padding: 30px 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+    .ho-session {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .ho-session:hover { background: var(--surface2); }
+    .ho-session-top {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 3px;
+    }
+    .ho-session-date {
+      font-size: .65rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .ho-session-preview {
+      font-size: .8rem;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ho-session-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 5px;
+    }
+    .ho-btn {
+      font-size: .68rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: none;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .ho-btn:hover { color: var(--text); border-color: var(--accent); }
+    .ho-btn.resume { color: var(--accent); border-color: var(--accent); }
+    .ho-btn.resume:hover { background: var(--accent); color: #fff; }
+    .ho-btn.del:hover { border-color: var(--red); color: var(--red); }
+    .ho-msg-count { font-size: .63rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
   </style>
 </head>
 <body>
+
+  <!-- ── Inline session history overlay ────────────────────────── -->
+  <div id="history-overlay" role="dialog" aria-label="Session history">
+    <div class="ho-header">
+      <span class="ho-title">&#128196; Chat History</span>
+      <button class="ho-close" id="ho-close-btn" title="Close">&#10005;</button>
+    </div>
+    <div class="ho-search">
+      <input id="ho-search-input" type="text" placeholder="Search sessions&#8230;" autocomplete="off" />
+    </div>
+    <div class="ho-list" id="ho-list">
+      <div class="ho-empty">Loading&#8230;</div>
+    </div>
+  </div>
 
   <!-- ── Header ─────────────────────────────────────────────────── -->
   <header role="banner">
@@ -527,9 +656,9 @@
       <button class="header-btn" id="btn-clear" title="Clear conversation" aria-label="Clear conversation">
         &#128465; Clear
       </button>
-      <a href="sessions.html" class="header-btn" title="Session history" aria-label="Session history">
+      <button class="header-btn" id="btn-history" title="Session history" aria-label="Session history" onclick="openHistoryOverlay()">
         &#128196; History
-      </a>
+      </button>
       <a href="index.html" class="header-btn" title="Admin Hub" aria-label="Go to Admin Hub">
         &#9881; Hub
       </a>
@@ -815,9 +944,9 @@
       localStorage.setItem('intelli_persona', _persona);
     });
 
-    /* ── Resume session from history page ───────────────────────── */
-    async function tryResumeSession() {
-      const resumeId = localStorage.getItem('intelli_resume_session_id');
+    /* ── Resume session from history page (or inline overlay) ────── */
+    async function tryResumeSession(id) {
+      const resumeId = id || localStorage.getItem('intelli_resume_session_id');
       if (!resumeId || !_token) return;
       localStorage.removeItem('intelli_resume_session_id');
       try {
@@ -829,14 +958,122 @@
         const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
         if (!msgs.length) return;
         _msgs = msgs.map(m => ({ role: m.role, content: m.content }));
+        _sessionId = resumeId;
+        localStorage.setItem('intelli_session_id', _sessionId);
         // Render them
         $emptyState.style.display = 'none';
+        $messages.innerHTML = '';
         for (const m of _msgs) appendMsg(m.role, m.content);
         setStatus(`Resumed session (${_msgs.length} messages)`, 'ok');
       } catch (e) { /* best-effort */ }
     }
     // Delay slightly so token is applied first
     setTimeout(() => tryResumeSession(), 200);
+
+    /* ── Inline session history overlay ─────────────────────────── */
+    let _hoSessions = [];
+    let _hoSearchTimer = null;
+
+    function _hoFmtDate(ts) {
+      if (!ts) return '';
+      const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+      return isNaN(d) ? '' : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function _hoEsc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function openHistoryOverlay() {
+      const overlay = document.getElementById('history-overlay');
+      overlay.classList.add('open');
+      document.getElementById('ho-search-input').value = '';
+      document.getElementById('ho-list').innerHTML = '<div class="ho-empty">Loading\u2026</div>';
+      await _hoLoad('');
+      document.getElementById('ho-search-input').focus();
+    }
+
+    function closeHistoryOverlay() {
+      document.getElementById('history-overlay').classList.remove('open');
+    }
+
+    async function _hoLoad(q) {
+      try {
+        const url = q
+          ? `${GW}/sessions?limit=100&q=${encodeURIComponent(q)}`
+          : `${GW}/sessions?limit=100`;
+        const r = await fetch(url, { headers: { 'Authorization': `Bearer ${_token}` } });
+        if (!r.ok) throw new Error(await r.text());
+        _hoSessions = await r.json();
+        _hoRender(_hoSessions);
+      } catch (e) {
+        document.getElementById('ho-list').innerHTML =
+          `<div class="ho-empty" style="color:var(--red)">Failed to load: ${_hoEsc(e.message)}</div>`;
+      }
+    }
+
+    function _hoRender(list) {
+      const $list = document.getElementById('ho-list');
+      if (!list.length) {
+        $list.innerHTML = '<div class="ho-empty">No sessions yet.</div>';
+        return;
+      }
+      $list.innerHTML = '';
+      for (const s of list) {
+        const div = document.createElement('div');
+        div.className = 'ho-session';
+        div.dataset.id = s.id;
+        div.innerHTML = `
+          <div class="ho-session-top">
+            <span class="ho-session-preview">${_hoEsc(s.preview || '(no messages)')}</span>
+            <span class="ho-msg-count">${s.msg_count || '?'} msg</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="ho-session-date">${_hoFmtDate(s.last_ts || s.created_at)}</span>
+            <div class="ho-session-actions">
+              <button class="ho-btn resume" data-id="${_hoEsc(s.id)}">&#8629; Resume</button>
+              <button class="ho-btn del"    data-id="${_hoEsc(s.id)}">&#128465; Delete</button>
+            </div>
+          </div>`;
+        div.querySelector('.resume').addEventListener('click', e => {
+          e.stopPropagation();
+          closeHistoryOverlay();
+          tryResumeSession(s.id);
+        });
+        div.querySelector('.del').addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm('Delete this session permanently?')) return;
+          try {
+            const dr = await fetch(`${GW}/sessions/${encodeURIComponent(s.id)}`,
+              { method: 'DELETE', headers: { 'Authorization': `Bearer ${_token}` } });
+            if (!dr.ok) throw new Error(await dr.text());
+            div.remove();
+            _hoSessions = _hoSessions.filter(x => x.id !== s.id);
+            if (!document.querySelectorAll('.ho-session').length)
+              document.getElementById('ho-list').innerHTML = '<div class="ho-empty">No sessions yet.</div>';
+          } catch (err) {
+            alert('Delete failed: ' + err.message);
+          }
+        });
+        $list.appendChild(div);
+      }
+    }
+
+    // Close button
+    document.getElementById('ho-close-btn').addEventListener('click', closeHistoryOverlay);
+
+    // Search with debounce
+    document.getElementById('ho-search-input').addEventListener('input', () => {
+      clearTimeout(_hoSearchTimer);
+      _hoSearchTimer = setTimeout(() => {
+        _hoLoad(document.getElementById('ho-search-input').value.trim());
+      }, 320);
+    });
+
+    // Escape key closes overlay
+    document.getElementById('history-overlay').addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeHistoryOverlay();
+    });
 
     $btnLogin.addEventListener('click', doLogin);
     $loginPass.addEventListener('keydown', e => {
