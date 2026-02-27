@@ -251,7 +251,12 @@ class TestCreateUserEndpoint:
                     json={'username': 'nick', 'password': 'pw', 'roles': ['admin']},
                     headers=_auth(token))
         assert log.exists()
-        content = log.read_text()
+        # Audit log is always encrypted; decrypt with the session key to verify.
+        key = _app._audit_key()
+        content = ' '.join(
+            _app._decrypt_audit_line(line, key)
+            for line in log.read_text().splitlines() if line.strip()
+        )
         assert 'create_user' in content
         assert 'nick' in content
 
@@ -375,6 +380,11 @@ class TestChangePasswordEndpoint:
         client.post('/admin/users/wade/password',
                     json={'new_password': 'newpw'},
                     headers=_auth(token))
-        content = log.read_text()
+        # Audit log is always encrypted; decrypt with the session key to verify.
+        key = _app._audit_key()
+        content = ' '.join(
+            _app._decrypt_audit_line(line, key)
+            for line in log.read_text().splitlines() if line.strip()
+        )
         assert 'change_password' in content
         assert 'wade' in content

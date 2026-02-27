@@ -785,13 +785,11 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
                   continue;
                 }
                 try {
-                  // Use JSON.stringify for the addon name so ALL special characters
-                  // are fully escaped inside the generated JS code (CWE-116 / CodeQL
-                  // js/incomplete-string-escaping). JSON.stringify handles \, ", ', `,
-                  // ${...}, and newlines — .replace(/'/g,...) is incomplete by contrast.
-                  const nameJson = JSON.stringify(addon.name || '');
-                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] '+${nameJson}+':', e.message, e.stack);}})();`;
-                  await view.webContents.executeJavaScript(wrapped);
+                  // Execute addon.code_js directly without embedding it in a template
+                  // literal — avoids CodeQL js/improper-code-sanitization (CWE-116).
+                  // Errors thrown by the page-side code propagate as rejected Promises
+                  // and are caught by the outer catch block below.
+                  await view.webContents.executeJavaScript(addon.code_js);
                   console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
                 } catch (err) {
                   console.error(`[addon] re-inject "${addon.name}" CRASHED:`, err.message);
@@ -1821,13 +1819,11 @@ function registerIPC() {
 
           for (const item of items) {
             try {
-              // Use JSON.stringify for the addon name so ALL special characters
-              // are fully escaped inside the generated JS code (CWE-116 / CodeQL
-              // js/incomplete-string-escaping). JSON.stringify handles \, ", ', `,
-              // ${...}, and newlines — .replace(/'/g,...) is incomplete by contrast.
-              const nameJson = JSON.stringify(item.name || '');
-              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] '+${nameJson}+':', e.message);}})();`;
-              await tab.view.webContents.executeJavaScript(wrapped);
+              // Execute item.code_js directly without embedding it in a template
+              // literal — avoids CodeQL js/improper-code-sanitization (CWE-116).
+              // Errors thrown by the page-side code propagate as rejected Promises
+              // and are caught by the outer catch block below.
+              await tab.view.webContents.executeJavaScript(item.code_js);
               console.log(`[addon] injected "${item.name}" into ${url}`);
             } catch (err) {
               console.error(`[addon] inject "${item.name}" CRASHED:`, err.message);

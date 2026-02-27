@@ -100,19 +100,22 @@ class TestActorHelper:
 
 class TestAuditEntryActor:
     def _entries(self, log: Path, event: str) -> list[dict]:
-        """Parse JSONL audit log and filter by event name."""
+        """Parse encrypted JSONL audit log and filter by event name."""
+        import app as _app
         entries = []
         if not log.exists():
             return entries
+        key = _app._audit_key()
         for line in log.read_text().splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
-                obj = json.loads(line)
+                plain = _app._decrypt_audit_line(line, key)
+                obj = json.loads(plain)
                 if obj.get('event') == event:
                     entries.append(obj)
-            except json.JSONDecodeError:
+            except Exception:
                 pass
         return entries
 

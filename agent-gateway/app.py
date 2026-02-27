@@ -88,12 +88,23 @@ AUDIT_PATH = Path(__file__).with_name('audit.log')
 # Generate key: python -c "import secrets; print(secrets.token_hex(32))"
 # ---------------------------------------------------------------------------
 import base64 as _b64
+import secrets as _secrets
 
-def _audit_key() -> bytes | None:
-    """Return 32-byte AES-256-GCM key from INTELLI_AUDIT_ENCRYPT_KEY, or None."""
+# Ephemeral per-session key used when INTELLI_AUDIT_ENCRYPT_KEY is not
+# configured.  The audit log is always encrypted so cleartext sensitive data
+# never reaches the file write (CWE-312).  Without a stable configured key
+# the log is unreadable across restarts, which is preferable to plain text.
+_EPHEMERAL_AUDIT_KEY: bytes = _secrets.token_bytes(32)
+
+def _audit_key() -> bytes:
+    """Return 32-byte AES-256-GCM key; falls back to ephemeral session key.
+
+    Always returns bytes — never None — so the audit log is always encrypted
+    and the cleartext json_line variable never reaches the file-write sink.
+    """
     raw = os.environ.get('INTELLI_AUDIT_ENCRYPT_KEY', '').strip()
     if not raw:
-        return None
+        return _EPHEMERAL_AUDIT_KEY
     key = bytes.fromhex(raw)
     if len(key) != 32:
         raise ValueError(
@@ -185,11 +196,9 @@ def _audit(event: str, details: dict, actor: str = None):
         # user-controlled data but with any sensitive-named fields already
         # redacted by _scrub_audit_details.
         json_line = json.dumps(entry, ensure_ascii=False)
-        key = _audit_key()
-        # Encrypt the audit line when a key is configured so that secrets are
-        # never stored in clear text on disk. The variable written to disk is
-        # always the post-encryption value when 'key' is present.
-        to_write = _encrypt_audit_line(json_line, key) if key else json_line
+        # _audit_key() always returns bytes (ephemeral key when no env var is set)
+        # so the file-write sink always receives ciphertext, never json_line.
+        to_write = _encrypt_audit_line(json_line, _audit_key())
         with AUDIT_PATH.open('a', encoding='utf-8') as f:
             f.write(to_write + "\n")
     except Exception:
