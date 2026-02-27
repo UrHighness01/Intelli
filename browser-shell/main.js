@@ -442,13 +442,24 @@ function _showPair(pair, win = mainWin) {
   notifyChrome('split-changed', { splitTabId: pair.rightId });
 }
 
-/** Enter split-view: active tab on left, `id` on right. Creates a new pair. */
+/** Enter split-view: `id` on right, best solo tab on left. Creates a new pair. */
 function enterSplit(id, win = mainWin) {
-  if (!tabs[id] || !tabs[activeTabId]) return;
+  if (!tabs[id]) return;
+  // Right-side tab must not already be in a pair
+  if (getPairOf(id) !== null) return;
+  // Determine the left tab: prefer activeTabId if it's solo, else find a solo tab
+  let leftId = activeTabId;
+  if (!tabs[leftId] || getPairOf(leftId) !== null) {
+    // Pick the most recently placed solo tab (last in tabOrder that is solo)
+    const soloTab = tabOrder.slice().reverse().find(tid => tid !== id && getPairOf(tid) === null && tabs[tid]);
+    if (!soloTab) return; // no solo tab available
+    leftId = soloTab;
+  }
   // Pause any currently visible pair
   const ap = getActivePair();
   if (ap) ap.paused = true;
-  const pair = { leftId: activeTabId, rightId: id, paused: false, ratio: 0.5, focusedId: activeTabId };
+  activeTabId = leftId;
+  const pair = { leftId, rightId: id, paused: false, ratio: 0.5, focusedId: leftId };
   splitPairs.push(pair);
   _showPair(pair, win);
   notifyTabsUpdated();
@@ -954,6 +965,8 @@ function notifyTabsUpdated() {
       title:       t.view.webContents.getTitle(),
       favicon:     null,  // favicon updates arrive via separate event
       active:      t.id === activeTabId,
+      muted:       t.view.webContents.isAudioMuted(),
+      audible:     t.view.webContents.isCurrentlyAudible(),
       // Split pair metadata (used by the tab-bar merged pill)
       pairId:      pair ? Math.min(pair.leftId, pair.rightId) : null,
       pairLeft:    pair ? (t.id === pair.leftId) : false,
@@ -1054,14 +1067,14 @@ function registerIPC() {
         click: () => {
           if (!wc) return;
           wc.setAudioMuted(!isMuted);
-          notifyChrome('tab-muted', { id: tabId, muted: !isMuted });
+          notifyChrome('tab-muted', { id: tabId, muted: !isMuted, audible: wc.isCurrentlyAudible() });
           notifyTabsUpdated();
         },
       }] : []),
-      // Split: close the pair this tab belongs to; show "fractionner" for any unpaired inactive tab
+      // Split: close the pair this tab belongs to; show "fractionner" for any unpaired tab
       ...(getPairOf(tabId)
         ? [{ label: '⊟ Fermer la vue fractionnée', click: () => exitSplitForTab(tabId) }]
-        : (!isActive
+        : (tabOrder.some(tid => tid !== tabId && getPairOf(tid) === null && tabs[tid])
             ? [{ label: '⊟ Vue fractionnée', click: () => enterSplit(tabId) }]
             : [])),
       { type: 'separator' },

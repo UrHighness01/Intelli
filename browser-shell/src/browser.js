@@ -413,11 +413,17 @@ window.electronAPI.onUrlChanged(({ id, url }) => {
 });
 
 // Sync the full tab list (create / switch / close).
-// Merge with existing _tabs to preserve cached favicons (the main process
-// sends favicon:null because favicons arrive via a separate IPC event).
+// Merge with existing _tabs to preserve cached favicons, muted and audible state
+// (the main process sends favicon:null because favicons arrive via a separate IPC event).
 window.electronAPI.onTabsUpdated(incoming => {
   const faviconCache = Object.fromEntries(_tabs.map(t => [t.id, t.favicon]));
-  const merged = incoming.map(t => ({ ...t, favicon: faviconCache[t.id] ?? t.favicon }));
+  const audioCache   = Object.fromEntries(_tabs.map(t => [t.id, { muted: t.muted, audible: t.audible }]));
+  const merged = incoming.map(t => ({
+    ...t,
+    favicon:  faviconCache[t.id] ?? t.favicon,
+    muted:    t.muted   !== undefined ? t.muted   : (audioCache[t.id]?.muted   ?? false),
+    audible:  t.audible !== undefined ? t.audible : (audioCache[t.id]?.audible ?? false),
+  }));
   const active = merged.find(t => t.active);
 
   // Record last-seen time for the tab that is LOSING focus (was active before)
