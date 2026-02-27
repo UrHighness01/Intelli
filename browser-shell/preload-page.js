@@ -134,7 +134,13 @@ try {
     const orig = Ctx.prototype.getParameter;
     Ctx.prototype.getParameter = function (param) {
       if (param === 37445) return 'Google Inc. (Intel)';
-      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+      // Renderer string must match the real OS — D3D11 only exists on Windows
+      const renderer = process.platform === 'darwin'
+        ? 'ANGLE (Intel, ANGLE Metal Renderer: Intel(R) Iris(TM) Plus Graphics, Unspecified Version)'
+        : process.platform === 'win32'
+          ? 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)'
+          : 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)';
+      if (param === 37446) return renderer;
       return orig.call(this, param);
     };
   };
@@ -159,3 +165,11 @@ try {
 // ── 10. screen / window dimensions cohérentes ─────────────────────────────
 try { Object.defineProperty(window, 'outerWidth',  { get: () => window.innerWidth,       configurable: true }); } catch (_) {}
 try { Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 74, configurable: true }); } catch (_) {}
+
+// ── 11. navigator.platform — must match the real OS, never hardcode Windows ─
+try {
+  const _navPlatform = process.platform === 'darwin' ? 'MacIntel'
+                     : process.platform === 'win32'  ? 'Win32'
+                     : 'Linux x86_64';
+  Object.defineProperty(navigator, 'platform', { get: () => _navPlatform, configurable: true });
+} catch (_) {}

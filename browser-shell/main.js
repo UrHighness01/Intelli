@@ -69,9 +69,16 @@ app.commandLine.appendSwitch('no-default-browser-check');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('force-color-profile', 'srgb');
 
-// Spoof a current Chrome UA. Chrome 122 (Electron 29's real engine) is 
-// ancient by Feb 2026 — using it triggers bot-detection on X.com and others.
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+// Build a platform-aware UA so the OS in the UA matches the real OS.
+// Spoofing Windows on Linux creates a detectable platform mismatch that
+// bot-detection systems (X.com, Google, Cloudflare) catch immediately.
+const _osPlatform = process.platform;
+const CHROME_UA = _osPlatform === 'darwin'
+  ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+  : _osPlatform === 'win32'
+    ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+    : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+const SEC_CH_UA_PLATFORM = _osPlatform === 'darwin' ? '"macOS"' : _osPlatform === 'win32' ? '"Windows"' : '"Linux"';
 
 // ─── Anti-détection injectable dans le monde principal ───────────────────────
 // Exécuté via executeJavaScript() (monde principal) à chaque dom-ready,
@@ -1984,7 +1991,7 @@ app.whenReady().then(async () => {
     h['User-Agent']          = CHROME_UA;
     h['Sec-CH-UA']           = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"';
     h['Sec-CH-UA-Mobile']    = '?0';
-    h['Sec-CH-UA-Platform']  = '"Windows"';
+    h['Sec-CH-UA-Platform']  = SEC_CH_UA_PLATFORM;
     h['Accept-Language']     = _acceptLanguage;
     delete h['X-Electron-Version'];
     delete h['X-Electron-App-Version'];
