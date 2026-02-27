@@ -73,12 +73,14 @@ def _seed_defaults() -> None:
     _seed_skill('web-search', _SKILL_WEB_SEARCH)
     _seed_skill('translate', _SKILL_TRANSLATE)
 
-    # Patch existing AGENTS.md with skill-creator guide if not already present
+    # Keep the Skill Creator section in AGENTS.md current (replace if outdated)
     agents_md = _WORKSPACE_ROOT / 'AGENTS.md'
     if agents_md.exists():
         current = agents_md.read_text(encoding='utf-8')
-        if '## Skill Creator' not in current:
-            agents_md.write_text(current.rstrip() + '\n\n' + _SKILL_CREATOR_SECTION, encoding='utf-8')
+        # Strip any existing Skill Creator section before re-appending the latest
+        if '## Skill Creator' in current:
+            current = re.sub(r'\n*## Skill Creator\b.*', '', current, flags=re.DOTALL).rstrip()
+        agents_md.write_text(current + '\n\n' + _SKILL_CREATOR_SECTION, encoding='utf-8')
 
 
 def _seed_skill(slug: str, content: str) -> None:
@@ -157,41 +159,38 @@ Keep translations natural, not word-for-word literal.
 _SKILL_CREATOR_SECTION = """\
 ## Skill Creator
 
-You can create, read, and update workspace skills on demand using these tools:
+When asked to create a skill, **do it in one single `skill_create` call — no
+back-and-forth, no reading first**.  Plan the steps in your head, then fire.
 
-- `skill_list` — list all installed skills
-- `skill_read(slug)` — read a skill's full SKILL.md content
-- `skill_create(slug, name, description, content)` — install a new skill
-- `skill_update(slug, content)` — update an existing skill's instructions
+| Tool | Purpose |
+|---|---|
+| `skill_list` | List all installed skills |
+| `skill_read(slug)` | Read a skill's full SKILL.md |
+| `skill_create(slug, name, description, content)` | Install a new skill (one shot) |
+| `skill_update(slug, content)` | Overwrite an existing skill's SKILL.md |
+| `skill_delete(slug)` | Permanently remove a skill |
 
-### SKILL.md format
+### content format — CRITICAL
 
-Every skill is a Markdown file with a YAML frontmatter block:
+`skill_create` auto-generates YAML frontmatter from `slug`, `name`, `description`.
+**Never put `---` frontmatter inside `content`.**
+`content` = Markdown body only: a `# Heading`, then numbered steps using tool names.
+**Use `\\n` for newlines in the JSON string — literal newlines in JSON values are invalid.**
 
-```
----
-name: my-skill
-description: One-line description of what this skill does
-user-invokable: true
----
+### Available tool names to reference inside skill steps
 
-# Skill Title
+`web_fetch`  `web_search`  `browser_exec_js`  `browser_snapshot`  `browser_navigate`
+`browser_summarize_page`  `browser_click`  `browser_fill`  `file_read`  `file_write`
+`shell_exec`  `memory_add`  `memory_search`  `video_describe`  `canvas_render`
+`addon_create_and_activate`  `schedule_task`
 
-Instructions for the agent describing what to do when this skill is active...
-```
+### Rules
 
-Supported frontmatter fields: `name`, `description`, `user-invokable`,
-`compatibility`, `argument-hint`, `disable-model-invocation`, `license`, `metadata`.
-
-### Workflow for creating a skill
-
-1. Ask the user what capability they want.
-2. Draft the SKILL.md content with clear, concise agent instructions.
-3. Call `skill_create(slug, name, description, content)`.
-4. Tell the user the skill is ready and how to activate it.
-
-Always use a descriptive, URL-safe slug (lowercase, hyphens only).
-If the skill already exists, use `skill_update` instead.
+- Write detailed, numbered steps — include exact tool names, example args, fallback steps.
+- slug: lowercase + hyphens only (e.g. `ocr-extractor`, `pdf-builder`, `news-digest`).
+- Do NOT ask for confirmation — just create it immediately.
+- If slug already exists, `skill_create` returns an error → use `skill_update` instead
+  and pass the complete SKILL.md text (frontmatter + body) as `content`.
 """
 
 

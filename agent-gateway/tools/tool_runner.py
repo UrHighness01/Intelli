@@ -330,15 +330,16 @@ _REGISTRY['skill_create'] = {
     'fn': _skill_create_fn,
     'description': (
         'Create and install a new workspace skill. '
-        'The content must be a complete SKILL.md with frontmatter (name, description) '
-        'and agent instructions in the body. '
+        'The frontmatter (name, description, created) is auto-generated from the separate args — '
+        'do NOT include a YAML frontmatter block in content. '
+        'content should be only the Markdown body: a heading and clear agent instructions. '
         'Use a descriptive lowercase-hyphen slug like "hacker-news-digest".'
     ),
     'args': {
-        'slug':        {'type': 'string', 'required': True,  'description': 'URL-safe identifier (lowercase, hyphens)'},
-        'name':        {'type': 'string', 'required': True,  'description': 'Human-readable skill name'},
+        'slug':        {'type': 'string', 'required': True,  'description': 'URL-safe identifier (lowercase, hyphens only, e.g. "hacker-news-digest")'},
+        'name':        {'type': 'string', 'required': True,  'description': 'Human-readable skill name (e.g. "Hacker News Digest")'},
         'description': {'type': 'string', 'required': True,  'description': 'One-line description of what the skill does'},
-        'content':     {'type': 'string', 'required': True,  'description': 'Full SKILL.md text including frontmatter and body'},
+        'content':     {'type': 'string', 'required': True,  'description': 'Markdown body only — NO frontmatter. Start with a # heading, then write the agent instructions.'},
     },
 }
 
@@ -353,10 +354,31 @@ def _skill_update_fn(slug: str, content: str) -> str:
 
 _REGISTRY['skill_update'] = {
     'fn': _skill_update_fn,
-    'description': 'Update (overwrite) the SKILL.md of an existing skill. Use this to fix or improve a skill after creation.',
+    'description': (
+        'Overwrite the SKILL.md of an existing skill with new content. '
+        'Pass the complete new SKILL.md text (including the frontmatter block). '
+        'Use this to fix or improve a skill after creation.'
+    ),
     'args': {
         'slug':    {'type': 'string', 'required': True, 'description': 'Slug of the skill to update'},
-        'content': {'type': 'string', 'required': True, 'description': 'New complete SKILL.md content'},
+        'content': {'type': 'string', 'required': True, 'description': 'Complete new SKILL.md content (frontmatter + body)'},
+    },
+}
+
+
+def _skill_delete_fn(slug: str) -> str:
+    try:
+        _wm().delete_skill(slug)
+        return f"Skill '{slug}' deleted."
+    except FileNotFoundError as exc:
+        return f'[ERROR] skill_delete: {exc}'
+
+
+_REGISTRY['skill_delete'] = {
+    'fn': _skill_delete_fn,
+    'description': 'Permanently remove a workspace skill by slug.',
+    'args': {
+        'slug': {'type': 'string', 'required': True, 'description': 'Slug of the skill to delete'},
     },
 }
 
@@ -821,7 +843,7 @@ def _extract_tool_calls(text: str) -> list[dict]:
         fragment = raw[:end] if end else raw
         try:
             obj = json.loads(fragment)
-            if isinstance(obj, dict) and 'name' in obj:
+            if isinstance(obj, dict) and ('tool' in obj or 'name' in obj):
                 calls.append(obj)
         except json.JSONDecodeError:
             pass
@@ -995,7 +1017,7 @@ def run_tool_loop(
 
         tool_results = []
         for call in calls:
-            name = call.get('name', '?')
+            name = call.get('tool') or call.get('name', '?')
             args = call.get('args', {})
             if on_tool_call:
                 on_tool_call(name, args)
