@@ -787,6 +787,13 @@
     /* ── State ─────────────────────────────────────────────────── */
     let _token    = localStorage.getItem('gw_token') || '';
     let _msgs     = [];   // [{role, content}]
+    // Restore last-used provider+model immediately (before session fetch completes)
+    (() => {
+      const p = localStorage.getItem('intelli_last_provider');
+      const m = localStorage.getItem('intelli_last_model');
+      if (p) { const el = document.getElementById('sel-provider'); if (el) el.value = p; }
+      if (m) { const el = document.getElementById('inp-model');    if (el) el.value = m; }
+    })();
     let _busy     = false;
     let _totalIn  = 0;
     let _totalOut = 0;
@@ -946,7 +953,9 @@
 
     /* ── Resume session from history page (or inline overlay) ────── */
     async function tryResumeSession(id) {
-      const resumeId = id || localStorage.getItem('intelli_resume_session_id');
+      // Fall back to the saved resume id, then to the ongoing session (for browser restart restore)
+      const explicitResume = id || localStorage.getItem('intelli_resume_session_id');
+      const resumeId = explicitResume || _sessionId;
       if (!resumeId || !_token) return;
       localStorage.removeItem('intelli_resume_session_id');
       try {
@@ -960,11 +969,24 @@
         _msgs = msgs.map(m => ({ role: m.role, content: m.content }));
         _sessionId = resumeId;
         localStorage.setItem('intelli_session_id', _sessionId);
+        // Restore provider/model from the last assistant message that recorded them
+        const lastWithMeta = [...msgs].reverse().find(m => m.role === 'assistant' && m.provider);
+        if (lastWithMeta) {
+          if (lastWithMeta.provider) {
+            $selProv.value = lastWithMeta.provider;
+            localStorage.setItem('intelli_last_provider', lastWithMeta.provider);
+          }
+          if (lastWithMeta.model) {
+            $inpModel.value = lastWithMeta.model;
+            localStorage.setItem('intelli_last_model', lastWithMeta.model);
+          }
+        }
         // Render them
         $emptyState.style.display = 'none';
         $messages.innerHTML = '';
         for (const m of _msgs) appendMsg(m.role, m.content);
-        setStatus(`Resumed session (${_msgs.length} messages)`, 'ok');
+        const label = explicitResume ? 'Resumed' : 'Restored last';
+        setStatus(`${label} session (${_msgs.length} messages)`, 'ok');
       } catch (e) { /* best-effort */ }
     }
     // Delay slightly so token is applied first
@@ -1499,6 +1521,9 @@
             modelSpan.textContent = finalResult.model;
             $statModel.textContent = finalResult.model;
           }
+          // Persist last-used provider+model so they survive browser restart
+          localStorage.setItem('intelli_last_provider', finalResult.provider || provider);
+          if (finalResult.model || model) localStorage.setItem('intelli_last_model', finalResult.model || model);
 
           // Update token counts
           const usage = finalResult.usage || {};
