@@ -9,7 +9,7 @@ validates, redacts, approves, and audits every AI tool call before execution.
 > Free for personal / educational / research use. Commercial use requires written permission.
 > See [LICENSE](LICENSE) for full terms.
 
-------
+-------
 
 ## Repository layout
 
