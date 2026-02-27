@@ -55,6 +55,13 @@ def pop_inject_queue() -> list[dict]:
     _inject_queue.clear()
     return items
 
+def get_active_addons() -> list[dict]:
+    """Return all currently active addons (name + code_js) without draining anything."""
+    with _lock:
+        store = _load()
+    return [{'name': a['name'], 'code_js': a['code_js']}
+            for a in store.values() if a.get('active')]
+
 # ── CRUD helpers ──────────────────────────────────────────────────────────────
 
 def list_addons() -> list[dict]:

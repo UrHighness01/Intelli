@@ -133,10 +133,11 @@ except Exception as _ce:  # pragma: no cover
     import logging as _logging
     _logging.getLogger(__name__).warning('coding_tools unavailable: %s', _ce)
 
-# Browser automation tools (DOM control via Electron IPC)
+# Browser automation tools (DOM control via Electron IPC) + Addon management
 try:
-    from tools.browser_tools import BROWSER_TOOLS as _BROWSER_TOOLS
+    from tools.browser_tools import BROWSER_TOOLS as _BROWSER_TOOLS, ADDON_TOOLS as _ADDON_TOOLS
     _REGISTRY.update(_BROWSER_TOOLS)
+    _REGISTRY.update(_ADDON_TOOLS)
 except Exception as _be:  # pragma: no cover
     import logging as _logging
     _logging.getLogger(__name__).warning('browser_tools unavailable: %s', _be)
@@ -700,6 +701,11 @@ def list_tools() -> list[dict]:
 
 def build_tool_system_block() -> str:
     """Return the tool-use instruction block for injection into the system prompt."""
+    # Auto-load AGENT_TOOLS.md from the gateway root (one level up from tools/)
+    import pathlib as _pathlib
+    _md_path = _pathlib.Path(__file__).parent.parent / 'AGENT_TOOLS.md'
+    _agent_tools_md = _md_path.read_text() if _md_path.exists() else ''
+
     tool_lines = []
     for name, spec in _REGISTRY.items():
         arg_parts = []
@@ -713,8 +719,9 @@ def build_tool_system_block() -> str:
         )
 
     tools_block = '\n\n'.join(tool_lines)
+    md_section = f'{_agent_tools_md.strip()}\n\n' if _agent_tools_md else ''
     return f"""\
-## Available Tools
+{md_section}## Available Tools
 
 You may call tools to look up information, fetch web pages, or perform actions.
 To call a tool, output EXACTLY this format (one call per line, valid JSON):
@@ -731,6 +738,25 @@ Rules:
 - If a tool call fails, say so and use what you know.
 - Do NOT fabricate tool results.
 
+### JavaScript Addon Rules (for addon_create_and_activate / addon_create)
+
+When writing the code_js argument, you MUST follow these rules:
+1. Always wrap code in an IIFE: (function(){{ ... }})();
+2. Inject CSS with style.textContent = "..." — NEVER use style.innerHTML.
+3. Do NOT check window.location.href — the code already runs in the user's active tab.
+4. Guard against double-injection: if (document.getElementById('MY-UNIQUE-ID')) return;
+5. Strings inside style.textContent must use escaped quotes or single quotes.
+
+Correct example (pink logo on x.com):
+    (function(){{
+      var id='intelli-pink-x';
+      if(document.getElementById(id))return;
+      var s=document.createElement('style');
+      s.id=id;
+      s.textContent='header svg,a[href="/"] svg{{color:#ff69b4!important;fill:currentColor!important}}';
+      document.head.appendChild(s);
+    }})();
+
 ### Tools
 
 {tools_block}
@@ -741,27 +767,55 @@ Rules:
 # Parser
 # ---------------------------------------------------------------------------
 
-_TOOL_CALL_RE = re.compile(
-    r'TOOL_CALL\s*:\s*(\{.+?\})',
-    re.DOTALL | re.IGNORECASE,
+# Matches "TOOL_CALL:" and captures the position just before the opening "{".
+# We intentionally do NOT capture the JSON body in the regex — the body is
+# extracted via brace-counting below so that nested {"args": {...}} objects
+# are never truncated by a non-greedy regex stopping at the first "}".
+_TOOL_CALL_ANCHOR_RE = re.compile(
+    r'TOOL_CALL\s*:\s*(?=\{)',
+    re.IGNORECASE,
 )
-_MAX_JSON_SEARCH = 2000  # chars to scan for JSON completeness
+# Used only for stripping TOOL_CALL lines from the displayed content.
+_TOOL_CALL_STRIP_RE = re.compile(
+    r'^\s*TOOL_CALL\s*:.*$',
+    re.MULTILINE | re.IGNORECASE,
+)
+_MAX_JSON_SEARCH = 16_000  # chars to scan per tool call (covers large code_js)
 
 
 def _extract_tool_calls(text: str) -> list[dict]:
-    """Return all TOOL_CALL JSON objects from an LLM response."""
+    """Return all TOOL_CALL JSON objects from an LLM response.
+
+    Uses brace-counting from the position of each "TOOL_CALL: {" anchor so
+    that nested JSON objects (e.g. {"args": {"code_js": "..."}}) are never
+    truncated by a regex stopping at the first closing brace.
+    """
     calls = []
-    for m in _TOOL_CALL_RE.finditer(text):
-        raw = m.group(1).strip()
-        # Try to fix truncated JSON by counting braces
+    for m in _TOOL_CALL_ANCHOR_RE.finditer(text):
+        # Start brace-counting from the "{" that follows "TOOL_CALL:"
+        start = m.end()
+        raw = text[start: start + _MAX_JSON_SEARCH]
         depth = 0
         end = 0
-        for i, ch in enumerate(raw[:_MAX_JSON_SEARCH]):
+        in_string = False
+        escape_next = False
+        for i, ch in enumerate(raw):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
             if ch == '{':
                 depth += 1
             elif ch == '}':
                 depth -= 1
-            if depth == 0:
+            if depth == 0 and end == 0:
                 end = i + 1
                 break
         fragment = raw[:end] if end else raw
@@ -832,7 +886,22 @@ def _run_tool(name: str, args: dict) -> str:
     # --------------------------------------------------------------------
 
     try:
-        result = spec['fn'](**fn_args)
+        import asyncio as _asyncio, inspect as _inspect
+        raw = spec['fn'](**fn_args)
+        # Transparently handle async tool functions
+        if _inspect.isawaitable(raw):
+            try:
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures as _cf
+                    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                        result = pool.submit(_asyncio.run, raw).result(timeout=35)
+                else:
+                    result = loop.run_until_complete(raw)
+            except RuntimeError:
+                result = _asyncio.run(raw)
+        else:
+            result = raw
     except Exception as exc:
         tb = traceback.format_exc(limit=3)
         return f'[ERROR] Tool {name!r} raised an exception:\n{tb}'
@@ -918,7 +987,7 @@ def run_tool_loop(
             return result
 
         # Remove TOOL_CALL lines from the displayed content for cleanliness
-        display_content = _TOOL_CALL_RE.sub('', content).strip()
+        display_content = _TOOL_CALL_STRIP_RE.sub('', content).strip()
         result['content'] = display_content
 
         # Push assistant turn (cleaned) and execute each tool call

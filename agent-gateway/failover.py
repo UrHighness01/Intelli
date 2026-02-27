@@ -42,7 +42,7 @@ _DEFAULT_MODELS: Dict[str, str] = {
     'anthropic':      'claude-3-5-haiku-20241022',
     'openrouter':     'openai/gpt-4o-mini',
     'github_copilot': 'gpt-4o',
-    'ollama':         'llama3',
+    'ollama':         'llama3.1:8b',
 }
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,9 @@ def cooldown_status() -> List[Dict[str, Any]]:
 # The chain is a list of (provider, model | None) tuples.
 # None means "use _DEFAULT_MODELS" for that provider.
 _chain: List[Tuple[str, Optional[str]]] = [
+    ('ollama',    'llama3.1:8b'),
     ('openai',    None),
     ('anthropic', None),
-    ('ollama',    None),
 ]
 _chain_lock = threading.Lock()
 

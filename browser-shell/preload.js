@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeTab:      (id)   => ipcRenderer.invoke('close-tab', id),
   switchTab:     (id)   => ipcRenderer.invoke('switch-tab', id),
   getTabs:       ()     => ipcRenderer.invoke('get-tabs'),
+  reorderTab:    (fromId, toId) => ipcRenderer.invoke('reorder-tab', { fromId, toId }),
   duplicateTab:  (id)            => ipcRenderer.invoke('duplicate-tab', id),
   /** Show native OS context menu for a tab (renders above BrowserViews). */
   showTabCtx:    (tabId, tabUrl) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl }),

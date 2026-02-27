@@ -333,13 +333,13 @@ async function loadAll() {
 
 // Auto-load if token is saved
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = sessionStorage.getItem('intelli_token');
+  const saved = localStorage.getItem('gw_token');
   if (saved) {
     document.getElementById('token-input').value = saved;
     loadAll();
   }
   document.getElementById('token-input').addEventListener('change', () => {
-    sessionStorage.setItem('intelli_token', document.getElementById('token-input').value.trim());
+    localStorage.setItem('gw_token', document.getElementById('token-input').value.trim());
   });
 });
 </script>

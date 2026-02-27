@@ -66,11 +66,13 @@
     }
     #login-bar.hidden { display: none; }
     #login-bar label { color: var(--muted); font-size: .75rem; white-space: nowrap; }
-    #login-token {
-      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    #login-user, #login-pass {
+      background: var(--surface2); border: 1px solid var(--border);
       color: var(--text); border-radius: 5px; padding: 4px 8px; font-size: .8rem;
     }
-    #login-token:focus { outline: none; border-color: var(--accent); }
+    #login-user { width: 90px; }
+    #login-pass { flex: 1; }
+    #login-user:focus, #login-pass:focus { outline: none; border-color: var(--accent); }
     .btn-sm {
       background: var(--accent); color: #fff; border: none; border-radius: 5px;
       padding: 4px 12px; font-size: .78rem; cursor: pointer; font-weight: 600;
@@ -126,7 +128,7 @@
       font-size: .72rem; cursor: pointer; transition: all .15s; white-space: nowrap;
     }
     .ctx-btn:hover { color: var(--text); border-color: var(--accent); }
-    .ctx-btn.active { background: rgba(108,99,255,.18); border-color: var(--accent); color: var(--accent); }
+    .ctx-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
     .ctx-pill {
       font-size: .68rem; padding: 2px 7px; border-radius: 10px;
       background: rgba(108,99,255,.12); color: var(--accent2);
@@ -257,9 +259,14 @@
       border-top: 1px solid var(--border);
       padding: 8px 12px;
       display: flex;
-      align-items: flex-end;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
       flex-shrink: 0;
+    }
+    #input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
     }
     #msg-input {
       flex: 1;
@@ -531,10 +538,13 @@
 
   <!-- ── Login bar ──────────────────────────────────────────────── -->
   <div id="login-bar" role="form" aria-label="Authentication">
-    <label for="login-token">API Token:</label>
-    <input id="login-token" type="password" placeholder="Bearer token from /admin/login" aria-label="Bearer token" />
-    <button class="btn-sm" id="btn-login">Connect</button>
+    <label for="login-user">User:</label>
+    <input id="login-user" type="text" placeholder="admin" autocomplete="username" aria-label="Username" />
+    <label for="login-pass">Password:</label>
+    <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" />
+    <button class="btn-sm" id="btn-login" onclick="doLogin()">Connect</button>
   </div>
+  <div id="login-err" style="display:none;color:var(--red);font-size:.85rem;font-weight:600;padding:6px 12px;background:rgba(255,107,107,.15);border-radius:6px;border:1px solid rgba(255,107,107,.4);margin-top:6px"></div>
 
   <!-- ── Config bar ─────────────────────────────────────────────── -->
   <div id="config-bar" aria-label="Chat configuration">
@@ -608,7 +618,7 @@
   <!-- ── Input area ─────────────────────────────────────────────── -->
   <div id="input-area">
     <div id="img-preview-bar" aria-label="Attached images"></div>
-    <div style="display:flex;gap:6px;align-items:flex-end">
+    <div id="input-row">
       <textarea id="msg-input" rows="1" placeholder="Ask anything… (Enter / drag & drop images)"
                 aria-label="Message input" aria-multiline="true"></textarea>
       <button id="btn-mic" title="Hold to record voice input (Whisper STT)" aria-label="Record voice"> 🎤 </button>
@@ -669,9 +679,22 @@
         c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
     }
 
+    /* ── Global error reporter ──────────────────────────────────── */
+    window.onerror = (msg, src, line, col, err) => {
+      const el = document.getElementById('login-err');
+      if (el) { el.textContent = `JS Error: ${msg} (line ${line})`; el.style.display = 'block'; }
+      console.error('Global JS error:', msg, src, line, err);
+      return false; // do not suppress errors
+    };
+    window.addEventListener('unhandledrejection', ev => {
+      console.error('Unhandled promise rejection:', ev.reason);
+    });
+
     /* ── DOM refs ───────────────────────────────────────────────── */
     const $loginBar   = document.getElementById('login-bar');
-    const $loginToken = document.getElementById('login-token');
+    const $loginUser  = document.getElementById('login-user');
+    const $loginPass  = document.getElementById('login-pass');
+    const $loginErr   = document.getElementById('login-err');
     const $btnLogin   = document.getElementById('btn-login');
     const $messages   = document.getElementById('messages');
     const $emptyState = document.getElementById('empty-state');
@@ -695,16 +718,77 @@
 
     /* ── Auth ───────────────────────────────────────────────────── */
     function applyToken(tok) {
-      _token = tok.trim();
+      _token = (tok || '').trim();
       if (_token) {
         localStorage.setItem('gw_token', _token);
-        $loginBar.classList.add('hidden');
+        $loginBar?.classList.add('hidden');
+        if ($loginErr) $loginErr.style.display = 'none';
       } else {
-        $loginBar.classList.remove('hidden');
+        $loginBar?.classList.remove('hidden');
       }
     }
 
+    function _showLoginErr(msg) {
+      if (!$loginErr) { console.error('[login]', msg); return; }
+      $loginErr.textContent = msg;
+      $loginErr.style.display = 'block';
+      setTimeout(() => { $loginErr.style.display = 'none'; }, 8000);
+    }
+
+    async function doLogin() {
+      const user = (($loginUser?.value || '').trim() || 'admin');
+      const pass = $loginPass?.value || '';
+      if (!pass) { _showLoginErr('Enter your password'); return; }
+      if ($loginErr) $loginErr.style.display = 'none';
+      const origText = $btnLogin?.textContent || 'Connect';
+      if ($btnLogin) { $btnLogin.textContent = 'Connecting…'; $btnLogin.disabled = true; }
+      try {
+        const r = await fetch(`${GW}/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          localStorage.setItem('gw_remember_user', user);
+          if ($btnLogin) { $btnLogin.textContent = '✓ Connected'; $btnLogin.style.background = 'var(--green)'; }
+          setTimeout(() => {
+            if ($btnLogin) { $btnLogin.style.background = ''; $btnLogin.textContent = origText; }
+          }, 2000);
+          applyToken(d.token);
+          loadPersonas();
+          tryResumeSession();
+        } else {
+          const detail = await r.json().catch(() => ({}));
+          _showLoginErr(`Login failed (${r.status}): ${detail.detail || 'wrong credentials'}`);
+          if ($btnLogin) $btnLogin.textContent = origText;
+        }
+      } catch (e) {
+        _showLoginErr('Cannot reach gateway — is it running?');
+        if ($btnLogin) $btnLogin.textContent = origText;
+      } finally {
+        if ($btnLogin) $btnLogin.disabled = false;
+      }
+    }
+
+    // Expose on window so onclick= attributes and Electron injection always reach them
+    window.applyToken = applyToken;
+    window.doLogin    = doLogin;
+
+    // Pre-fill username from last successful login
+    if ($loginUser) $loginUser.value = localStorage.getItem('gw_remember_user') || 'admin';
+
     applyToken(_token);
+
+    // Poll for token injected by Electron shell (arrives after did-finish-load)
+    if (!_token) {
+      let _pollCount = 0;
+      const _tokenPoll = setInterval(() => {
+        const t = localStorage.getItem('gw_token');
+        if (t) { applyToken(t); loadPersonas(); clearInterval(_tokenPoll); }
+        if (++_pollCount > 25) clearInterval(_tokenPoll); // stop after 5 s
+      }, 200);
+    }
 
     /* ── Persona selector ────────────────────────────────────────── */
     async function loadPersonas() {
@@ -754,11 +838,12 @@
     // Delay slightly so token is applied first
     setTimeout(() => tryResumeSession(), 200);
 
-    $btnLogin.addEventListener('click', () => {
-      applyToken($loginToken.value);
+    $btnLogin.addEventListener('click', doLogin);
+    $loginPass.addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
     });
-    $loginToken.addEventListener('keydown', e => {
-      if (e.key === 'Enter') applyToken($loginToken.value);
+    $loginUser.addEventListener('keydown', e => {
+      if (e.key === 'Enter') $loginPass.focus();
     });
 
     /* ── Page context toggle ─────────────────────────────────────── */
@@ -968,7 +1053,7 @@
       if ((!text && _attachedImages.length === 0) || _busy) return;
       if (!_token) {
         setStatus('⚠ Connect a token first', 'warn');
-        $loginBar.classList.remove('hidden');
+        $loginBar?.classList.remove('hidden');
         return;
       }
 
@@ -1662,5 +1747,6 @@
         setTimeout(() => toast.remove(), 250);
       }, 7000);
     }
+  </script>
 </body>
 </html>

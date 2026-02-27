@@ -58,6 +58,7 @@ try {
 // ─── Tab state ────────────────────────────────────────────────────────────────
 // tabs[id] = { view: BrowserView, id: number }
 let tabs        = {};
+let tabOrder    = [];   // ordered list of tab IDs — drives the tab bar order
 let activeTabId = null;
 let nextTabId   = 1;
 
@@ -189,6 +190,20 @@ function startGateway() {
     ];
 
     console.log(`[gateway] spawning: ${python} ${args.join(' ')} in ${gwDir}`);
+
+    // Kill any stale process already bound to our port (happens when Electron
+    // is quit and restarted before the previous gateway process fully exits).
+    // This ensures our new process gets the port AND that our BOOTSTRAP_SECRET
+    // matches the running gateway (otherwise the bootstrap-token call would 403).
+    try {
+      const { execSync } = require('child_process');
+      if (process.platform === 'win32') {
+        execSync(`FOR /F "tokens=5" %P IN ('netstat -ano ^| findstr :${GATEWAY_PORT}') DO taskkill /PID %P /F`, { stdio: 'ignore', shell: true });
+      } else {
+        // fuser -k kills any process on the port; sleep gives the OS time to release it
+        execSync(`fuser -k ${GATEWAY_PORT}/tcp 2>/dev/null; sleep 0.5; true`, { stdio: 'ignore', shell: true });
+      }
+    } catch (_) { /* ignore — port may not have been in use */ }
 
     gatewayProcess = spawn(python, args, {
       cwd:   gwDir,
@@ -416,11 +431,56 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
     view.webContents.executeJavaScript(`
       (function(tok) {
         try { localStorage.setItem('gw_token', tok); } catch(e) {}
-        var inp = document.getElementById('token-input');
-        if (inp) inp.value = tok;
-        if (typeof connect === 'function') connect();
+        if (typeof applyToken === 'function') {
+          applyToken(tok);
+          if (typeof loadPersonas === 'function') loadPersonas();
+        }
       })(${JSON.stringify(adminToken)})
     `).catch(() => {});
+  });
+
+  // Re-inject all active addons on every real page load so they survive
+  // navigation and hard refreshes.  For SPAs (React, Vue, etc.) the framework
+  // may render elements AFTER did-finish-load, so we re-run at 500 ms, 1.5 s,
+  // and 3 s post-load to ensure the addon catches any late-rendered DOM.
+  view.webContents.on('did-finish-load', () => {
+    if (!gatewayReady) return;
+    const _addonUrl = view.webContents.getURL();
+    if (!_addonUrl || _addonUrl === 'about:blank' || _addonUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+    if (view !== tabs[activeTabId]?.view) return;
+
+    function _reInjectAddons(delay) {
+      setTimeout(() => {
+        // Guard: view may have navigated away during the delay
+        const currentUrl = view.webContents.getURL();
+        if (currentUrl !== _addonUrl) return;
+        http.get(`${GATEWAY_ORIGIN}/tab/active-addons`, res => {
+          let _addonData = '';
+          res.on('data', d => { _addonData += d; });
+          res.on('end', async () => {
+            try {
+              const addons = JSON.parse(_addonData);
+              if (!Array.isArray(addons) || addons.length === 0) return;
+              for (const addon of addons) {
+                try {
+                  await view.webContents.executeJavaScript(addon.code_js);
+                  console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${_addonUrl}`);
+                } catch (err) {
+                  console.error(`[addon] re-inject "${addon.name}" failed:`, err.message);
+                }
+              }
+            } catch (e) {
+              console.error('[active-addons] parse error:', e.message);
+            }
+          });
+        }).on('error', () => {});
+      }, delay);
+    }
+
+    // Fire immediately and at SPA render milestones
+    _reInjectAddons(200);
+    _reInjectAddons(1000);
+    _reInjectAddons(3000);
   });
 
   // Auto-push a tab snapshot to the gateway after every real page load so
@@ -451,6 +511,7 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
   });
 
   tabs[id] = { id, view };
+  tabOrder.push(id);
   switchTab(id, win);
   return id;
 }
@@ -477,6 +538,28 @@ function switchTab(id, win = mainWin) {
     canGoForward: wc.canGoForward(),
   });
   notifyTabsUpdated();
+
+  // Push a fresh snapshot for the newly-active tab so "Page" context always
+  // reflects the page the user is actually looking at.
+  const snapUrl = wc.getURL();
+  if (snapUrl && snapUrl !== 'about:blank' && !snapUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) {
+    wc.executeJavaScript('document.documentElement.outerHTML').then(html => {
+      const title   = wc.getTitle();
+      const payload = JSON.stringify({ url: snapUrl, title, html });
+      const req = http.request({
+        hostname: GATEWAY_HOST,
+        port:     GATEWAY_PORT,
+        path:     '/tab/snapshot',
+        method:   'PUT',
+        headers:  {
+          'Content-Type':   'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      });
+      req.on('error', () => {}); // silently ignore if gateway not yet up
+      req.end(payload);
+    }).catch(() => {});
+  }
 }
 
 /**
@@ -488,6 +571,7 @@ function closeTab(id, win = mainWin) {
   win.removeBrowserView(tab.view);
   tab.view.webContents.destroy();
   delete tabs[id];
+  tabOrder = tabOrder.filter(tid => tid !== id);
 
   if (Object.keys(tabs).length === 0) {
     // No tabs left — open a fresh one
@@ -517,13 +601,16 @@ function notifyChrome(channel, payload) {
  * in sync after any create / switch / close operation.
  */
 function notifyTabsUpdated() {
-  const list = Object.values(tabs).map(t => ({
-    id:     t.id,
-    url:    t.view.webContents.getURL(),
-    title:  t.view.webContents.getTitle(),
-    favicon: null,           // favicon updates arrive via separate event
-    active: t.id === activeTabId,
-  }));
+  const list = tabOrder.filter(id => tabs[id]).map(id => {
+    const t = tabs[id];
+    return {
+      id:      t.id,
+      url:     t.view.webContents.getURL(),
+      title:   t.view.webContents.getTitle(),
+      favicon: null,           // favicon updates arrive via separate event
+      active:  t.id === activeTabId,
+    };
+  });
   notifyChrome('tabs-updated', list);
 }
 
@@ -610,12 +697,26 @@ function registerIPC() {
   });
 
   ipcMain.handle('get-tabs', () => {
-    return Object.values(tabs).map(t => ({
-      id:    t.id,
-      url:   t.view.webContents.getURL(),
-      title: t.view.webContents.getTitle(),
-      active: t.id === activeTabId,
-    }));
+    return tabOrder.filter(id => tabs[id]).map(id => {
+      const t = tabs[id];
+      return {
+        id:     t.id,
+        url:    t.view.webContents.getURL(),
+        title:  t.view.webContents.getTitle(),
+        active: t.id === activeTabId,
+      };
+    });
+  });
+
+  ipcMain.handle('reorder-tab', (_, { fromId, toId }) => {
+    const fi = tabOrder.indexOf(fromId);
+    const ti = tabOrder.indexOf(toId);
+    if (fi === -1 || ti === -1 || fi === ti) return;
+    tabOrder.splice(fi, 1);
+    // Re-find ti after removal since index may have shifted
+    const newTi = tabOrder.indexOf(toId);
+    tabOrder.splice(newTi, 0, fromId);
+    notifyTabsUpdated();
   });
 
   ipcMain.handle('get-gateway-status', () => ({
@@ -1045,6 +1146,44 @@ function registerIPC() {
   // Start polling loop
   setInterval(pollBrowserCommands, 500);
 
+  // ── Addon injection queue ───────────────────────────────────────────────
+  // Polls /tab/inject-queue every 2 s.  Each item returned is a JS snippet
+  // written by an agent (or activated via the Addons admin UI).  We run it
+  // inside the currently-active browser tab — NOT the sidebar or any gateway
+  // UI page.
+  function pollInjectQueue() {
+    if (!gatewayReady) return;
+    http.get(`${GATEWAY_ORIGIN}/tab/inject-queue`, res => {
+      let data = '';
+      res.on('data', d => { data += d; });
+      res.on('end', async () => {
+        try {
+          const items = JSON.parse(data);          // [{name, code_js}, …]
+          if (!Array.isArray(items) || items.length === 0) return;
+
+          const tab = tabs[activeTabId];
+          if (!tab) return;
+          const url = tab.view.webContents.getURL();
+          // Only inject into real external pages, not gateway admin UI
+          if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+
+          for (const item of items) {
+            try {
+              await tab.view.webContents.executeJavaScript(item.code_js);
+              console.log(`[addon] injected "${item.name}" into ${url}`);
+            } catch (err) {
+              console.error(`[addon] inject "${item.name}" failed:`, err.message);
+            }
+          }
+        } catch (e) {
+          console.error('[inject-queue] parse error:', e.message);
+        }
+      });
+    }).on('error', () => { /* gateway may be restarting */ });
+  }
+
+  setInterval(pollInjectQueue, 2000);
+
   // ── Sidebar toggle ──────────────────────────────────────────────────────
   // Creates the sidebar BrowserView lazily on first use, then shows/hides it
   // by adding/removing it from the window and resizing the active tab view.
@@ -1060,7 +1199,9 @@ function registerIPC() {
           webviewTag:       false,
         },
       });
-      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/chat.html`);
+      sidebarView.webContents.loadURL(`${GATEWAY_ORIGIN}/ui/chat.html`, {
+        extraHeaders: 'Cache-Control: no-cache\r\nPragma: no-cache\r\n',
+      });
     }
 
     sidebarOpen = !sidebarOpen;
@@ -1098,8 +1239,9 @@ function buildAppMenu() {
     {
       label: 'View',
       submenu: [
-        { label: 'Reload Tab',       accelerator: 'CmdOrCtrl+R', click: () => tabs[activeTabId]?.view.webContents.reload() },
-        { label: 'Force Reload',     accelerator: 'CmdOrCtrl+Shift+R', click: () => tabs[activeTabId]?.view.webContents.reloadIgnoringCache() },
+        { label: 'Reload Tab',   accelerator: 'CmdOrCtrl+R', click: () => tabs[activeTabId]?.view.webContents.reload() },
+        { label: 'Reload Tab',   accelerator: 'F5',           click: () => tabs[activeTabId]?.view.webContents.reload(), visible: false },
+        { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => tabs[activeTabId]?.view.webContents.reloadIgnoringCache() },
         { type: 'separator' },
         { label: 'Toggle DevTools (page)',  accelerator: 'F12', click: () => tabs[activeTabId]?.view.webContents.toggleDevTools() },
         { label: 'Toggle DevTools (chrome)', click: () => mainWin?.webContents.toggleDevTools() },

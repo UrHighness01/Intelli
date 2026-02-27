@@ -65,6 +65,18 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
+# Prevent browsers / Electron from caching UI HTML/JS/CSS so updates
+# are always loaded immediately after a gateway restart.
+@app.middleware('http')
+async def no_cache_ui(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith('/ui/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 SCHEMA_PATH = Path(__file__).with_name("tool_schema.json")
 RULES_PATH = Path(__file__).with_name('redaction_rules.json')
 AUDIT_PATH = Path(__file__).with_name('audit.log')
@@ -2237,6 +2249,17 @@ def inject_queue_poll():
     No auth required — only reachable from localhost.
     """
     return _addons.pop_inject_queue()
+
+
+@app.get('/tab/active-addons')
+def active_addons_list():
+    """Return all currently active addons as [{name, code_js}].
+
+    The Electron browser chrome calls this on every page load to re-inject
+    active addons so they persist across navigation and hard refreshes.
+    No auth required — only reachable from localhost.
+    """
+    return _addons.get_active_addons()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -440,9 +440,9 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Auto-load token from sessionStorage ──────────────────────────────────────
+// ── Auto-load token from localStorage ──────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = sessionStorage.getItem('intelli_token');
+  const saved = localStorage.getItem('gw_token');
   if (saved) {
     document.getElementById('token-input').value = saved;
     loadAll();
@@ -450,7 +450,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 document.getElementById && document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('token-input').addEventListener('change', () => {
-    sessionStorage.setItem('intelli_token', document.getElementById('token-input').value.trim());
+    localStorage.setItem('gw_token', document.getElementById('token-input').value.trim());
   });
 });
 </script>

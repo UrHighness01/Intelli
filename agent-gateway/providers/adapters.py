@@ -382,7 +382,7 @@ class OllamaAdapter(BaseAdapter):
     """
     provider = 'ollama'
     requires_key = False
-    DEFAULT_MODEL = 'llama3'
+    DEFAULT_MODEL = 'llama3.1:8b'
 
     def _get_base_url(self) -> str:
         """Return the Ollama endpoint, preferring admin settings over env var."""

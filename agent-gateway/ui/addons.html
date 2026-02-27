@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelli Gateway — Addons</title>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #21253a;
+      --border:   #2d3145;
+      --accent:   #6c63ff;
+      --green:    #3ddc84;
+      --red:      #ff6b6b;
+      --yellow:   #ffd166;
+      --blue:     #60a5fa;
+      --text:     #e2e4f0;
+      --muted:    #7b7f9e;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 18px 28px; display: flex; align-items: center; gap: 16px;
+    }
+    header a.back { color: var(--muted); text-decoration: none; font-size: .85rem; }
+    header a.back:hover { color: var(--accent); }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header .sub { color: var(--muted); font-size: .82rem; margin-left: auto; }
+
+    main { padding: 24px 28px; max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+    /* Buttons */
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 7px 16px; font-size: .82rem; cursor: pointer; font-weight: 600; transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.danger    { background: #7f2020; color: #ffaaaa; }
+    button.success   { background: #1a4a2e; color: var(--green); }
+    button.deactive  { background: #3a3a20; color: var(--yellow); }
+    button:disabled  { opacity: .4; cursor: default; }
+
+    /* Panel */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .panel-header h3 { font-size: .95rem; font-weight: 600; }
+    .panel-body { padding: 18px; }
+
+    /* Form fields */
+    input, textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 12px; color: var(--text);
+      font-family: inherit; font-size: .88rem; outline: none;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    textarea.code {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: .82rem; min-height: 160px; resize: vertical; line-height: 1.5;
+    }
+    label { font-size: .82rem; color: var(--muted); display: block; margin-bottom: 4px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-grid .span2 { grid-column: span 2; }
+
+    /* Addon cards */
+    #addon-list { display: flex; flex-direction: column; gap: 12px; }
+    .addon-card {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .addon-card.active-card { border-color: var(--accent); }
+    .card-top { display: flex; align-items: center; gap: 10px; }
+    .status-dot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+      background: var(--muted);
+    }
+    .status-dot.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .card-name { font-weight: 600; font-size: .93rem; flex: 1; }
+    .card-badge {
+      font-size: .72rem; padding: 2px 8px; border-radius: 10px;
+      background: var(--border); color: var(--muted);
+    }
+    .card-badge.active { background: #1a3a24; color: var(--green); }
+    .card-desc { font-size: .82rem; color: var(--muted); }
+    .card-meta { font-size: .75rem; color: var(--muted); }
+    .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* Code preview */
+    .code-preview {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: .78rem; color: #a0cfff; white-space: pre-wrap; word-break: break-all;
+      max-height: 80px; overflow: hidden; cursor: pointer; user-select: none;
+    }
+    .code-preview.expanded { max-height: none; }
+    .code-expand { font-size: .72rem; color: var(--muted); cursor: pointer; margin-top: 2px; }
+    .code-expand:hover { color: var(--accent); }
+
+    /* Editor overlay */
+    #editor-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none;
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    #editor-overlay.open { display: flex; }
+    #editor-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 24px; width: min(700px, 94vw); display: flex; flex-direction: column; gap: 14px;
+    }
+    #editor-box h3 { font-size: 1rem; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px;
+      font-size: .85rem; min-width: 220px; opacity: 0; transform: translateY(8px);
+      transition: all .25s; pointer-events: none; z-index: 200;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.ok  { border-color: var(--green); color: var(--green); }
+    #toast.err { border-color: var(--red); color: var(--red); }
+
+    .empty-state { color: var(--muted); font-size: .88rem; text-align: center; padding: 28px 0; }
+    .row { display: flex; gap: 10px; align-items: center; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">← Hub</a>
+  <h1>🧩 Addons</h1>
+  <span class="sub">JavaScript snippets injected into browser tabs by agents or you</span>
+</header>
+
+<main>
+
+  <!-- ── Create new addon ───────────────────────────────────────────────── -->
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Create New Addon</h3>
+    </div>
+    <div class="panel-body">
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="form-grid">
+          <div class="field">
+            <label>Name (slug, no spaces)</label>
+            <input id="new-name" type="text" placeholder="e.g. pink-x-logo" />
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <input id="new-desc" type="text" placeholder="e.g. Turns the X logo pink on x.com" />
+          </div>
+          <div class="field span2">
+            <label>JavaScript code (runs inside the active browser tab)</label>
+            <textarea id="new-code" class="code" placeholder="// Example: turn the X logo pink&#10;(function(){&#10;  const s = document.createElement('style');&#10;  s.textContent = 'svg[viewBox=&quot;0 0 24 24&quot;]{color:#ff2d95!important}';&#10;  document.head.appendChild(s);&#10;})();"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="createAddon()">Create Addon</button>
+          <button class="secondary" onclick="insertExample()">Insert Example</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Addon list ─────────────────────────────────────────────────────── -->
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Installed Addons</h3>
+      <button class="secondary" onclick="loadAddons()" style="padding:4px 12px;font-size:.78rem;">↺ Refresh</button>
+    </div>
+    <div class="panel-body">
+      <div id="addon-list"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Code editor overlay ────────────────────────────────────────────────── -->
+<div id="editor-overlay">
+  <div id="editor-box">
+    <h3>Edit Addon: <span id="edit-name-label"></span></h3>
+    <div class="field">
+      <label>Description</label>
+      <input id="edit-desc" type="text" />
+    </div>
+    <div class="field">
+      <label>JavaScript code</label>
+      <textarea id="edit-code" class="code" style="min-height:220px;"></textarea>
+    </div>
+    <div class="row">
+      <button onclick="saveEdit()">Save Changes</button>
+      <button class="secondary" onclick="closeEditor()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('gw_token') || '';
+let editingName = null;
+
+/* ── Auth helper ─────────────────────────────────────────────────────────── */
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Authorization': `Bearer ${token}` },
+  };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(API + path, opts);
+  if (r.status === 204) return null;
+  const text = await r.text();
+  try { return { ok: r.ok, status: r.status, data: JSON.parse(text) }; }
+  catch { return { ok: r.ok, status: r.status, data: text }; }
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+let toastTimer;
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+/* ── Load addon list ─────────────────────────────────────────────────────── */
+async function loadAddons() {
+  const list = document.getElementById('addon-list');
+  list.innerHTML = '<div class="empty-state">Loading…</div>';
+  const r = await api('GET', '/admin/addons');
+  if (!r?.ok) {
+    if (r?.status === 401 || r?.status === 403) {
+      list.innerHTML = '<div class="empty-state" style="color:var(--red)">Not authenticated — provide a token above or log in via the Hub.</div>';
+    } else {
+      list.innerHTML = `<div class="empty-state" style="color:var(--red)">Failed to load addons (${r?.status}).</div>`;
+    }
+    return;
+  }
+  const addons = r.data.addons || [];
+  if (!addons.length) {
+    list.innerHTML = '<div class="empty-state">No addons yet. Create one above.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const a of addons) {
+    list.appendChild(makeCard(a));
+  }
+}
+
+/* ── Build a card ────────────────────────────────────────────────────────── */
+function makeCard(a) {
+  const div = document.createElement('div');
+  div.className = 'addon-card' + (a.active ? ' active-card' : '');
+  div.dataset.name = a.name;
+
+  const preview = (a.code_js || '').slice(0, 300) + ((a.code_js || '').length > 300 ? '\n…' : '');
+
+  div.innerHTML = `
+    <div class="card-top">
+      <div class="status-dot ${a.active ? 'on' : ''}"></div>
+      <span class="card-name">${esc(a.name)}</span>
+      <span class="card-badge ${a.active ? 'active' : ''}">${a.active ? 'Active' : 'Inactive'}</span>
+    </div>
+    ${a.description ? `<div class="card-desc">${esc(a.description)}</div>` : ''}
+    <div class="code-preview" onclick="toggleCode(this)">${esc(preview)}</div>
+    <div class="code-expand" onclick="toggleCode(this.previousElementSibling)">▾ show / ▴ hide code</div>
+    <div class="card-meta">Created ${a.created_at ? new Date(a.created_at).toLocaleString() : '—'}</div>
+    <div class="card-actions">
+      ${a.active
+        ? `<button class="deactive" onclick="deactivateAddon('${esc(a.name)}')">⏸ Deactivate</button>`
+        : `<button class="success" onclick="activateAddon('${esc(a.name)}')">▶ Activate</button>`
+      }
+      <button class="secondary" onclick="openEditor('${esc(a.name)}', '${esc64(a.description)}', '${esc64(a.code_js)}')">✏ Edit</button>
+      <button class="danger" onclick="deleteAddon('${esc(a.name)}')">🗑 Delete</button>
+    </div>
+  `;
+  return div;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function esc64(s) { try { return btoa(unescape(encodeURIComponent(s ?? ''))); } catch { return ''; } }
+function dec64(s) { try { return decodeURIComponent(escape(atob(s))); } catch { return s; } }
+
+function toggleCode(el) {
+  el.classList.toggle('expanded');
+}
+
+/* ── Create addon ────────────────────────────────────────────────────────── */
+async function createAddon() {
+  const name    = document.getElementById('new-name').value.trim();
+  const desc    = document.getElementById('new-desc').value.trim();
+  const code_js = document.getElementById('new-code').value;
+  if (!name) { toast('Name is required', 'err'); return; }
+  if (!code_js.trim()) { toast('Code is required', 'err'); return; }
+  const slug = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+  const r = await api('POST', '/admin/addons', { name: slug, description: desc, code_js });
+  if (!r?.ok) {
+    toast(r?.data?.detail || 'Create failed', 'err'); return;
+  }
+  toast(`Addon "${slug}" created`, 'ok');
+  document.getElementById('new-name').value = '';
+  document.getElementById('new-desc').value = '';
+  document.getElementById('new-code').value = '';
+  loadAddons();
+}
+
+/* ── Activate / Deactivate ───────────────────────────────────────────────── */
+async function activateAddon(name) {
+  const r = await api('POST', `/admin/addons/${encodeURIComponent(name)}/activate`);
+  if (!r?.ok) { toast(r?.data?.detail || 'Activate failed', 'err'); return; }
+  toast(`"${name}" activated — JS injecting into active tab…`, 'ok');
+  loadAddons();
+}
+
+async function deactivateAddon(name) {
+  const r = await api('POST', `/admin/addons/${encodeURIComponent(name)}/deactivate`);
+  if (!r?.ok) { toast(r?.data?.detail || 'Deactivate failed', 'err'); return; }
+  toast(`"${name}" deactivated`, 'ok');
+  loadAddons();
+}
+
+/* ── Delete ──────────────────────────────────────────────────────────────── */
+async function deleteAddon(name) {
+  if (!confirm(`Delete addon "${name}"? This cannot be undone.`)) return;
+  const r = await api('DELETE', `/admin/addons/${encodeURIComponent(name)}`);
+  if (r !== null && !r?.ok) { toast(r?.data?.detail || 'Delete failed', 'err'); return; }
+  toast(`"${name}" deleted`, 'ok');
+  loadAddons();
+}
+
+/* ── Editor overlay ──────────────────────────────────────────────────────── */
+function openEditor(name, descB64, codeB64) {
+  editingName = name;
+  document.getElementById('edit-name-label').textContent = name;
+  document.getElementById('edit-desc').value  = dec64(descB64);
+  document.getElementById('edit-code').value  = dec64(codeB64);
+  document.getElementById('editor-overlay').classList.add('open');
+}
+
+function closeEditor() {
+  editingName = null;
+  document.getElementById('editor-overlay').classList.remove('open');
+}
+
+async function saveEdit() {
+  if (!editingName) return;
+  const desc    = document.getElementById('edit-desc').value.trim();
+  const code_js = document.getElementById('edit-code').value;
+  const r = await api('PUT', `/admin/addons/${encodeURIComponent(editingName)}`, { description: desc, code_js });
+  if (!r?.ok) { toast(r?.data?.detail || 'Save failed', 'err'); return; }
+  toast(`"${editingName}" updated`, 'ok');
+  closeEditor();
+  loadAddons();
+}
+
+/* ── Example snippet ─────────────────────────────────────────────────────── */
+function insertExample() {
+  document.getElementById('new-name').value = 'pink-x-logo';
+  document.getElementById('new-desc').value = 'Turns the X logo pink on x.com';
+  document.getElementById('new-code').value = `// Pink X logo — injects a style into x.com that recolors the X SVG
+(function () {
+  const ID = 'intelli-pink-x-style';
+  if (document.getElementById(ID)) return; // already injected
+  const style = document.createElement('style');
+  style.id = ID;
+  style.textContent = 'svg[viewBox="0 0 24 24"] { color: #ff2d95 !important; fill: currentColor !important; }';
+  document.head.appendChild(style);
+})();`;
+}
+
+/* Close editor on backdrop click */
+document.getElementById('editor-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeEditor();
+});
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+loadAddons();
+</script>
+</body>
+</html>

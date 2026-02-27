@@ -215,6 +215,227 @@ async def browser_wait(selector: str, timeout: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Addon management tools  (server-side — calls addons.py directly)
+# ---------------------------------------------------------------------------
+
+def addon_list() -> str:
+    """List all Intelli addons and their status."""
+    try:
+        import sys, os
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        items = _addons.list_addons()
+        if not items:
+            return 'No addons installed yet.'
+        lines = []
+        for a in items:
+            status = '✓ active' if a.get('active') else '○ inactive'
+            lines.append(f"  {status}  {a['name']} — {a.get('description', '')}")
+        return 'Installed addons:\n' + '\n'.join(lines)
+    except Exception as e:
+        return f'[ERROR] addon_list: {e}'
+
+
+def addon_create(name: str, description: str, code_js: str) -> str:
+    """Create a new Intelli addon.
+
+    Args:
+        name: Short slug (no spaces) for the addon.
+        description: What the addon does.
+        code_js: JavaScript snippet run inside the active browser tab on activation.
+    """
+    try:
+        import sys, os, re
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        slug = re.sub(r'[^a-zA-Z0-9_-]', '-', name.strip())
+        addon = _addons.create_addon(slug, description, code_js)
+        return f'Addon "{slug}" created successfully. Use addon_activate to inject it into the active tab.'
+    except ValueError as e:
+        return f'[ERROR] addon_create: {e}'
+    except Exception as e:
+        return f'[ERROR] addon_create: {e}'
+
+
+def addon_activate(name: str) -> str:
+    """Activate an addon — injects its JavaScript into the currently active browser tab.
+
+    Args:
+        name: The addon name/slug to activate.
+    """
+    try:
+        import sys, os
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        _addons.activate_addon(name)
+        return (
+            f'Addon "{name}" activated and queued for injection. '
+            'The browser shell will inject the JS into the active tab within ~2 seconds.'
+        )
+    except KeyError:
+        return f'[ERROR] addon_activate: addon "{name}" not found — create it first with addon_create.'
+    except Exception as e:
+        return f'[ERROR] addon_activate: {e}'
+
+
+def addon_create_and_activate(name: str, description: str, code_js: str) -> str:
+    """Create an addon and immediately activate it — injects JS into the active tab in one step.
+
+    Args:
+        name: Short slug for the addon (no spaces).
+        description: What the addon does.
+        code_js: JavaScript snippet to inject into the active browser tab.
+    """
+    import re as _re
+    slug = _re.sub(r'[^a-zA-Z0-9_-]', '-', name.strip())
+
+    # If the addon already exists, update its code instead of erroring out.
+    # This allows re-running the same request with improved code.
+    try:
+        import sys, os
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        existing = _addons.get_addon(slug)
+        if existing is not None:
+            _addons.update_addon(slug, description=description, code_js=code_js)
+        else:
+            _addons.create_addon(slug, description, code_js)
+    except Exception as e:
+        return f'[ERROR] addon_create_and_activate (create/update): {e}'
+
+    return addon_activate(slug)
+
+
+def addon_deactivate(name: str) -> str:
+    """Deactivate an addon (marks it inactive; does not undo already-injected JS).
+
+    Args:
+        name: The addon name/slug to deactivate.
+    """
+    try:
+        import sys, os
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        _addons.deactivate_addon(name)
+        return f'Addon "{name}" deactivated.'
+    except KeyError:
+        return f'[ERROR] addon_deactivate: addon "{name}" not found.'
+    except Exception as e:
+        return f'[ERROR] addon_deactivate: {e}'
+
+
+def addon_delete(name: str) -> str:
+    """Permanently delete an addon.
+
+    Args:
+        name: The addon name/slug to delete.
+    """
+    try:
+        import sys, os
+        _gw = os.path.dirname(os.path.dirname(__file__))
+        if _gw not in sys.path:
+            sys.path.insert(0, _gw)
+        import addons as _addons
+        _addons.delete_addon(name)
+        return f'Addon "{name}" deleted.'
+    except KeyError:
+        return f'[ERROR] addon_delete: addon "{name}" not found.'
+    except Exception as e:
+        return f'[ERROR] addon_delete: {e}'
+
+
+ADDON_TOOLS: Dict[str, Any] = {
+    'addon_list': {
+        'fn': addon_list,
+        'description': 'List all installed Intelli addons with their name, status (active/inactive), and description.',
+        'args': {},
+    },
+    'addon_create': {
+        'fn': addon_create,
+        'description': (
+            'Save a new Intelli addon WITHOUT activating it — use this ONLY when the user explicitly '
+            'says they do not want it to run yet. '
+            'In ALL other cases ("make an addon", "create an addon", "change something on the page") '
+            'use addon_create_and_activate instead. '
+            'Names must be short slugs (no spaces). '
+            'IMPORTANT: code_js must be valid JavaScript wrapped in an IIFE: '
+            '(function(){...})(); — use style.textContent not innerHTML, '
+            'and guard against double-injection with document.getElementById.'
+        ),
+        'args': {
+            'name':        {'type': 'string', 'required': True,  'description': 'Addon slug, e.g. pink-x-logo (no spaces, hyphens ok)'},
+            'description': {'type': 'string', 'required': False, 'description': 'Human description of what the addon does'},
+            'code_js':     {'type': 'string', 'required': True,  'description': 'Valid JS wrapped in IIFE. Example: (function(){var s=document.createElement(\'style\');s.id=\'my-addon\';s.textContent=\'svg{color:pink}\';\ document.head.appendChild(s);})();'},
+        },
+    },
+    'addon_activate': {
+        'fn': addon_activate,
+        'description': (
+            'Activate an Intelli addon by name — queues its JavaScript for injection into the active browser tab. '
+            'The JS runs within ~2 seconds in whatever page the user is currently viewing.'
+        ),
+        'args': {
+            'name': {'type': 'string', 'required': True, 'description': 'Addon slug to activate'},
+        },
+    },
+    'addon_create_and_activate': {
+        'fn': addon_create_and_activate,
+        'description': (
+            'Create an Intelli addon and immediately inject its JavaScript into the active browser tab — one-step shortcut. '
+            'Use this for ANY request to create, make, or build an addon, or modify/change something on the current page. '
+            'Trigger phrases: "make an addon", "create an addon", "make an intelli addon", '
+            '"inject", "add", "change", "modify", "hide", "replace" anything on the page. '
+            'If an addon with the same name exists, it will be updated with the new code. '
+            'CRITICAL — code_js rules:\n'
+            '  1. Must be syntactically valid JavaScript.\n'
+            '  2. Always wrap in an IIFE: (function(){ ... })();\n'
+            '  3. Inject CSS with style.textContent = "...", NEVER style.innerHTML.\n'
+            '  4. Do NOT check window.location.href — the code runs in the user\'s active tab already.\n'
+            '  5. Guard double-injection: if (document.getElementById(\'MY-ID\')) return;\n'
+            'Example for "make X logo pink":\n'
+            '(function(){'
+            'var id="intelli-pink-x";'
+            'if(document.getElementById(id))return;'
+            'var s=document.createElement("style");'
+            's.id=id;'
+            's.textContent="header svg,a[href=\'/\'] svg,a[href=\'/home\'] svg{color:#ff69b4!important;fill:currentColor!important}";'
+            'document.head.appendChild(s);'
+            '})();'
+        ),
+        'args': {
+            'name':        {'type': 'string', 'required': True,  'description': 'Addon slug, e.g. pink-x-logo (hyphens ok, no spaces)'},
+            'description': {'type': 'string', 'required': False, 'description': 'What the addon does'},
+            'code_js':     {'type': 'string', 'required': True,  'description': 'Valid JS IIFE that manipulates the DOM. Do not check location.href. Use style.textContent for CSS injection.'},
+        },
+    },
+    'addon_deactivate': {
+        'fn': addon_deactivate,
+        'description': 'Deactivate (disable) an Intelli addon by name.',
+        'args': {
+            'name': {'type': 'string', 'required': True, 'description': 'Addon slug to deactivate'},
+        },
+    },
+    'addon_delete': {
+        'fn': addon_delete,
+        'description': 'Permanently delete an Intelli addon by name.',
+        'args': {
+            'name': {'type': 'string', 'required': True, 'description': 'Addon slug to delete'},
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Tool registry for tool_runner.py
 # ---------------------------------------------------------------------------
 

@@ -239,7 +239,7 @@
   };
 
   function token() {
-    return localStorage.getItem('intelli_token') || document.getElementById('token-input').value.trim();
+    return localStorage.getItem('gw_token') || document.getElementById('token-input').value.trim();
   }
 
   function headers() {
@@ -262,7 +262,7 @@
 
   async function loadServers() {
     const t = token();
-    if (t) localStorage.setItem('intelli_token', t);
+    if (t) localStorage.setItem('gw_token', t);
     try {
       const r = await fetch(`${BASE}/mcp/servers`, { headers: headers() });
       if (!r.ok) { showError(`HTTP ${r.status} — check token`); return; }
@@ -393,7 +393,7 @@
   }
 
   // Auto-load if token already saved
-  const saved = localStorage.getItem('intelli_token');
+  const saved = localStorage.getItem('gw_token');
   if (saved) { document.getElementById('token-input').value = saved; loadServers(); }
 </script>
 </body>
