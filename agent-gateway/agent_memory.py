@@ -163,7 +163,7 @@ def memory_set(agent_id: str, key: str, value: Any, ttl_seconds: Optional[float]
         many seconds.  ``None`` means no expiry.
     """
     with _lock:
-        _, raw = _load_active(agent_id)  # drop already-expired keys
+        raw = _load(agent_id)  # preserve all raw entries; reads filter expired via _load_active
         raw[key] = _wrap(value, ttl_seconds)
         _save(agent_id, raw)
 
