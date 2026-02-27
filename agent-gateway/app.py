@@ -147,8 +147,11 @@ def _save_rules():
 # Keys whose values are redacted from audit entries written in cleartext.
 # Keeps CWE-312 and CodeQL py/clear-text-storage-of-sensitive-info quiet.
 _SENSITIVE_AUDIT_KEYS = frozenset({
+    # Generic credential / secret names
     'password', 'passwd', 'secret', 'key', 'token', 'credential',
     'authorization', 'access_token', 'refresh_token', 'api_key', 'private_key',
+    # Webhook / signing secret variants (defense-in-depth for webhook flows)
+    'webhook_secret', 'hmac_secret', 'signing_secret',
 })
 
 
