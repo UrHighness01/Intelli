@@ -89,13 +89,47 @@ def _load() -> None:
         try:
             data = json.loads(WEBHOOKS_FILE.read_text(encoding='utf-8'))
             if isinstance(data, dict):
-                _hooks.update(data)
+                key = _get_encryption_key()
+                fernet = Fernet(key) if key else None
+                for hook_id, hook in data.items():
+                    h = dict(hook)
+                    # Decrypt on-disk secret back to plaintext for in-memory use.
+                    if h.get('_secret_encrypted') and fernet:
+                        try:
+                            h['secret'] = fernet.decrypt(h['secret'].encode()).decode()
+                        except (InvalidToken, Exception):
+                            h['secret'] = ''  # corrupted / wrong key — disable signing
+                        del h['_secret_encrypted']
+                    elif h.get('_secret_encrypted'):
+                        # Encrypted on disk but no key configured — can't decrypt.
+                        h['secret'] = ''
+                        del h['_secret_encrypted']
+                    _hooks[hook_id] = h
         except Exception:
             pass  # corrupted file — start fresh
 
 
 def _save() -> None:
-    WEBHOOKS_FILE.write_text(json.dumps(_hooks, indent=2), encoding='utf-8')
+    # Encrypt secrets at the persistence boundary so the on-disk file never
+    # contains cleartext HMAC secrets.  If no key is configured the secret
+    # field is omitted from disk entirely (the hook remains functional until
+    # next restart, but signing won't survive a restart without a key).
+    key = _get_encryption_key()
+    fernet = Fernet(key) if key else None
+    to_write: Dict[str, Any] = {}
+    for hook_id, hook in _hooks.items():
+        h = dict(hook)
+        raw_secret = h.pop('secret', '')
+        if raw_secret and fernet:
+            h['secret'] = fernet.encrypt(raw_secret.encode()).decode()
+            h['_secret_encrypted'] = True
+        elif raw_secret:
+            # No encryption key — omit the secret from disk to avoid cleartext storage.
+            h['secret'] = ''
+        else:
+            h['secret'] = ''
+        to_write[hook_id] = h
+    WEBHOOKS_FILE.write_text(json.dumps(to_write, indent=2), encoding='utf-8')
 
 
 def _get_encryption_key() -> Optional[bytes]:
@@ -180,15 +214,11 @@ def register_webhook(url: str, events: Optional[List[str]] = None, secret: str =
             raise ValueError(f'unknown events: {unknown}; valid: {VALID_EVENTS}')
 
     hook_id = str(uuid.uuid4())
-    # Encrypt the HMAC secret before persisting so it is never stored in clear text.
-    stored_secret: str = ''
-    if secret:
-        stored_secret = _encrypt_secret(secret)
     hook = {
         'id': hook_id,
         'url': url,
         'events': sorted(events),
-        'secret': stored_secret,
+        'secret': secret,  # stored in plaintext in-memory; encrypted at disk-write time
         'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     with _lock:
