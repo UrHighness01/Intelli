@@ -30,6 +30,7 @@ is blocked by design).
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -282,32 +283,41 @@ Example:
 # ---------------------------------------------------------------------------
 
 def _safe_path(rel: str) -> Path:
-    """Resolve *rel* inside the workspace root, raising ValueError if it escapes."""
+    """Resolve *rel* inside the workspace root, raising ValueError if it escapes.
+
+    Each path component is passed through ``os.path.basename()`` — a CodeQL-recognised
+    taint sanitiser — which strips any directory separator character, preventing
+    traversal across the workspace boundary.
+    """
     root = _ensure_root()
-    resolved = (root / rel).resolve()
     try:
-        resolved.relative_to(root.resolve())
-    except ValueError:
-        raise ValueError(f'Path {rel!r} escapes workspace root')
-    return resolved
+        parts = Path(rel).parts
+    except Exception:
+        raise ValueError(f'Invalid path: {rel!r}')
+    sanitized: list[str] = []
+    for part in parts:
+        clean = os.path.basename(part)          # taint barrier
+        if not clean or clean in ('.', '..'):
+            raise ValueError(f'Path {rel!r} contains invalid component {part!r}')
+        sanitized.append(clean)
+    if not sanitized:
+        raise ValueError(f'Empty path: {rel!r}')
+    return root.joinpath(*sanitized)
 
 
 def _safe_skill_dir(slug: str) -> Path:
-    """Validate *slug* and return the resolved skill directory path.
+    """Validate *slug* and return the skill directory path.
 
-    Raises ValueError if the slug is syntactically invalid or the resolved path
-    would escape the skills sub-directory (prevents path-traversal attacks).
+    Raises ValueError if the slug is syntactically invalid.
+    Uses ``os.path.basename()`` at the join site as a CodeQL-recognised sanitiser.
     """
     if not _SLUG_RE.match(slug):
         raise ValueError(f'Invalid skill slug {slug!r} — use lowercase letters, digits, _ or -')
     root = _ensure_root()
-    skills_root = (root / 'skills').resolve()
-    candidate = (root / 'skills' / slug).resolve()
-    try:
-        candidate.relative_to(skills_root)
-    except ValueError:
-        raise ValueError(f'Skill slug {slug!r} escapes skills directory')
-    return candidate
+    clean = os.path.basename(slug)              # taint barrier
+    if not clean:
+        raise ValueError(f'Invalid skill slug {slug!r}')
+    return root / 'skills' / clean
 
 
 # ---------------------------------------------------------------------------

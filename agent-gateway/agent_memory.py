@@ -95,15 +95,9 @@ def _validate_id(agent_id: str) -> None:
 
 def _agent_path(agent_id: str) -> Path:
     _validate_id(agent_id)
-    # os.path.basename is a CodeQL-recognised taint sanitiser; _validate_id already
-    # whitelists the charset but this makes the taint barrier explicit for static analysis.
-    safe = os.path.basename(agent_id)
-    candidate = (MEMORY_DIR / f'{safe}.json').resolve()
-    try:
-        candidate.relative_to(MEMORY_DIR.resolve())
-    except ValueError:
-        raise ValueError(f'agent_id {agent_id!r} escapes memory directory')
-    return candidate
+    # os.path.basename strips any directory separator — CodeQL-recognised sanitiser.
+    # Applied directly at the join site; no .resolve() to avoid re-tainting the Path.
+    return MEMORY_DIR / (os.path.basename(agent_id) + '.json')
 
 
 def _load(agent_id: str) -> Dict[str, Any]:

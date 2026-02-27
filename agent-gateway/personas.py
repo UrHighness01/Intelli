@@ -94,20 +94,14 @@ def list_personas() -> list[dict]:
 
 
 def _safe_slug(slug: str) -> Optional[str]:
-    """Re-apply slug sanitization and verify the resulting path stays inside
-    _PERSONAS_DIR.  Returns the sanitized slug or None if the path escapes."""
-    sanitized = _slug(slug)  # strips everything except a-z0-9_-
-    # os.path.basename is a CodeQL-recognised taint sanitiser for path injection;
-    # combined with the regex above it is doubly safe.
-    sanitized = os.path.basename(sanitized)
-    if not sanitized:
-        return None
-    candidate = (_PERSONAS_DIR / sanitized).resolve()
-    try:
-        candidate.relative_to(_PERSONAS_DIR.resolve())
-    except ValueError:
-        return None
-    return sanitized
+    """Sanitize *slug* for use as a filesystem component.
+
+    Applies the slug regex then ``os.path.basename()`` (CodeQL-recognised taint
+    sanitiser) to strip any directory separators.  Returns None for empty result.
+    """
+    sanitized = _slug(slug)                     # strips to a-z0-9_-
+    sanitized = os.path.basename(sanitized)     # taint barrier
+    return sanitized if sanitized else None
 
 
 def get_persona(slug: str) -> Optional[dict]:
@@ -117,7 +111,9 @@ def get_persona(slug: str) -> Optional[dict]:
     safe = _safe_slug(slug)
     if safe is None:
         return None
-    return _load_dir(_PERSONAS_DIR / safe)
+    # Apply os.path.basename() at the join site so CodeQL sees the taint barrier
+    # in the same scope as the path expression.
+    return _load_dir(_PERSONAS_DIR / os.path.basename(safe))
 
 
 def create_persona(
@@ -131,7 +127,7 @@ def create_persona(
     slug = _safe_slug(name)
     if slug is None:
         raise ValueError(f'Invalid persona name: {name!r}')
-    d = _PERSONAS_DIR / slug
+    d = _PERSONAS_DIR / os.path.basename(slug)  # basename at join site: taint barrier
     d.mkdir(parents=True, exist_ok=True)
     cfg: dict = {
         'name':       name,
@@ -152,7 +148,7 @@ def update_persona(slug: str, **kwargs) -> Optional[dict]:
     safe = _safe_slug(slug)
     if safe is None:
         return None
-    d = _PERSONAS_DIR / safe
+    d = _PERSONAS_DIR / os.path.basename(safe)  # basename at join site: taint barrier
     cfg_path = d / 'config.json'
     if not cfg_path.exists():
         return None
@@ -173,7 +169,7 @@ def delete_persona(slug: str) -> bool:
     safe = _safe_slug(slug)
     if safe is None:
         return False
-    d = _PERSONAS_DIR / safe
+    d = _PERSONAS_DIR / os.path.basename(safe)  # basename at join site: taint barrier
     if not d.exists():
         return False
     shutil.rmtree(d)

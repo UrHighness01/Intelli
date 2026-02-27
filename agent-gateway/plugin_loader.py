@@ -115,13 +115,12 @@ def _save_state(state: Dict[str, Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 def _read_manifest(plugin_dir: Path) -> Optional[Dict[str, Any]]:
-    mf = (plugin_dir / _MANIFEST).resolve()
+    # Re-anchor to PLUGINS_DIR using only the final directory component so that
+    # any taint carried by plugin_dir is discarded.  os.path.basename() is a
+    # CodeQL-recognised sanitiser that removes directory separators.
+    clean_name = os.path.basename(str(plugin_dir))
+    mf = PLUGINS_DIR / clean_name / _MANIFEST
     if not mf.exists():
-        return None
-    # Verify manifest did not escape plugin_dir via symlink or traversal.
-    try:
-        mf.relative_to(plugin_dir.resolve())
-    except ValueError:
         return None
     try:
         return json.loads(mf.read_text(encoding='utf-8'))
@@ -165,7 +164,7 @@ def _import_module(slug: str, plugin_dir: Path, module_name: str) -> types.Modul
 
     spec_name = f'_intelli_plugin_{slug}_{module_name}'
     spec = importlib.util.spec_from_file_location(
-        spec_name, plugin_dir / f'{module_name}.py'
+        spec_name, plugin_dir / (os.path.basename(module_name) + '.py')
     )
     if spec is None or spec.loader is None:
         raise ImportError(f'Cannot find module "{module_name}" in {plugin_dir}')

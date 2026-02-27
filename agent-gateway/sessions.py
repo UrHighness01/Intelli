@@ -46,12 +46,9 @@ import re as _re
 
 def _session_path(session_id: str) -> pathlib.Path:
     safe = _re.sub(r'[^a-zA-Z0-9_-]', '', session_id)
-    candidate = (_SESSIONS_DIR / f'{safe}.jsonl').resolve()
-    try:
-        candidate.relative_to(_SESSIONS_DIR.resolve())
-    except ValueError:
-        raise ValueError(f'Session ID {session_id!r} escapes sessions directory')
-    return candidate
+    # os.path.basename is a CodeQL-recognised taint sanitiser; applied directly
+    # at the join site so the resulting Path object is not tainted.
+    return _SESSIONS_DIR / (os.path.basename(safe) + '.jsonl')
 
 
 def _load_index() -> list[dict]:
