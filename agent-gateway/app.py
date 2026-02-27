@@ -3003,13 +3003,37 @@ def sessions_list(
 
 
 @app.get('/sessions/{session_id}')
-def sessions_get(session_id: str, request: Request):
-    """Return all messages in a session in chronological order. Auth required."""
+def sessions_get(
+    session_id: str,
+    request: Request,
+    limit: int = Query(100, ge=0, le=5000, description='Max messages to return (0 = all, default 100 most recent)'),
+):
+    """Return messages in a session in chronological order.
+
+    By default returns only the most recent 100 messages to prevent the UI
+    from freezing on long sessions.  Pass ``limit=0`` to retrieve everything.
+    The response always includes ``total`` (full message count) and
+    ``truncated`` (True when older messages were omitted).
+    Auth required.
+    """
     _require_bearer(request)
-    msgs = _sessions.get_session(session_id)
-    if not msgs:
+    all_msgs = _sessions.get_session(session_id)
+    if not all_msgs:
         raise HTTPException(status_code=404, detail=f'session {session_id!r} not found')
-    return {'session_id': session_id, 'messages': msgs, 'count': len(msgs)}
+    total = len(all_msgs)
+    if limit > 0 and limit < total:
+        msgs = all_msgs[-limit:]
+        truncated = True
+    else:
+        msgs = all_msgs
+        truncated = False
+    return {
+        'session_id': session_id,
+        'messages': msgs,
+        'count': len(msgs),
+        'total': total,
+        'truncated': truncated,
+    }
 
 
 @app.get('/sessions/{session_id}/stats')

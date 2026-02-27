@@ -230,6 +230,72 @@
       font-weight: 700;
     }
     .msg-body { font-size: .84rem; }
+    /* ── History-truncation notice (shown when session was long) ── */
+    .history-truncated-notice {
+      align-self: center;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: .76rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .history-truncated-notice span { flex: 1; }
+    .history-truncated-notice .load-all-btn,
+    .history-truncated-notice .new-session-btn {
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 3px 9px;
+      font-size: .72rem;
+      white-space: nowrap;
+    }
+    .history-truncated-notice .load-all-btn:hover,
+    .history-truncated-notice .new-session-btn:hover { background: var(--accent); color: #fff; }
+    /* ── Context-length warning banner ─────────────────────────── */
+    #ctx-limit-banner {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 7px 14px;
+      font-size: .78rem;
+      border-top: 1px solid;
+    }
+    #ctx-limit-banner.warn   { background: color-mix(in srgb,var(--yellow) 12%,transparent); border-color:var(--yellow); color:var(--yellow); }
+    #ctx-limit-banner.danger { background: color-mix(in srgb,var(--red)    12%,transparent); border-color:var(--red);    color:var(--red); }
+    #ctx-limit-banner span { flex: 1; }
+    .ctx-limit-action, .ctx-limit-dismiss {
+      border-radius: 5px;
+      border: 1px solid currentColor;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 3px 9px;
+      font-size: .72rem;
+      white-space: nowrap;
+    }
+    .ctx-limit-action:hover  { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .ctx-limit-dismiss:hover { opacity: .7; }
+    /* ── Heavy-session badge in history overlay ─────────────────── */
+    .ho-heavy-badge {
+      font-size: .62rem;
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-left: 4px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .ho-heavy-badge.warn   { background: color-mix(in srgb,var(--yellow) 20%,transparent); color:var(--yellow); border:1px solid var(--yellow); }
+    .ho-heavy-badge.danger { background: color-mix(in srgb,var(--red)    20%,transparent); color:var(--red);    border:1px solid var(--red); }
     .cursor {
       display: inline-block;
       width: 7px;
@@ -760,6 +826,9 @@
     </div>
   </div>
 
+  <!-- ── Context-length warning banner (shown when session is very long) ── -->
+  <div id="ctx-limit-banner" role="alert" aria-live="polite" style="display:none"></div>
+
   <!-- ── Input area ─────────────────────────────────────────────── -->
   <div id="input-area">
     <div id="img-preview-bar" aria-label="Attached images"></div>
@@ -802,7 +871,8 @@
 
     /* ── State ─────────────────────────────────────────────────── */
     let _token    = localStorage.getItem('gw_token') || '';
-    let _msgs     = [];   // [{role, content}]
+    let _msgs          = [];   // [{role, content}]
+    let _suppressScroll = false; // true during bulk history render (avoids per-msg reflow)
     // Restore last-used provider+model immediately (before session fetch completes)
     (() => {
       const p = localStorage.getItem('intelli_last_provider');
@@ -988,9 +1058,10 @@
       if (!resumeId || !_token) return;
       localStorage.removeItem('intelli_resume_session_id');
       try {
-        const r = await fetch(`${GW}/sessions/${encodeURIComponent(resumeId)}`, {
-          headers: { 'Authorization': `Bearer ${_token}` },
-        });
+        const r = await fetch(
+          `${GW}/sessions/${encodeURIComponent(resumeId)}?limit=${_RESUME_LIMIT}`,
+          { headers: { 'Authorization': `Bearer ${_token}` } },
+        );
         if (!r.ok) return;
         const data = await r.json();
         const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
@@ -1010,16 +1081,99 @@
             localStorage.setItem('intelli_last_model', lastWithMeta.model);
           }
         }
-        // Render them
+        // Render in chunks to avoid blocking the main thread
         $emptyState.style.display = 'none';
         $messages.innerHTML = '';
-        for (const m of _msgs) appendMsg(m.role, m.content);
+        // If the server truncated the history, show a notice above the messages
+        if (data.truncated) {
+          const notice = document.createElement('div');
+          notice.className = 'history-truncated-notice';
+          notice.innerHTML =
+            `<span>&#8679; Showing last <strong>${_msgs.length}</strong> of ` +
+            `<strong>${data.total}</strong> messages.</span>` +
+            `<button class="load-all-btn" title="Load full history (may be slow)">Load all</button>` +
+            `<button class="new-session-btn" title="Start a fresh session">New session</button>`;
+          notice.querySelector('.load-all-btn').addEventListener('click', () =>
+            _loadFullSession(resumeId));
+          notice.querySelector('.new-session-btn').addEventListener('click', () => {
+            $messages.innerHTML = '';
+            _msgs = [];
+            _sessionId = null;
+            localStorage.removeItem('intelli_session_id');
+            renderEmpty();
+          });
+          $messages.appendChild(notice);
+        }
+        await _renderMsgsBatched(_msgs);
         const label = explicitResume ? 'Resumed' : 'Restored last';
-        setStatus(`${label} session (${_msgs.length} messages)`, 'ok');
+        const truncInfo = data.truncated
+          ? ` – showing last ${_msgs.length} of ${data.total}` : '';
+        setStatus(`${label} session (${_msgs.length} messages${truncInfo})`, 'ok');
       } catch (e) { /* best-effort */ }
     }
-    // Delay slightly so token is applied first
-    setTimeout(() => tryResumeSession(), 200);
+
+    /* Load the complete session history (user-initiated, may be slow for huge sessions) */
+    async function _loadFullSession(resumeId) {
+      try {
+        const r = await fetch(
+          `${GW}/sessions/${encodeURIComponent(resumeId)}?limit=0`,
+          { headers: { 'Authorization': `Bearer ${_token}` } },
+        );
+        if (!r.ok) return;
+        const data = await r.json();
+        const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
+        if (!msgs.length) return;
+        _msgs = msgs.map(m => ({ role: m.role, content: m.content }));
+        $messages.innerHTML = '';
+        await _renderMsgsBatched(_msgs);
+        setStatus(`Full history loaded (${_msgs.length} messages)`, 'ok');
+      } catch (e) { toast('Failed to load full history', 'err'); }
+    }
+
+    /* ── Context-length guard: warn at _MAX_CTX_WARN, auto-new-session at _MAX_CTX_HARD ── */
+    function _checkContextLimit() {
+      const count = _msgs.length;
+      const $banner = document.getElementById('ctx-limit-banner');
+      if (!$banner) return;
+      if (count >= _MAX_CTX_HARD) {
+        $banner.className = 'danger';
+        $banner.innerHTML =
+          `<span>⛔ Session reached ${_MAX_CTX_HARD} messages — starting a fresh conversation to prevent freezing.</span>` +
+          `<button class="ctx-limit-action" onclick="newChat()">OK — New Chat</button>`;
+        $banner.style.display = 'flex';
+        newChat();
+      } else if (count >= _MAX_CTX_WARN) {
+        $banner.className = 'warn';
+        $banner.innerHTML =
+          `<span>⚠ ${count} messages — context is getting long. Consider starting a fresh chat.</span>` +
+          `<button class="ctx-limit-action" onclick="newChat()">New Chat</button>` +
+          `<button class="ctx-limit-dismiss" onclick="document.getElementById('ctx-limit-banner').style.display='none'">✕</button>`;
+        $banner.style.display = 'flex';
+      } else {
+        $banner.style.display = 'none';
+      }
+    }
+    // On startup: open the history overlay so the user picks which session to
+    // resume — this avoids silently loading a potentially huge session that would
+    // freeze the UI.  If the app was opened via an explicit deep-link resume
+    // (intelli_resume_session_id set by sessions.html), honour that directly.
+    setTimeout(async () => {
+      const explicitResume = localStorage.getItem('intelli_resume_session_id');
+      if (explicitResume) {
+        tryResumeSession(explicitResume);
+        return;
+      }
+      if (!_token) return;
+      try {
+        const r = await fetch(`${GW}/sessions?limit=1`, {
+          headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (r.ok) {
+          const list = await r.json();
+          if (list.length > 0) openHistoryOverlay();
+        }
+      } catch { /* best-effort; fail silently if gateway not yet up */ }
+    }, 300);
 
     /* ── Inline session history overlay ─────────────────────────── */
     let _hoSessions = [];
@@ -1080,10 +1234,15 @@
         const div = document.createElement('div');
         div.className = 'ho-session';
         div.dataset.id = s.id;
+        const heavy = (s.msg_count || 0) >= _MAX_CTX_HARD
+          ? `<span class="ho-heavy-badge danger" title="Very long session — may be slow to load">⚠ ${s.msg_count} msgs</span>`
+          : (s.msg_count || 0) >= _MAX_CTX_WARN
+          ? `<span class="ho-heavy-badge warn" title="Long session — consider deleting or starting fresh">${s.msg_count} msgs</span>`
+          : '';
         div.innerHTML = `
           <div class="ho-session-top">
             <span class="ho-session-preview">${_hoEsc(s.preview || '(no messages)')}</span>
-            <span class="ho-msg-count">${s.msg_count || '?'} msg</span>
+            <span class="ho-msg-count">${heavy || (s.msg_count || '?') + ' msg'}</span>
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="ho-session-date">${_hoFmtDate(s.last_ts || s.created_at)}</span>
@@ -1304,9 +1463,31 @@
       wrap.appendChild(metaDiv);
       wrap.appendChild(body);
       $messages.appendChild(wrap);
-      $messages.scrollTop = $messages.scrollHeight;
+      if (!_suppressScroll) $messages.scrollTop = $messages.scrollHeight;
       renderEmpty();
       return body;
+    }
+
+    /* ── Batch-render a list of messages without blocking the main thread ── */
+    const _RESUME_LIMIT  = 100; // default max messages fetched on session resume
+    const _RENDER_CHUNK  = 20;  // messages rendered per animation frame
+    const _MAX_CTX_WARN  = 150; // show a warning at this many messages
+    const _MAX_CTX_HARD  = 200; // auto-start new session at this many messages
+
+    async function _renderMsgsBatched(msgs) {
+      _suppressScroll = true;
+      // Note: caller is responsible for clearing $messages before calling this,
+      // so any prepended elements (e.g. truncation notice) are preserved.
+      for (let i = 0; i < msgs.length; i += _RENDER_CHUNK) {
+        const chunk = msgs.slice(i, i + _RENDER_CHUNK);
+        for (const m of chunk) appendMsg(m.role, m.content);
+        if (i + _RENDER_CHUNK < msgs.length) {
+          // Yield to the browser so the UI stays responsive between chunks
+          await new Promise(r => requestAnimationFrame(r));
+        }
+      }
+      _suppressScroll = false;
+      $messages.scrollTop = $messages.scrollHeight;
     }
 
     function appendThinking() {
@@ -1596,6 +1777,7 @@
       _busy = false;
       $btnSend.disabled = false;
       $messages.scrollTop = $messages.scrollHeight;
+      _checkContextLimit();
       $msgInput.focus();
     }
 

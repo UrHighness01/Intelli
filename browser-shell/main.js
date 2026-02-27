@@ -183,8 +183,9 @@ let nextTabId   = 1;
 const tabPreviews = {};  // tabId → data:URL screenshot (captured when tab is grouped)
 let _hoverWin     = null;  // floating preview BrowserWindow (module-scope for cleanup)
 function _closeHoverWin() {
-  if (_hoverWin && !_hoverWin.isDestroyed()) { _hoverWin.destroy(); }
-  _hoverWin = null;
+  const w = _hoverWin;
+  _hoverWin = null;          // null first so any re-entrant calls are no-ops
+  if (w && !w.isDestroyed()) w.destroy();
 }
 
 // ─── User-data paths ──────────────────────────────────────────────────────────
@@ -657,8 +658,8 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
       notifyChrome('url-changed', { id, url: navUrl });
       notifyChrome('nav-state', {
         id,
-        canGoBack:    view.webContents.canGoBack(),
-        canGoForward: view.webContents.canGoForward(),
+        canGoBack:    view.webContents.navigationHistory.canGoBack(),
+        canGoForward: view.webContents.navigationHistory.canGoForward(),
       });
     }
     // Record visit in history (skip internal gateway UI)
@@ -675,8 +676,8 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
       notifyChrome('url-changed', { id, url: navUrl });
       notifyChrome('nav-state', {
         id,
-        canGoBack:    view.webContents.canGoBack(),
-        canGoForward: view.webContents.canGoForward(),
+        canGoBack:    view.webContents.navigationHistory.canGoBack(),
+        canGoForward: view.webContents.navigationHistory.canGoForward(),
       });
     }
     // Ré-injecter le script anti-détection : lors d'une navigation SPA
@@ -709,10 +710,10 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
     const items = [];
 
     // Back / Forward / Reload
-    if (view.webContents.canGoBack())
-      items.push({ label: 'Back',    click: () => view.webContents.goBack() });
-    if (view.webContents.canGoForward())
-      items.push({ label: 'Forward', click: () => view.webContents.goForward() });
+    if (view.webContents.navigationHistory.canGoBack())
+      items.push({ label: 'Back',    click: () => view.webContents.navigationHistory.goBack() });
+    if (view.webContents.navigationHistory.canGoForward())
+      items.push({ label: 'Forward', click: () => view.webContents.navigationHistory.goForward() });
     if (items.length)
       items.push({ label: 'Reload',  click: () => view.webContents.reload() });
     if (items.length)
@@ -739,84 +740,75 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
 
     Menu.buildFromTemplate(items).popup({ window: mainWin });
   });
-  // Auto-inject the admin token into gateway UI pages so users don’t have
-  // to paste a bearer token manually on every admin page load.
-  view.webContents.on('did-finish-load', () => {
-    if (!adminToken) return;
-    const url = view.webContents.getURL();
-    if (!url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
-    view.webContents.executeJavaScript(`
-      (function(tok) {
-        try { localStorage.setItem('gw_token', tok); } catch(e) {}
-        if (typeof applyToken === 'function') {
-          applyToken(tok);
-          if (typeof loadPersonas === 'function') loadPersonas();
-        }
-      })(${JSON.stringify(adminToken)})
-    `).catch(() => {});
-  });
-
-  // Re-inject all active addons on every real page load so they survive
-  // navigation and hard refreshes.  For SPAs (React, Vue, etc.) the framework
-  // may render elements AFTER did-finish-load, so we re-run at 500 ms, 1.5 s,
-  // and 3 s post-load to ensure the addon catches any late-rendered DOM.
-  view.webContents.on('did-finish-load', () => {
-    if (!gatewayReady) return;
-    const _addonUrl = view.webContents.getURL();
-    if (!_addonUrl || _addonUrl === 'about:blank' || _addonUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
-    if (view !== tabs[activeTabId]?.view) return;
-
-    function _reInjectAddons(delay) {
-      setTimeout(() => {
-        // Guard: view may have navigated away during the delay
-        const currentUrl = view.webContents.getURL();
-        if (currentUrl !== _addonUrl) return;
-        http.get(`${GATEWAY_ORIGIN}/tab/active-addons`, res => {
-          let _addonData = '';
-          res.on('data', d => { _addonData += d; });
-          res.on('end', async () => {
-            try {
-              const addons = JSON.parse(_addonData);
-              if (!Array.isArray(addons) || addons.length === 0) return;
-              for (const addon of addons) {
-                // Skip if addon has a URL pattern that doesn't match current page
-                if (addon.url_pattern && !currentUrl.includes(addon.url_pattern)) {
-                  console.log(`[addon] skip "${addon.name}" — url_pattern "${addon.url_pattern}" not in ${currentUrl}`);
-                  continue;
-                }
-                try {
-                  // Execute addon.code_js directly without embedding it in a template
-                  // literal — avoids CodeQL js/improper-code-sanitization (CWE-116).
-                  // Errors thrown by the page-side code propagate as rejected Promises
-                  // and are caught by the outer catch block below.
-                  await view.webContents.executeJavaScript(addon.code_js);
-                  console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
-                } catch (err) {
-                  console.error(`[addon] re-inject "${addon.name}" CRASHED:`, err.message);
-                }
-              }
-            } catch (e) {
-              console.error('[active-addons] parse error:', e.message);
-            }
-          });
-        }).on('error', () => {});
-      }, delay);
-    }
-
-    // Fire immediately and at SPA render milestones
-    _reInjectAddons(200);
-    _reInjectAddons(1000);
-    _reInjectAddons(3000);
-  });
-
-  // Auto-push a tab snapshot to the gateway after every real page load so
-  // the AI chat always has fresh page context when the user enables "Page" context.
+  // Single combined did-finish-load handler — consolidates admin-token injection,
+  // addon re-injection (SPA-safe), and tab snapshot push so only one listener is
+  // registered per webContents instead of three, reducing MaxListeners noise.
   view.webContents.on('did-finish-load', async () => {
     const url = view.webContents.getURL();
-    // Skip blank, new-tab, and gateway admin pages
-    if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
-    // Only push for the currently active tab
+
+    // ── Admin-token injection (gateway UI pages only) ──────────────────────
+    if (adminToken && url.startsWith(GATEWAY_ORIGIN + '/ui/')) {
+      view.webContents.executeJavaScript(`
+        (function(tok) {
+          try { localStorage.setItem('gw_token', tok); } catch(e) {}
+          if (typeof applyToken === 'function') {
+            applyToken(tok);
+            if (typeof loadPersonas === 'function') loadPersonas();
+          }
+        })(${JSON.stringify(adminToken)})
+      `).catch(() => {});
+      return; // nothing else applies to admin pages
+    }
+
+    // ── Below: non-gateway, active-tab-only operations ─────────────────────
+    if (!url || url === 'about:blank') return;
     if (view !== tabs[activeTabId]?.view) return;
+
+    // ── Addon re-injection (SPA-safe: 200 ms / 1 s / 3 s) ─────────────────
+    // For SPAs (React, Vue, etc.) elements render AFTER did-finish-load, so
+    // we re-run at staggered delays to ensure the addon catches late DOM.
+    if (gatewayReady) {
+      const _addonUrl = url;
+      function _reInjectAddons(delay) {
+        setTimeout(() => {
+          // Guard: view may have navigated away during the delay
+          const currentUrl = view.webContents.getURL();
+          if (currentUrl !== _addonUrl) return;
+          http.get(`${GATEWAY_ORIGIN}/tab/active-addons`, res => {
+            let _addonData = '';
+            res.on('data', d => { _addonData += d; });
+            res.on('end', async () => {
+              try {
+                const addons = JSON.parse(_addonData);
+                if (!Array.isArray(addons) || addons.length === 0) return;
+                for (const addon of addons) {
+                  if (addon.url_pattern && !currentUrl.includes(addon.url_pattern)) {
+                    console.log(`[addon] skip "${addon.name}" — url_pattern "${addon.url_pattern}" not in ${currentUrl}`);
+                    continue;
+                  }
+                  try {
+                    // Execute addon.code_js directly — avoids CodeQL js/improper-code-sanitization (CWE-116).
+                    await view.webContents.executeJavaScript(addon.code_js);
+                    console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
+                  } catch (err) {
+                    console.error(`[addon] re-inject "${addon.name}" CRASHED:`, err.message);
+                  }
+                }
+              } catch (e) {
+                console.error('[active-addons] parse error:', e.message);
+              }
+            });
+          }).on('error', () => {});
+        }, delay);
+      }
+      _reInjectAddons(200);
+      _reInjectAddons(1000);
+      _reInjectAddons(3000);
+    }
+
+    // ── Tab snapshot push ──────────────────────────────────────────────────
+    // Pushes the current page HTML to the gateway so the AI chat always has
+    // fresh context when the user enables "Page" context.
     try {
       const html  = await view.webContents.executeJavaScript('document.documentElement.outerHTML').catch(() => '');
       const title = view.webContents.getTitle();
@@ -903,7 +895,7 @@ function switchTab(id, win = mainWin) {
     const wc2 = tabs[activeTabId]?.view.webContents;
     if (wc2) {
       notifyChrome('url-changed', { id: activeTabId, url: wc2.getURL() });
-      notifyChrome('nav-state', { id: activeTabId, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
+      notifyChrome('nav-state', { id: activeTabId, canGoBack: wc2.navigationHistory.canGoBack(), canGoForward: wc2.navigationHistory.canGoForward() });
     }
     notifyTabsUpdated();
     return;
@@ -919,7 +911,7 @@ function switchTab(id, win = mainWin) {
   tab.view.webContents.focus();
   const wc = tab.view.webContents;
   notifyChrome('url-changed', { id, url: wc.getURL() });
-  notifyChrome('nav-state', { id, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+  notifyChrome('nav-state', { id, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
   notifyTabsUpdated();
 
   // Push a fresh snapshot for the newly-active tab so "Page" context always
@@ -1193,8 +1185,8 @@ function registerIPC() {
   });
 
   // Back / Forward / Reload / Stop
-  ipcMain.handle('go-back',    () => tabs[activeTabId]?.view.webContents.goBack());
-  ipcMain.handle('go-forward', () => tabs[activeTabId]?.view.webContents.goForward());
+  ipcMain.handle('go-back',    () => tabs[activeTabId]?.view.webContents.navigationHistory.goBack());
+  ipcMain.handle('go-forward', () => tabs[activeTabId]?.view.webContents.navigationHistory.goForward());
   ipcMain.handle('reload',     () => tabs[activeTabId]?.view.webContents.reload());
   ipcMain.handle('stop',       () => tabs[activeTabId]?.view.webContents.stop());
 
@@ -1441,8 +1433,9 @@ function registerIPC() {
   let _tabsPopup = null;
 
   function _closeTabsPopup() {
-    if (_tabsPopup && !_tabsPopup.isDestroyed()) { _tabsPopup.close(); }
-    _tabsPopup = null;
+    const w = _tabsPopup;
+    _tabsPopup = null;         // null first so the blur-timer callback is a no-op
+    if (w && !w.isDestroyed()) w.destroy(); // destroy (not close) avoids Linux GTK re-entrant signal
   }
 
   ipcMain.handle('show-inactive-tabs-popup', (_, { tabs, btnRect }) => {
@@ -1910,8 +1903,8 @@ function buildAppMenu() {
     {
       label: 'History',
       submenu: [
-        { label: 'Back',    accelerator: 'Alt+Left',  click: () => tabs[activeTabId]?.view.webContents.goBack() },
-        { label: 'Forward', accelerator: 'Alt+Right', click: () => tabs[activeTabId]?.view.webContents.goForward() },
+        { label: 'Back',    accelerator: 'Alt+Left',  click: () => tabs[activeTabId]?.view.webContents.navigationHistory.goBack() },
+        { label: 'Forward', accelerator: 'Alt+Right', click: () => tabs[activeTabId]?.view.webContents.navigationHistory.goForward() },
       ],
     },
     {
@@ -1977,6 +1970,12 @@ function createMainWindow() {
   });
 
   mainWin.loadFile(path.join(__dirname, 'src', 'browser.html'));
+  // Each BrowserView (tab) causes Electron to internally attach a 'closed'
+  // listener to the host BrowserWindow so it can clean up when the window
+  // is destroyed.  With many tabs this exceeds Node's default limit of 10.
+  // Raise it to 100 (one per potential tab) to silence the false-positive
+  // MaxListenersExceededWarning without hiding real leaks.
+  mainWin.setMaxListeners(100);
 
   mainWin.once('ready-to-show', () => {
     mainWin.show();
