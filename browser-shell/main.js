@@ -514,10 +514,23 @@ function _isBlockedURL(urlStr) {
  * Returns the tab id.
  */
 function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
-  // Si l'URL est un Admin Hub et qu'un tel onglet existe déjà, basculer dessus.
+  // The Admin Hub index page is a singleton — if one is already open, switch to it.
+  // Other /ui/ sub-pages (chat, canvas, memory, etc.) are NOT singletons and should
+  // always open as a fresh tab (or switch to themselves if the same exact URL is open).
   if (url.startsWith(GATEWAY_ORIGIN + '/ui/')) {
-    const existing = _existingAdminHubId();
-    if (existing !== null) { switchTab(existing, win); return existing; }
+    const isHubIndex = /\/ui\/?(?:index\.html)?(?:[?#]|$)/.test(url);
+    if (isHubIndex) {
+      // Switch to the existing hub tab if any
+      const existing = _existingAdminHubId();
+      if (existing !== null) { switchTab(existing, win); return existing; }
+    } else {
+      // For other admin pages, only deduplicate against the exact same URL
+      const existing = Object.values(tabs).find(t =>
+        !t.view.webContents.isDestroyed() &&
+        (t.view.webContents.getURL() || '') === url
+      );
+      if (existing) { switchTab(existing.id, win); return existing.id; }
+    }
   }
   const id   = nextTabId++;
   const view = new BrowserView({
@@ -742,7 +755,15 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   });
 
   tabs[id] = { id, view };
-  tabOrder.push(id);
+  // Admin hub pages always go to the left of regular internet tabs.
+  if (url.startsWith(GATEWAY_ORIGIN + '/ui/')) {
+    const firstRegIdx = tabOrder.findIndex(tid =>
+      !(tabs[tid]?.view?.webContents?.getURL() || '').startsWith(GATEWAY_ORIGIN + '/ui/')
+    );
+    tabOrder.splice(firstRegIdx === -1 ? tabOrder.length : firstRegIdx, 0, id);
+  } else {
+    tabOrder.push(id);
+  }
   switchTab(id, win);
   return id;
 }
@@ -811,6 +832,9 @@ function switchTab(id, win = mainWin) {
   activeTabId = id;
   win.addBrowserView(tab.view);
   tab.view.setBounds(tabBounds(win));
+  // Give the BrowserView OS focus so wheel/scroll events reach it on Linux
+  // (on Linux, scroll events follow keyboard focus rather than cursor position).
+  tab.view.webContents.focus();
   const wc = tab.view.webContents;
   notifyChrome('url-changed', { id, url: wc.getURL() });
   notifyChrome('nav-state', { id, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
@@ -845,9 +869,6 @@ function switchTab(id, win = mainWin) {
 function closeTab(id, win = mainWin) {
   const tab = tabs[id];
   if (!tab) return;
-  // Admin Hub tabs are pinned — cannot be closed
-  const _tabUrl = tab.view.webContents.isDestroyed() ? '' : (tab.view.webContents.getURL() || '');
-  if (_tabUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
   // Remove pair if the closing tab was part of one
   const closingPair = getPairOf(id);
   if (closingPair) {
@@ -864,6 +885,14 @@ function closeTab(id, win = mainWin) {
     createTab(NEW_TAB_URL, win);
     return;
   }
+
+  // If no admin hub tabs remain, reopen the index so the user always has one.
+  const hasAdminTab = Object.values(tabs).some(t =>
+    !t.view.webContents.isDestroyed() &&
+    (t.view.webContents.getURL() || '').startsWith(GATEWAY_ORIGIN + '/ui/')
+  );
+  if (!hasAdminTab) createTab(HOME_URL, win);
+
   if (activeTabId === id) {
     const remaining = tabOrder.filter(x => tabs[x]);
     switchTab(remaining[remaining.length - 1] ?? remaining[0], win);
@@ -942,21 +971,18 @@ function registerIPC() {
     notifyTabsUpdated();
   });
 
-  // Reorder tabs by drag-and-drop
+  // Reorder tabs by drag-and-drop.
+  // Zone rule: admin hub tabs stay left of regular tabs and vice-versa.
   ipcMain.handle('reorder-tab', (_, dragId, targetId) => {
-    // Admin Hub is always pinned at position 0 — it cannot be moved
-    const adminId  = _existingAdminHubId();
-    if (dragId === adminId) return;
+    const from = tabOrder.indexOf(dragId);
+    const to   = tabOrder.indexOf(targetId);
+    if (from === -1 || to === -1 || from === to) return;
 
-    const from     = tabOrder.indexOf(dragId);
-    let   to       = tabOrder.indexOf(targetId);
-    if (from === -1 || to === -1) return;
+    const isAdminUrl = (id) =>
+      (tabs[id]?.view?.webContents?.getURL() || '').startsWith(GATEWAY_ORIGIN + '/ui/');
+    // Prevent dragging across zone boundary
+    if (isAdminUrl(dragId) !== isAdminUrl(targetId)) return;
 
-    // Clamp: never allow a tab to be placed before the Admin Hub
-    const adminPos = adminId ? tabOrder.indexOf(adminId) : -1;
-    if (adminPos !== -1 && to <= adminPos) to = adminPos + 1;
-
-    if (from === to) return;
     tabOrder.splice(from, 1);
     tabOrder.splice(to, 0, dragId);
     notifyTabsUpdated();
@@ -1106,30 +1132,24 @@ function registerIPC() {
     });
   });
 
-  ipcMain.handle('reorder-tab', (_, { fromId, toId }) => {
-    const fi = tabOrder.indexOf(fromId);
-    const ti = tabOrder.indexOf(toId);
-    if (fi === -1 || ti === -1 || fi === ti) return;
-    tabOrder.splice(fi, 1);
-    // Re-find ti after removal since index may have shifted
-    const newTi = tabOrder.indexOf(toId);
-    tabOrder.splice(newTi, 0, fromId);
-    notifyTabsUpdated();
-  });
-
   ipcMain.handle('get-gateway-status', () => ({
     ready: gatewayReady,
     origin: GATEWAY_ORIGIN,
     pid: gatewayProcess?.pid ?? null,
   }));
 
-  // Navigate active tab to the Intelli admin hub
+  // Navigate to the Intelli admin hub index.
+  // Looks for an existing index tab first; if none, opens a new one.
   ipcMain.handle('go-home', () => {
-    const existing = _existingAdminHubId();
-    if (existing !== null) {
-      switchTab(existing);
+    const indexTab = Object.values(tabs).find(t => {
+      if (t.view.webContents.isDestroyed()) return false;
+      const u = t.view.webContents.getURL() || '';
+      return /\/ui\/?(?:index\.html)?(?:[?#]|$)/.test(u);
+    });
+    if (indexTab) {
+      switchTab(indexTab.id);
     } else {
-      tabs[activeTabId]?.view.webContents.loadURL(HOME_URL);
+      createTab(HOME_URL);
     }
   });
 

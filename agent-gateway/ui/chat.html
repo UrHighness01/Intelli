@@ -1889,8 +1889,8 @@
     function openCanvas() {
       // Open canvas in a new tab (Electron tab via IPC, or plain window.open fallback)
       const url = `${GW}/ui/canvas.html`;
-      if (window.intelliAPI?.newTab) {
-        window.intelliAPI.newTab(url);
+      if (window.electronAPI?.newTab) {
+        window.electronAPI.newTab(url);
       } else {
         window.open(url, '_blank');
       }
@@ -1898,8 +1898,8 @@
 
     function openMemory() {
       const url = `${GW}/ui/memory.html`;
-      if (window.intelliAPI?.newTab) {
-        window.intelliAPI.newTab(url);
+      if (window.electronAPI?.newTab) {
+        window.electronAPI.newTab(url);
       } else {
         window.open(url, '_blank');
       }

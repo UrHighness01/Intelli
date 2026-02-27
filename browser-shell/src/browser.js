@@ -38,7 +38,7 @@ const $gwDot   = document.getElementById('gw-dot');
 /* ── Tab rendering ──────────────────────────────────────────────── */
 function _makeTabSide(t) {
   const isAdminHub = t.url && t.url.startsWith('http://127.0.0.1:8080/ui/');
-  const displayTitle = isAdminHub ? '⚙ Admin Hub' : (t.title || t.url || 'New Tab');
+  const displayTitle = isAdminHub ? ('⚙ ' + (t.title || 'Admin Hub')) : (t.title || t.url || 'New Tab');
   const side = document.createElement('div');
   side.className = 'split-side';
   side.dataset.id = t.id;
@@ -223,14 +223,14 @@ function renderTabs(tabs) {
 
     const isAdminHub = t.url && t.url.startsWith('http://127.0.0.1:8080/ui/');
     if (isAdminHub) el.classList.add('admin-hub');
-    const displayTitle = isAdminHub ? '⚙ Admin Hub' : (t.title || t.url || 'New Tab');
+    const displayTitle = isAdminHub ? ('⚙ ' + (t.title || 'Admin Hub')) : (t.title || t.url || 'New Tab');
 
     const title = document.createElement('span');
     title.className = 'tab-title';
     title.textContent = displayTitle;
 
     const close = document.createElement('span');
-    close.className = 'tab-close' + (isAdminHub ? ' hidden' : '');
+    close.className = 'tab-close';
     close.textContent = '×';
     close.title = 'Close tab';
     close.addEventListener('click', e => {
@@ -255,23 +255,25 @@ function renderTabs(tabs) {
     el.append(fav, title, muteIcon, close);
     el.addEventListener('click', () => window.electronAPI.switchTab(t.id));
     if (isAdminHub) el.addEventListener('dblclick', e => { e.stopPropagation(); window.electronAPI.newTab(); });
+    // Right-click → native OS context menu (renders above BrowserViews)
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      window.electronAPI.showTabCtx(t.id, t.url || '', _chromGroups);
+    });
 
-    if (!isAdminHub) {
-      el.draggable = true;
-      el.addEventListener('dragstart', e => {
-        _dragTabId = t.id;
-        e.dataTransfer.effectAllowed = 'move';
-        requestAnimationFrame(() => el.classList.add('dragging'));
-      });
-      el.addEventListener('dragend', () => {
-        el.classList.remove('dragging');
-        _dragTabId = null;
-        $tabs.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
-      });
-    }
+    el.draggable = true;
+    el.addEventListener('dragstart', e => {
+      _dragTabId = t.id;
+      e.dataTransfer.effectAllowed = 'move';
+      requestAnimationFrame(() => el.classList.add('dragging'));
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      _dragTabId = null;
+      $tabs.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
+    });
     el.addEventListener('dragover', e => {
       if (_dragTabId === null || _dragTabId === t.id) return;
-      if (isAdminHub) return;   // Admin Hub is pinned — not a valid drop target
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       el.classList.add('drag-over');
@@ -280,32 +282,10 @@ function renderTabs(tabs) {
     el.addEventListener('drop', e => {
       e.preventDefault();
       el.classList.remove('drag-over');
-      if (!isAdminHub && _dragTabId !== null && _dragTabId !== t.id) {
+      if (_dragTabId !== null && _dragTabId !== t.id) {
         window.electronAPI.reorderTab(_dragTabId, t.id);
       }
       _dragTabId = null;
-    });
-
-    // ── Drag-to-reorder ────────────────────────────────────────────────
-    el.draggable = true;
-    el.addEventListener('dragstart', e => {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(t.id));
-      el.classList.add('dragging');
-    });
-    el.addEventListener('dragend', () => el.classList.remove('dragging'));
-    el.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drag-over');
-    });
-    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-    el.addEventListener('drop', e => {
-      e.preventDefault();
-      el.classList.remove('drag-over');
-      const fromId = Number(e.dataTransfer.getData('text/plain'));
-      const toId   = t.id;
-      if (fromId !== toId) window.electronAPI.reorderTab(fromId, toId);
     });
 
     $tabs.appendChild(el);
@@ -1287,7 +1267,7 @@ document.getElementById('setting-newtab-custom-url')?.addEventListener('keydown'
 });
 
 document.getElementById('setting-open-hub')      ?.addEventListener('click', () => { window.electronAPI.goHome(); closeAllPanels(); });
-document.getElementById('setting-open-addons')   ?.addEventListener('click', () => { window.electronAPI.navigate('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
+document.getElementById('setting-open-addons')   ?.addEventListener('click', () => { window.electronAPI.newTab('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
 document.getElementById('setting-open-downloads') ?.addEventListener('click', () => window.electronAPI.openDownloadsFolder());
 document.getElementById('setting-devtools-page')  ?.addEventListener('click', () => window.electronAPI.toggleDevTools());
 document.getElementById('setting-devtools-chrome')?.addEventListener('click', () => window.electronAPI.toggleChromeDevTools());
