@@ -80,27 +80,75 @@ const CHROME_UA = _osPlatform === 'darwin'
     : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const SEC_CH_UA_PLATFORM = _osPlatform === 'darwin' ? '"macOS"' : _osPlatform === 'win32' ? '"Windows"' : '"Linux"';
 
-// ─── Anti-détection injectable dans le monde principal ───────────────────────
-// Exécuté via executeJavaScript() (monde principal) à chaque dom-ready,
-// did-navigate et did-navigate-in-page.
-// Note: avec contextIsolation:true, window.process/Buffer/global ne sont JAMAIS
-// exposés dans le monde de la page — pas besoin de les supprimer ici.
-// navigator.webdriver est déjà géré par disable-blink-features=AutomationControlled.
+// ─── Anti-detect script injected into every page via executeJavaScript() ──────
+// Runs in the main world on dom-ready / did-navigate / did-navigate-in-page.
+// contextIsolation:true keeps Node globals (process, require, Buffer) out of
+// the page world entirely — no need to delete them here.
+// navigator.webdriver is already undefined via disable-blink-features=AutomationControlled.
+const _navPlatform   = _osPlatform === 'darwin' ? 'MacIntel' : _osPlatform === 'win32' ? 'Win32' : 'Linux x86_64';
+const _webglRenderer = _osPlatform === 'darwin'
+  ? 'ANGLE (Intel, ANGLE Metal Renderer: Intel(R) Iris(TM) Plus Graphics, Unspecified Version)'
+  : _osPlatform === 'win32'
+    ? 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)'
+    : 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)';
 const ANTIDETECT_JS = `(function(){
-  // document.hasFocus() — BrowserView non-focusé retourne false → YouTube le détecte
-  try { Object.defineProperty(document,'hasFocus',{value:()=>true,writable:true,configurable:true}); } catch(_) {}
-  // Compléter window.chrome si absent ou incomplet (Chromium l'expose nativement mais
-  // sans csi() / loadTimes() dans certaines versions d'Electron)
-  try {
-    if(window.chrome && !window.__intel_spoofed__) {
-      const t0 = performance.now ? (performance.timeOrigin + performance.now()) : Date.now();
-      if(!window.chrome.csi) window.chrome.csi = () => ({startE:t0,onloadT:t0+120,pageT:t0+150,tran:15});
-      if(!window.chrome.loadTimes) window.chrome.loadTimes = () => ({commitLoadTime:t0/1000,connectionInfo:'h2',finishDocumentLoadTime:(t0+120)/1000,finishLoadTime:(t0+150)/1000,firstPaintAfterLoadTime:0,firstPaintTime:(t0+80)/1000,navigationType:'Other',npnNegotiatedProtocol:'h2',requestTime:t0/1000,startLoadTime:t0/1000,wasAlternateProtocolAvailable:false,wasFetchedViaSpdy:true,wasNpnNegotiated:true});
-      if(!window.chrome.runtime) window.chrome.runtime={id:undefined,connect:()=>{},sendMessage:()=>{},onConnect:{addListener:()=>{},removeListener:()=>{}},onMessage:{addListener:()=>{},removeListener:()=>{}}};
-      if(!window.chrome.app) window.chrome.app={isInstalled:false,getDetails:()=>null,getIsInstalled:()=>false,runningState:()=>'cannot_run'};
-      window.__intel_spoofed__ = true;
+  // 1. navigator.webdriver
+  try{Object.defineProperty(navigator,'webdriver',{get:()=>undefined,configurable:true});}catch(_){}
+  // 2. navigator.platform — must match real OS
+  try{Object.defineProperty(navigator,'platform',{get:()=>'${_navPlatform}',configurable:true});}catch(_){}
+  // 3. navigator.languages / language — match Accept-Language header
+  try{Object.defineProperty(navigator,'languages',{get:()=>['en-US','en'],configurable:true});}catch(_){}
+  try{Object.defineProperty(navigator,'language',{get:()=>'en-US',configurable:true});}catch(_){}
+  // 4. navigator.hardwareConcurrency + deviceMemory
+  try{Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>8,configurable:true});}catch(_){}
+  try{Object.defineProperty(navigator,'deviceMemory',{get:()=>8,configurable:true});}catch(_){}
+  // 5. navigator.plugins — Chrome PDF viewer list
+  try{
+    const fp=[{name:'PDF Viewer',filename:'internal-pdf-viewer',description:'Portable Document Format'},{name:'Chrome PDF Viewer',filename:'internal-pdf-viewer',description:''},{name:'Chromium PDF Viewer',filename:'internal-pdf-viewer',description:''}];
+    const arr=fp.map(p=>{const pl=Object.create(Plugin?Plugin.prototype:{});['name','filename','description'].forEach(k=>Object.defineProperty(pl,k,{value:p[k],enumerable:true}));return pl;});
+    arr.item=i=>arr[i];arr.namedItem=n=>arr.find(p=>p.name===n)||null;arr.refresh=()=>{};
+    Object.defineProperty(arr,'length',{value:fp.length});
+    Object.defineProperty(navigator,'plugins',{get:()=>arr,configurable:true});
+  }catch(_){}
+  // 6. document.hasFocus — BrowserView without focus returns false
+  try{Object.defineProperty(document,'hasFocus',{value:()=>true,writable:true,configurable:true});}catch(_){}
+  // 7. window.chrome — full object real Chrome exposes
+  try{
+    if(!window.__intelli_spoofed__){
+      const t0=performance.timeOrigin+performance.now();
+      window.chrome=window.chrome||{};
+      window.chrome.csi=()=>({startE:t0,onloadT:t0+120,pageT:t0+150,tran:15});
+      window.chrome.loadTimes=()=>({commitLoadTime:t0/1000,connectionInfo:'h2',finishDocumentLoadTime:(t0+120)/1000,finishLoadTime:(t0+150)/1000,firstPaintAfterLoadTime:0,firstPaintTime:(t0+80)/1000,navigationType:'Other',npnNegotiatedProtocol:'h2',requestTime:t0/1000,startLoadTime:t0/1000,wasAlternateProtocolAvailable:false,wasFetchedViaSpdy:true,wasNpnNegotiated:true});
+      if(!window.chrome.runtime)window.chrome.runtime={id:undefined,connect:()=>{},sendMessage:()=>{},onConnect:{addListener:()=>{},removeListener:()=>{}},onMessage:{addListener:()=>{},removeListener:()=>{}}};
+      if(!window.chrome.app)window.chrome.app={isInstalled:false,getDetails:()=>null,getIsInstalled:()=>false,runningState:()=>'cannot_run'};
+      window.__intelli_spoofed__=true;
     }
-  } catch(_) {}
+  }catch(_){}
+  // 8. WebGL renderer — D3D11 string on Linux = instant automation flag
+  try{
+    const patchGL=Ctx=>{
+      if(!Ctx)return;
+      const orig=Ctx.prototype.getParameter;
+      Ctx.prototype.getParameter=function(p){
+        if(p===37445)return'Google Inc. (Intel)';
+        if(p===37446)return'${_webglRenderer}';
+        return orig.call(this,p);
+      };
+    };
+    patchGL(WebGLRenderingContext);patchGL(WebGL2RenderingContext);
+  }catch(_){}
+  // 9. Permissions API
+  try{
+    const orig=navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.__proto__.query=p=>{
+      if(p.name==='notifications')return Promise.resolve({state:'default',onchange:null});
+      if(['camera','microphone','geolocation'].includes(p.name))return Promise.resolve({state:'prompt',onchange:null});
+      return orig(p).catch(()=>Promise.resolve({state:'prompt',onchange:null}));
+    };
+  }catch(_){}
+  // 10. outerWidth / outerHeight
+  try{Object.defineProperty(window,'outerWidth',{get:()=>window.innerWidth,configurable:true});}catch(_){}
+  try{Object.defineProperty(window,'outerHeight',{get:()=>window.innerHeight+74,configurable:true});}catch(_){}
 })();`;
 
 // ─── Gateway process handle ───────────────────────────────────────────────────
@@ -565,10 +613,12 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   const view = new BrowserView({
     webPreferences: {
       nodeIntegration:  false,
-      contextIsolation: false,   // must be false so preload-page can override navigator.*
-      sandbox:          false,   // preload-page.js needs non-sandboxed context
+      contextIsolation: true,   // MUST be true — keeps Node globals out of page world
+      sandbox:          true,   // full sandbox — no Node in page renderer
       webviewTag:       false,
-      preload:          path.join(__dirname, 'preload-page.js'),
+      // No preload: with contextIsolation:true a preload runs in an isolated
+      // context and cannot override page-visible navigator.* properties.
+      // All anti-detect overrides run via executeJavaScript() (main world) below.
     },
   });
 
