@@ -172,13 +172,14 @@ def _scrub_audit_details(obj: object) -> object:
 
 def _audit(event: str, details: dict, actor: str = None):
     try:
-        key = _audit_key()
-        # When no encryption key is configured, scrub sensitive-named fields
-        # from the audit entry before writing cleartext to prevent clear-text
-        # storage of credentials or tokens (CWE-312).
-        safe_details = details if key else _scrub_audit_details(details)
+        # Always scrub sensitive-named fields BEFORE building the entry so that
+        # no taint path from user-supplied sensitive data ever reaches the file
+        # write — regardless of whether AES-GCM encryption is also applied
+        # (CWE-312 / CodeQL py/clear-text-storage-sensitive-data).
+        safe_details = _scrub_audit_details(details)
         entry = {'ts': datetime.now(timezone.utc).isoformat(), 'event': event, 'actor': actor, 'details': safe_details}
         json_line = json.dumps(entry, ensure_ascii=False)
+        key = _audit_key()
         if key:
             json_line = _encrypt_audit_line(json_line, key)
         with AUDIT_PATH.open('a', encoding='utf-8') as f:

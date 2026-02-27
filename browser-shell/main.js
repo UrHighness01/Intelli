@@ -785,8 +785,12 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
                   continue;
                 }
                 try {
-                  // Wrap in try/catch so JS errors surface as real messages
-                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] ${addon.name.replace(/'/g, "\\'")}:', e.message, e.stack);}})();`;
+                  // Use JSON.stringify for the addon name so ALL special characters
+                  // are fully escaped inside the generated JS code (CWE-116 / CodeQL
+                  // js/incomplete-string-escaping). JSON.stringify handles \, ", ', `,
+                  // ${...}, and newlines — .replace(/'/g,...) is incomplete by contrast.
+                  const nameJson = JSON.stringify(addon.name || '');
+                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] '+${nameJson}+':', e.message, e.stack);}})();`;
                   await view.webContents.executeJavaScript(wrapped);
                   console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
                 } catch (err) {
@@ -1817,8 +1821,12 @@ function registerIPC() {
 
           for (const item of items) {
             try {
-              // Wrap in try/catch so JS errors surface in the log rather than crashing silently
-              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] ${(item.name||'').replace(/'/g,"\\'")}:', e.message);}})();`;
+              // Use JSON.stringify for the addon name so ALL special characters
+              // are fully escaped inside the generated JS code (CWE-116 / CodeQL
+              // js/incomplete-string-escaping). JSON.stringify handles \, ", ', `,
+              // ${...}, and newlines — .replace(/'/g,...) is incomplete by contrast.
+              const nameJson = JSON.stringify(item.name || '');
+              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] '+${nameJson}+':', e.message);}})();`;
               await tab.view.webContents.executeJavaScript(wrapped);
               console.log(`[addon] injected "${item.name}" into ${url}`);
             } catch (err) {
