@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   duplicateTab:  (id)            => ipcRenderer.invoke('duplicate-tab', id),
   /** Swap left/right sides of the active split pair (drag-to-swap in tab bar). */
   swapSplitSides: (tabId) => ipcRenderer.invoke('swap-split-sides', tabId),
+  /** Update the split pane ratio (0.15 – 0.85). tabId = left tab's id. */
+  setSplitRatio:  (tabId, ratio) => ipcRenderer.invoke('set-split-ratio', { tabId, ratio }),
   /** Show native OS context menu for a tab (renders above BrowserViews). */
   showTabCtx:    (tabId, tabUrl, groups) => ipcRenderer.invoke('show-tab-ctx', { tabId, tabUrl, groups: groups || [] }),
   /** Show native OS context menu for a tab group chip (renders above BrowserViews). */
@@ -90,6 +92,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Panel visibility (tells main to shrink the BrowserView) ──────────────
   setPanelVisible: (isOpen) => ipcRenderer.invoke('panel-visible', isOpen),
+  itaOpen:         (isOpen) => ipcRenderer.invoke('ita-open', isOpen),
 
   // ── Events from main → renderer (panels + misc) ───────────────────────────
   onOpenPanel:           (cb) => ipcRenderer.on('open-panel',            (_, name) => cb(name)),

@@ -76,6 +76,10 @@
     <button class="nav-btn" id="btn-sidebar"
             title="AI Chat sidebar (Ctrl+Shift+A)" aria-label="Toggle AI Chat sidebar">&#9776;</button>
 
+    <!-- Onglets inactifs button -->
+    <button id="btn-tab-groups" class="nav-btn hidden" tabindex="-1"
+            title="Onglets inactifs (Ctrl+Shift+G)">&#128564;<span id="tg-badge" class="tg-badge" style="display:none">0</span></button>
+
     <!-- three-dot menu -->
     <button class="nav-btn" id="btn-app-menu"
             title="Intelli menu">&#8942;</button>
@@ -261,6 +265,29 @@
     <div class="settings-row">
       <span>Intelli Addon Manager</span>
       <button id="devaddon-mgr-btn" class="btn-primary">Open</button>
+    </div>
+  </div>
+
+  <!-- ── Onglets inactifs dropdown ─────────────────────────────── -->
+  <div id="panel-inactive-tabs" class="hidden">
+    <div class="ita-header">
+      <div class="ita-header-left">
+        <span class="ita-header-icon">&#128564;</span>
+        <div>
+          <span class="ita-title">Onglets inactifs</span>
+          <span class="ita-subtitle" id="ita-subtitle">0 onglet inactif</span>
+        </div>
+      </div>
+      <button class="ita-close-btn" id="inactive-panel-close">&#10005;</button>
+    </div>
+    <div class="ita-search-wrap">
+      <input id="ita-search" class="ita-search" type="search"
+             placeholder="&#128269; Filtrer les onglets&#8230;" autocomplete="off" />
+    </div>
+    <div id="tg-panel-list" class="tg-list"></div>
+    <div class="ita-footer">
+      <button id="tg-panel-restore-all" class="btn-secondary ita-footer-btn">&#8629; Tout restaurer</button>
+      <button id="tg-panel-clear-all"   class="btn-danger ita-footer-btn">&#128465; Tout supprimer</button>
     </div>
   </div>
 

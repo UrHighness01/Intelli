@@ -201,6 +201,7 @@ let sidebarOpen = false;
 // When a panel is open we must shrink the active BrowserView so the panel
 // is not hidden underneath it (BrowserViews render above the chrome DOM).
 let panelVisible = false;
+let itaOpen      = false;  // ITA dropdown open — pans BrowserView left (no reflow)
 let bookmarksBarVisible = (_startSettings.bookmarksBar !== false); // default true
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -368,15 +369,32 @@ function sidebarBounds(win) {
   return { x: Math.max(0, w - SIDEBAR_WIDTH), y: ch, width: SIDEBAR_WIDTH, height: Math.max(0, h - ch) };
 }
 
-/** Bounds for the right-hand BrowserView in split mode. */
-function splitRightBounds(win) {
+/** Bounds for the left BrowserView in split mode (respects per-pair ratio). */
+function splitLeftBounds(pair, win) {
   const [w, h] = win.getContentSize();
   const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
   const panelW = panelVisible ? PANEL_WIDTH   : 0;
   const totalW = Math.max(0, w - sideW - panelW);
-  const half   = Math.floor(totalW / 2);
+  const ratio  = (pair && pair.ratio != null) ? pair.ratio : 0.5;
   const ch = chromeH();
-  return { x: half + 1, y: ch, width: totalW - half - 1, height: Math.max(0, h - ch) };
+  const leftW  = Math.floor(totalW * ratio);
+  return { x: 0, y: ch, width: leftW, height: Math.max(0, h - ch) };
+}
+
+/** Bounds for the right-hand BrowserView in split mode (respects per-pair ratio). */
+function splitRightBounds(pairOrWin, win) {
+  // Legacy single-arg call: splitRightBounds(win) — look up active pair
+  let pair, theWin;
+  if (win === undefined) { theWin = pairOrWin; pair = getActivePair(); }
+  else                   { pair = pairOrWin;   theWin = win;           }
+  const [w, h] = theWin.getContentSize();
+  const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
+  const panelW = panelVisible ? PANEL_WIDTH   : 0;
+  const totalW = Math.max(0, w - sideW - panelW);
+  const ratio  = (pair && pair.ratio != null) ? pair.ratio : 0.5;
+  const ch = chromeH();
+  const leftW  = Math.floor(totalW * ratio);
+  return { x: leftW + 2, y: ch, width: totalW - leftW - 2, height: Math.max(0, h - ch) };
 }
 
 // ── Split-pairs helpers ───────────────────────────────────────────────────────
@@ -391,6 +409,19 @@ function getActivePair() {
 }
 
 /**
+ * Returns the webContents for navigation commands.
+ * In split mode, routes to the focused side; otherwise to the active tab.
+ */
+function getNavWebContents() {
+  const pair = getActivePair();
+  if (pair) {
+    const fid = pair.focusedId || pair.leftId;
+    return tabs[fid]?.view.webContents;
+  }
+  return tabs[activeTabId]?.view.webContents;
+}
+
+/**
  * Internal: show a split pair side-by-side, pausing all other pairs.
  * Sets activeTabId to pair.leftId.
  */
@@ -398,14 +429,15 @@ function _showPair(pair, win = mainWin) {
   for (const p of splitPairs) if (p !== pair) p.paused = true;
   pair.paused = false;
   activeTabId = pair.leftId;
+  if (!pair.focusedId) pair.focusedId = pair.leftId;
   for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
   const lt = tabs[pair.leftId];
   const rt = tabs[pair.rightId];
   if (lt && rt) {
     win.addBrowserView(lt.view);
     win.addBrowserView(rt.view);
-    lt.view.setBounds(tabBounds(win));
-    rt.view.setBounds(splitRightBounds(win));
+    lt.view.setBounds(splitLeftBounds(pair, win));
+    rt.view.setBounds(splitRightBounds(pair, win));
   }
   notifyChrome('split-changed', { splitTabId: pair.rightId });
 }
@@ -416,7 +448,7 @@ function enterSplit(id, win = mainWin) {
   // Pause any currently visible pair
   const ap = getActivePair();
   if (ap) ap.paused = true;
-  const pair = { leftId: activeTabId, rightId: id, paused: false };
+  const pair = { leftId: activeTabId, rightId: id, paused: false, ratio: 0.5, focusedId: activeTabId };
   splitPairs.push(pair);
   _showPair(pair, win);
   notifyTabsUpdated();
@@ -573,7 +605,10 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   });
 
   view.webContents.on('did-navigate', (_, navUrl) => {
-    if (activeTabId === id) {
+    const _ap = getActivePair();
+    const _isFocused = id === activeTabId ||
+      (_ap && (_ap.focusedId === id || (!_ap.focusedId && id === _ap.leftId)));
+    if (_isFocused) {
       notifyChrome('url-changed', { id, url: navUrl });
       notifyChrome('nav-state', {
         id,
@@ -591,7 +626,10 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
     }
   });
   view.webContents.on('did-navigate-in-page', (_, navUrl) => {
-    if (activeTabId === id) {
+    const _ap2 = getActivePair();
+    const _isFocused2 = id === activeTabId ||
+      (_ap2 && (_ap2.focusedId === id || (!_ap2.focusedId && id === _ap2.leftId)));
+    if (_isFocused2) {
       notifyChrome('url-changed', { id, url: navUrl });
       notifyChrome('nav-state', {
         id,
@@ -794,34 +832,25 @@ function switchTab(id, win = mainWin) {
   const activePair = getActivePair();
 
   if (pair) {
+    // ─── Update which side has URL-bar focus (clicking either side) ──────────
+    pair.focusedId = id;
     if (pair.paused) {
-      // ─── Restore paused pair ───────────────────────────────────────────────
-      // If the right side was clicked, make it the active (left) side
-      if (id === pair.rightId) {
-        const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
-      }
+      // ─── Restore paused pair — show split again without swapping positions ─
       _showPair(pair, win);
-    } else if (id === pair.rightId) {
-      // ─── Swap sides in the active pair ────────────────────────────────────
-      const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
-      activeTabId = pair.leftId;
-      const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
-      if (lt && rt) {
-        win.addBrowserView(lt.view); win.addBrowserView(rt.view);
-        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
-      } else { exitSplitForTab(id, win); }
     } else {
-      // ─── Clicked active left — refresh bounds ─────────────────────────────
+      // ─── Pair is active — just refresh bounds with updated focus ──────────
       const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
       if (lt && rt) {
         win.addBrowserView(lt.view); win.addBrowserView(rt.view);
-        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
+        lt.view.setBounds(splitLeftBounds(pair, win));
+        rt.view.setBounds(splitRightBounds(pair, win));
       }
     }
-    const wc2 = tabs[activeTabId]?.view.webContents;
+    const focusedId = pair.focusedId || pair.leftId;
+    const wc2 = tabs[focusedId]?.view.webContents;
     if (wc2) {
-      notifyChrome('url-changed', { id: activeTabId, url: wc2.getURL() });
-      notifyChrome('nav-state', { id: activeTabId, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
+      notifyChrome('url-changed', { id: focusedId, url: wc2.getURL() });
+      notifyChrome('nav-state', { id: focusedId, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
     }
     notifyTabsUpdated();
     return;
@@ -917,13 +946,20 @@ function notifyChrome(channel, payload) {
  */
 function notifyTabsUpdated() {
   const list = tabOrder.filter(id => tabs[id]).map(id => {
-    const t = tabs[id];
+    const t    = tabs[id];
+    const pair = getPairOf(t.id);
     return {
-      id:      t.id,
-      url:     t.view.webContents.getURL(),
-      title:   t.view.webContents.getTitle(),
-      favicon: null,           // favicon updates arrive via separate event
-      active:  t.id === activeTabId,
+      id:          t.id,
+      url:         t.view.webContents.getURL(),
+      title:       t.view.webContents.getTitle(),
+      favicon:     null,  // favicon updates arrive via separate event
+      active:      t.id === activeTabId,
+      // Split pair metadata (used by the tab-bar merged pill)
+      pairId:      pair ? Math.min(pair.leftId, pair.rightId) : null,
+      pairLeft:    pair ? (t.id === pair.leftId) : false,
+      pairPaused:  pair ? pair.paused : false,
+      pairRatio:   pair ? (pair.ratio ?? 0.5) : 0.5,
+      pairFocused: pair ? (pair.focusedId === t.id) : false,
     };
   });
   notifyChrome('tabs-updated', list);
@@ -961,14 +997,27 @@ function registerIPC() {
     if (!pair || pair.paused) return;
     const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
     activeTabId = pair.leftId;
+    pair.focusedId = pair.leftId;
     const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
     if (lt && rt) {
       mainWin.removeBrowserView(lt.view); mainWin.removeBrowserView(rt.view);
       mainWin.addBrowserView(lt.view);    mainWin.addBrowserView(rt.view);
-      lt.view.setBounds(tabBounds(mainWin));
-      rt.view.setBounds(splitRightBounds(mainWin));
+      lt.view.setBounds(splitLeftBounds(pair, mainWin));
+      rt.view.setBounds(splitRightBounds(pair, mainWin));
     }
     notifyTabsUpdated();
+  });
+
+  // Resize split pane — update pair.ratio and recalculate BrowserView bounds
+  ipcMain.handle('set-split-ratio', (_, { tabId, ratio }) => {
+    const pair = getPairOf(tabId);
+    if (!pair || pair.paused) return;
+    pair.ratio = Math.max(0.15, Math.min(0.85, ratio));
+    const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+    if (lt && rt) {
+      lt.view.setBounds(splitLeftBounds(pair, mainWin));
+      rt.view.setBounds(splitRightBounds(pair, mainWin));
+    }
   });
 
   // Reorder tabs by drag-and-drop.
@@ -1093,7 +1142,9 @@ function registerIPC() {
 
   // Navigate active tab
   ipcMain.handle('navigate', (_, url) => {
-    const tab = tabs[activeTabId];
+    const _navPair = getActivePair();
+    const _navId   = _navPair ? (_navPair.focusedId || _navPair.leftId) : activeTabId;
+    const tab = tabs[_navId];
     if (!tab) return;
     // Ensure the URL has a scheme
     let target = url.trim();
@@ -1109,15 +1160,17 @@ function registerIPC() {
     return target;
   });
 
-  // Back / Forward / Reload / Stop
-  ipcMain.handle('go-back',    () => tabs[activeTabId]?.view.webContents.goBack());
-  ipcMain.handle('go-forward', () => tabs[activeTabId]?.view.webContents.goForward());
-  ipcMain.handle('reload',     () => tabs[activeTabId]?.view.webContents.reload());
-  ipcMain.handle('stop',       () => tabs[activeTabId]?.view.webContents.stop());
+  // Back / Forward / Reload / Stop — route to focused split side if in split view
+  ipcMain.handle('go-back',    () => getNavWebContents()?.goBack());
+  ipcMain.handle('go-forward', () => getNavWebContents()?.goForward());
+  ipcMain.handle('reload',     () => getNavWebContents()?.reload());
+  ipcMain.handle('stop',       () => getNavWebContents()?.stop());
 
   // Query current state
   ipcMain.handle('get-active-url', () => {
-    return tabs[activeTabId]?.view.webContents.getURL() || '';
+    const _pair = getActivePair();
+    const _fid  = _pair ? (_pair.focusedId || _pair.leftId) : activeTabId;
+    return tabs[_fid]?.view.webContents.getURL() || '';
   });
 
   ipcMain.handle('get-tabs', () => {
@@ -1336,6 +1389,9 @@ function registerIPC() {
     if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
   });
 
+  // ── ITA dropdown: no-op (popup uses native BrowserWindow alwaysOnTop) ────
+  ipcMain.handle('ita-open', () => { /* unused — native popup handles ITA */ });
+
   // ── Bookmarks bar visibility ──────────────────────────────────────────
   ipcMain.handle('set-bookmarks-bar-visible', (_, v) => {
     bookmarksBarVisible = !!v;
@@ -1375,13 +1431,18 @@ function registerIPC() {
     const footerH = 34;
     const popupH  = Math.min(tabs.length * rowH + footerH + 8, 490);
 
+    // Convert client-relative button coords to screen coords using the main window position
+    const [winX, winY] = mainWin.getPosition();
+    const screenX = winX + Math.round(btnRect.clientX);
+    const screenY = winY + Math.round(btnRect.clientY);
+
     // Position below the button, clamp to screen
-    const display = screen.getDisplayNearestPoint({ x: btnRect.screenX, y: btnRect.screenY });
+    const display = screen.getDisplayNearestPoint({ x: screenX, y: screenY });
     const { x: sx, y: sy, width: sw, height: sh } = display.bounds;
-    let px = Math.round(btnRect.screenX);
-    let py = Math.round(btnRect.screenY + btnRect.height);
+    let px = screenX;
+    let py = screenY + Math.round(btnRect.height) + 4;
     if (px + popupW > sx + sw) px = sx + sw - popupW - 4;
-    if (py + popupH > sy + sh) py = Math.round(btnRect.screenY) - popupH;
+    if (py + popupH > sy + sh) py = screenY - popupH - 4;
 
     _tabsPopup = new BrowserWindow({
       x: px, y: py,
@@ -1481,8 +1542,9 @@ function registerIPC() {
       },
       {
         label: 'History', submenu: [
-          { label: 'Show Full History',    accelerator: 'CmdOrCtrl+H', click: () => notifyChrome('open-panel', 'history') },
-          { label: 'Clear Browsing Data…',                              click: () => notifyChrome('open-panel', 'clear-data') },
+          { label: 'Show Full History',    accelerator: 'CmdOrCtrl+H',         click: () => notifyChrome('open-panel', 'history') },
+          { label: 'Clear Browsing Data…',                                        click: () => notifyChrome('open-panel', 'clear-data') },
+          { label: 'Onglets inactifs',       accelerator: 'CmdOrCtrl+Shift+G',   click: () => notifyChrome('open-panel', 'inactive-tabs') },
         ],
       },
       {
@@ -1901,8 +1963,8 @@ function createMainWindow() {
   function syncBounds() {
     const ap = getActivePair();
     if (ap) {
-      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(tabBounds(mainWin));
-      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(mainWin));
+      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(splitLeftBounds(ap, mainWin));
+      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(ap, mainWin));
     } else {
       const tab = tabs[activeTabId];
       if (tab) tab.view.setBounds(tabBounds(mainWin));

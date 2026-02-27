@@ -127,7 +127,7 @@ function renderTabs(tabs) {
   }
 
   for (const t of tabs) {
-    if (groupedIds.has(t.id)) continue;
+    if (groupedIds.has(t.id)) continue;  // inactive tabs hidden from tab bar
 
     // ── Chrome-style tab group chip (before the first tab of each group) ──────
     const _cgg = _cgGroupOf(t.id);
@@ -154,30 +154,56 @@ function renderTabs(tabs) {
       leftSide.classList.add('split-side-left');
       const divider = document.createElement('span');
       divider.className = 'split-divider';
-      divider.textContent = '│';
       const rightSide = _makeTabSide(rightTab);
       rightSide.classList.add('split-side-right');
 
+      // Apply initial ratio to flex widths for visual sizing
+      const _initRatio = isPaused ? 0.5 : (leftTab.pairRatio ?? 0.5);
+      leftSide.style.flex  = String(_initRatio);
+      rightSide.style.flex = String(1 - _initRatio);
+
       el.append(leftSide, divider, rightSide);
 
-      // Left side click → restore pair (or keep active) with left as focus
+      // Left side click → focus left side (URL bar shows left URL)
       leftSide.addEventListener('click', e => {
         e.stopPropagation();
         window.electronAPI.switchTab(leftTab.id);
       });
-      // Right side click → restore pair (or swap) with right as focus
+      // Right side click → focus right side (URL bar shows right URL, no swap)
       rightSide.addEventListener('click', e => {
         e.stopPropagation();
         window.electronAPI.switchTab(rightTab.id);
       });
-      // Right-click → context menu of the left (active) tab
+      // Right-click → context menu
       el.addEventListener('contextmenu', e => {
         e.preventDefault();
         window.electronAPI.showTabCtx(leftTab.id, leftTab.url || '', _chromGroups);
       });
 
-      // ── Drag-to-swap: glisser un côté vers l'autre pour inverser gauche/droite ──
       if (!isPaused) {
+        // ── Divider drag — slide to resize the split ratio ──────────────────
+        divider.addEventListener('mousedown', e => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          divider.classList.add('split-divider-dragging');
+          const onMove = me => {
+            const totalW = window.innerWidth || document.documentElement.clientWidth;
+            const ratio  = Math.max(0.15, Math.min(0.85, me.clientX / totalW));
+            leftSide.style.flex  = String(ratio);
+            rightSide.style.flex = String(1 - ratio);
+            window.electronAPI.setSplitRatio(leftTab.id, ratio);
+          };
+          const onUp = () => {
+            divider.classList.remove('split-divider-dragging');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+
+        // ── Drag-to-swap: glisser un côté sur l'autre pour inverser gauche/droite ──
         const _setupSplitDrag = (dragSide, dropSide) => {
           dragSide.draggable = true;
           dragSide.addEventListener('dragstart', e => {
@@ -253,6 +279,8 @@ function renderTabs(tabs) {
     }
 
     el.append(fav, title, muteIcon, close);
+    el.addEventListener('mouseenter', () => _scheduleTabPreview(el, t));
+    el.addEventListener('mouseleave', _cancelTabPreview);
     el.addEventListener('click', () => window.electronAPI.switchTab(t.id));
     if (isAdminHub) el.addEventListener('dblclick', e => { e.stopPropagation(); window.electronAPI.newTab(); });
     // Right-click → native OS context menu (renders above BrowserViews)
@@ -481,6 +509,7 @@ document.addEventListener('keydown', e => {
 
   // History
   if (ctrl && e.key === 'h') { e.preventDefault(); openPanel('history'); }
+  if (ctrl && e.shiftKey && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); openPanel('inactive-tabs'); }
 
   // Zoom
   if (ctrl && (e.key === '+' || e.key === '=')) { e.preventDefault(); window.electronAPI.zoomIn().then(refreshZoomIndicator); }
@@ -556,9 +585,9 @@ async function openPanel(name) {
   el.classList.remove('hidden');
   $backdrop.classList.remove('hidden');
   window.electronAPI.setPanelVisible(true);
-  if (name === 'bookmarks')     loadBookmarksPanel();
-  if (name === 'history')       loadHistoryPanel();
-  if (name === 'settings')      { renderTabGroupList(); loadSettingsPanel(); }
+  if (name === 'bookmarks')       loadBookmarksPanel();
+  if (name === 'history')         loadHistoryPanel();
+  if (name === 'settings')        { renderTabGroupList(); loadSettingsPanel(); }
 }
 
 function closeAllPanels() {
@@ -566,6 +595,7 @@ function closeAllPanels() {
     p.classList.add('hidden');
     p.style.visibility = '';
   });
+  document.getElementById('panel-inactive-tabs')?.classList.add('hidden');
   $backdrop.classList.add('hidden');
   _openPanel = null;
   window.electronAPI.setPanelVisible(false);
@@ -573,6 +603,32 @@ function closeAllPanels() {
 
 $backdrop.addEventListener('click', closeAllPanels);
 document.querySelectorAll('.panel-close').forEach(btn => btn.addEventListener('click', closeAllPanels));
+
+// ── Panel onglets inactifs — boutons footer ──────────────────────────────────
+document.getElementById('tg-panel-restore-all')?.addEventListener('click', () => {
+  const all = [..._groupedTabs];
+  _groupedTabs = [];
+  _tgSave();
+  closeAllPanels();
+  (async () => {
+    for (const g of all) {
+      const exists = _tabs.some(t => Number(t.id) === Number(g.id));
+      if (!exists) await window.electronAPI.newTab(g.url || '');
+    }
+    renderTabs(_tabs);
+    renderTabGroupList();
+  })();
+});
+document.getElementById('tg-panel-clear-all')?.addEventListener('click', async () => {
+  const ids = _groupedTabs.map(t => Number(t.id));
+  for (const id of ids) await window.electronAPI.closeTab(id);
+  _groupedTabs = [];
+  _tgSave();
+  renderTabs(_tabs);
+  closeAllPanels();
+  renderTabGroupList();
+});
+document.getElementById('ita-search')?.addEventListener('input', () => _tgFillPanel());
 
 /* ─── Bookmark star ─────────────────────────────────────────────── */
 const $bmStar    = document.getElementById('btn-bookmark-star');
@@ -943,16 +999,24 @@ function _tgRelTime(ts) {
 const $tgBtn   = document.getElementById('btn-tab-groups');
 const $tgBadge = document.getElementById('tg-badge');
 
-$tgBtn?.addEventListener('click', async () => {
+// Open the inactive-tabs native popup (BrowserWindow with alwaysOnTop)
+// so it renders above all BrowserViews without any page disruption.
+$tgBtn?.addEventListener('mousedown', (e) => { e.preventDefault(); }); // prevent focus-on-click
+$tgBtn?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  $tgBtn.blur();
   const rect = $tgBtn.getBoundingClientRect();
-  const btnRect = {
-    screenX: window.screenX + rect.left,
-    screenY: window.screenY + rect.bottom,
-    height:  0,
-    width:   rect.width,
-  };
-  window.electronAPI.showInactiveTabsPopup({ tabs: _groupedTabs, btnRect });
+  window.electronAPI.showInactiveTabsPopup({
+    tabs: _groupedTabs,
+    btnRect: {
+      clientX: rect.left,
+      clientY: rect.top,
+      width:   rect.width,
+      height:  rect.height,
+    },
+  });
 });
+
 
 window.electronAPI.onRestoreInactiveTab(id => {
   console.log('[tgRestore] received id:', id, 'grouped:', JSON.stringify(_groupedTabs.map(t => t.id)));
@@ -1095,10 +1159,27 @@ async function _tgRestoreTab(g, closeUI = true) {
 
 /* Remplit le panel onglets inactifs */
 function _tgFillPanel() {
-  const $list = document.getElementById('tg-panel-list');
+  const $list     = document.getElementById('tg-panel-list');
+  const $subtitle = document.getElementById('ita-subtitle');
+  const $search   = document.getElementById('ita-search');
   if (!$list) return;
+
+  const count = _groupedTabs.length;
+  if ($subtitle) {
+    $subtitle.textContent = count === 0 ? 'Aucun onglet inactif'
+      : count === 1 ? '1 onglet inactif'
+      : `${count} onglets inactifs`;
+  }
+
+  const query = ($search?.value || '').trim().toLowerCase();
+  const items = query
+    ? _groupedTabs.filter(g =>
+        (g.title || '').toLowerCase().includes(query) ||
+        (g.url   || '').toLowerCase().includes(query))
+    : _groupedTabs;
+
   $list.innerHTML = '';
-  for (const g of _groupedTabs) {
+  for (const g of items) {
     $list.appendChild(_tgBuildRow(g));
   }
 }
@@ -1107,10 +1188,14 @@ function _tgFillPanel() {
 function renderTabGroupList() {
   const count = _groupedTabs.length;
 
-  // ── Bouton tab-bar : visible dès que l'option est active ──
+  // ── Bouton tab-bar : visible si feature active OU s'il y a des onglets groupés ──
   if ($tgBtn) {
-    if (_tgEnabled) {
+    if (_tgEnabled || count > 0) {
       $tgBtn.classList.remove('hidden');
+      // Suppress stale :hover that Chromium shows when the button shifts under the cursor
+      // after a DOM reflow without a real mousemove event.
+      $tgBtn.classList.add('no-hover');
+      $tgBtn.addEventListener('mousemove', () => $tgBtn.classList.remove('no-hover'), { once: true });
     } else {
       $tgBtn.classList.add('hidden');
     }
@@ -1121,7 +1206,8 @@ function renderTabGroupList() {
     $tgBadge.style.display = count > 0 ? '' : 'none';
   }
 
-
+  // Refresh panel list if it's open
+  if (_openPanel === 'inactive-tabs') _tgFillPanel();
 }
 
 
@@ -1200,8 +1286,8 @@ setInterval(_tgCheck, 10_000);
 renderTabGroupList();
 
 // Clic droit sur un onglet → "Mettre en onglet inactif"
+// Note: manual grouping always works regardless of _tgEnabled (which only controls auto-grouping timer)
 window.electronAPI.onGroupTab(({ id: rawId, url, title, favicon }) => {
-  if (!_tgEnabled) return;   // feature off — ignore
   const id = Number(rawId);  // always numeric
   if (_groupedTabs.some(g => g.id === id)) return;   // already grouped
   // Use cached favicon from _tabs if main process sent null
