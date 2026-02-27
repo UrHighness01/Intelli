@@ -12,6 +12,8 @@ const {
   shell,
   dialog,
   nativeTheme,
+  nativeImage,
+  screen,
 } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
@@ -26,12 +28,51 @@ const GATEWAY_ORIGIN    = `http://${GATEWAY_HOST}:${GATEWAY_PORT}`;
 const GATEWAY_HEALTH    = `${GATEWAY_ORIGIN}/health`;
 const HOME_URL          = `${GATEWAY_ORIGIN}/ui/`;
 const CHROME_HEIGHT     = 88;   // px — tab bar (36) + address bar (52)
+const BOOKMARKS_BAR_H   = 30;   // px — bookmark bar (shown/hidden)
 const SIDEBAR_WIDTH     = 340;  // px — admin hub sidebar panel
 const PANEL_WIDTH       = 360;  // px — right-side overlay panels (bookmarks, history, etc.)
 const GATEWAY_READY_MS  = 15000;
 const HEALTH_POLL_MS    = 400;
-const NEW_TAB_URL       = `${GATEWAY_ORIGIN}/ui/`;
+// Resolved at startup from settings.json; updated live via IPC.
+const _startSettings = loadSettings();
+let NEW_TAB_URL = _newtabToUrl(_startSettings);
 const SETUP_URL         = `${GATEWAY_ORIGIN}/ui/setup.html`;
+
+// ─── Anti-fingerprint — must be set before app is ready ─────────────────────
+// Removes the flags that tell Google reCAPTCHA / bot-detection we are Electron.
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+app.commandLine.appendSwitch('disable-features', 'AutomationControlled,HardwareMediaKeyHandling,MediaFoundationVideoCapture');
+app.commandLine.appendSwitch('no-first-run');
+app.commandLine.appendSwitch('no-default-browser-check');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('force-color-profile', 'srgb');
+
+// Real Chrome 122 UA string (Electron 29 = Chrome 122). The word "Electron"
+// is removed so sites cannot trivially fingerprint us.
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+// ─── Anti-détection injectable dans le monde principal ───────────────────────
+// Exécuté via executeJavaScript() (monde principal) à chaque dom-ready,
+// did-navigate et did-navigate-in-page.
+// Note: avec contextIsolation:true, window.process/Buffer/global ne sont JAMAIS
+// exposés dans le monde de la page — pas besoin de les supprimer ici.
+// navigator.webdriver est déjà géré par disable-blink-features=AutomationControlled.
+const ANTIDETECT_JS = `(function(){
+  // document.hasFocus() — BrowserView non-focusé retourne false → YouTube le détecte
+  try { Object.defineProperty(document,'hasFocus',{value:()=>true,writable:true,configurable:true}); } catch(_) {}
+  // Compléter window.chrome si absent ou incomplet (Chromium l'expose nativement mais
+  // sans csi() / loadTimes() dans certaines versions d'Electron)
+  try {
+    if(window.chrome && !window.__intel_spoofed__) {
+      const t0 = performance.now ? (performance.timeOrigin + performance.now()) : Date.now();
+      if(!window.chrome.csi) window.chrome.csi = () => ({startE:t0,onloadT:t0+120,pageT:t0+150,tran:15});
+      if(!window.chrome.loadTimes) window.chrome.loadTimes = () => ({commitLoadTime:t0/1000,connectionInfo:'h2',finishDocumentLoadTime:(t0+120)/1000,finishLoadTime:(t0+150)/1000,firstPaintAfterLoadTime:0,firstPaintTime:(t0+80)/1000,navigationType:'Other',npnNegotiatedProtocol:'h2',requestTime:t0/1000,startLoadTime:t0/1000,wasAlternateProtocolAvailable:false,wasFetchedViaSpdy:true,wasNpnNegotiated:true});
+      if(!window.chrome.runtime) window.chrome.runtime={id:undefined,connect:()=>{},sendMessage:()=>{},onConnect:{addListener:()=>{},removeListener:()=>{}},onMessage:{addListener:()=>{},removeListener:()=>{}}};
+      if(!window.chrome.app) window.chrome.app={isInstalled:false,getDetails:()=>null,getIsInstalled:()=>false,runningState:()=>'cannot_run'};
+      window.__intel_spoofed__ = true;
+    }
+  } catch(_) {}
+})();`;
 
 // ─── Gateway process handle ───────────────────────────────────────────────────
 let gatewayProcess  = null;
@@ -60,11 +101,44 @@ try {
 let tabs        = {};
 let tabOrder    = [];   // ordered list of tab IDs — drives the tab bar order
 let activeTabId = null;
+let splitPairs  = [];  // [{ leftId, rightId, paused }] — all active split pairs
 let nextTabId   = 1;
+const tabPreviews = {};  // tabId → data:URL screenshot (captured when tab is grouped)
+let _hoverWin     = null;  // floating preview BrowserWindow (module-scope for cleanup)
+function _closeHoverWin() {
+  if (_hoverWin && !_hoverWin.isDestroyed()) { _hoverWin.destroy(); }
+  _hoverWin = null;
+}
 
 // ─── User-data paths ──────────────────────────────────────────────────────────
 function userDataFile(name) {
   return path.join(app.getPath('userData'), name);
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function loadSettings() {
+  try { return JSON.parse(fs.readFileSync(userDataFile('settings.json'), 'utf8')); }
+  catch { return {}; }
+}
+function saveSettingsData(s) {
+  fs.writeFileSync(userDataFile('settings.json'), JSON.stringify(s, null, 2));
+}
+// Ensures a custom URL has a valid protocol prefix.
+function _normalizeCustomUrl(url) {
+  if (!url) return '';
+  const u = url.trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  return 'https://' + u;
+}
+// Resolves a newtab setting value to a loadable URL.
+function _newtabToUrl(s) {
+  if (s.newtab === 'home')       return 'http://127.0.0.1:8080/ui/';
+  if (s.newtab === 'google')     return 'https://www.google.com/';
+  if (s.newtab === 'duckduckgo') return 'https://duckduckgo.com/';
+  if (s.newtab === 'brave')      return 'https://search.brave.com/';
+  if (s.newtab === 'custom' && s.customUrl) return _normalizeCustomUrl(s.customUrl);
+  return 'https://duckduckgo.com/';  // default
 }
 
 // ─── Bookmarks ────────────────────────────────────────────────────────────────
@@ -127,6 +201,7 @@ let sidebarOpen = false;
 // When a panel is open we must shrink the active BrowserView so the panel
 // is not hidden underneath it (BrowserViews render above the chrome DOM).
 let panelVisible = false;
+let bookmarksBarVisible = (_startSettings.bookmarksBar !== false); // default true
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gateway discovery & launch
@@ -270,17 +345,115 @@ function stopGateway() {
 // Tab management helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+function chromeH() {
+  return CHROME_HEIGHT + (bookmarksBarVisible ? BOOKMARKS_BAR_H : 0);
+}
+
 function tabBounds(win) {
   const [w, h] = win.getContentSize();
   const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
   const panelW = panelVisible ? PANEL_WIDTH   : 0;
-  return { x: 0, y: CHROME_HEIGHT, width: Math.max(0, w - sideW - panelW), height: Math.max(0, h - CHROME_HEIGHT) };
+  const totalW = Math.max(0, w - sideW - panelW);
+  const ch = chromeH();
+  if (getActivePair() !== null) {
+    return { x: 0, y: ch, width: Math.floor(totalW / 2) - 1, height: Math.max(0, h - ch) };
+  }
+  return { x: 0, y: ch, width: totalW, height: Math.max(0, h - ch) };
 }
 
 /** Bounds for the admin-hub sidebar BrowserView when open. */
 function sidebarBounds(win) {
   const [w, h] = win.getContentSize();
-  return { x: Math.max(0, w - SIDEBAR_WIDTH), y: CHROME_HEIGHT, width: SIDEBAR_WIDTH, height: Math.max(0, h - CHROME_HEIGHT) };
+  const ch = chromeH();
+  return { x: Math.max(0, w - SIDEBAR_WIDTH), y: ch, width: SIDEBAR_WIDTH, height: Math.max(0, h - ch) };
+}
+
+/** Bounds for the right-hand BrowserView in split mode. */
+function splitRightBounds(win) {
+  const [w, h] = win.getContentSize();
+  const sideW  = sidebarOpen  ? SIDEBAR_WIDTH : 0;
+  const panelW = panelVisible ? PANEL_WIDTH   : 0;
+  const totalW = Math.max(0, w - sideW - panelW);
+  const half   = Math.floor(totalW / 2);
+  const ch = chromeH();
+  return { x: half + 1, y: ch, width: totalW - half - 1, height: Math.max(0, h - ch) };
+}
+
+// ── Split-pairs helpers ───────────────────────────────────────────────────────
+/** Returns the split pair containing tab `id`, or null. */
+function getPairOf(id) {
+  return splitPairs.find(p => p.leftId === id || p.rightId === id) || null;
+}
+
+/** Returns the currently visible (non-paused) split pair, or null. */
+function getActivePair() {
+  return splitPairs.find(p => !p.paused) || null;
+}
+
+/**
+ * Internal: show a split pair side-by-side, pausing all other pairs.
+ * Sets activeTabId to pair.leftId.
+ */
+function _showPair(pair, win = mainWin) {
+  for (const p of splitPairs) if (p !== pair) p.paused = true;
+  pair.paused = false;
+  activeTabId = pair.leftId;
+  for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
+  const lt = tabs[pair.leftId];
+  const rt = tabs[pair.rightId];
+  if (lt && rt) {
+    win.addBrowserView(lt.view);
+    win.addBrowserView(rt.view);
+    lt.view.setBounds(tabBounds(win));
+    rt.view.setBounds(splitRightBounds(win));
+  }
+  notifyChrome('split-changed', { splitTabId: pair.rightId });
+}
+
+/** Enter split-view: active tab on left, `id` on right. Creates a new pair. */
+function enterSplit(id, win = mainWin) {
+  if (!tabs[id] || !tabs[activeTabId]) return;
+  // Pause any currently visible pair
+  const ap = getActivePair();
+  if (ap) ap.paused = true;
+  const pair = { leftId: activeTabId, rightId: id, paused: false };
+  splitPairs.push(pair);
+  _showPair(pair, win);
+  notifyTabsUpdated();
+}
+
+/** Close the split pair that contains `tabId`. */
+function exitSplitForTab(tabId, win = mainWin) {
+  const pair = getPairOf(tabId);
+  if (!pair) return;
+  splitPairs = splitPairs.filter(p => p !== pair);
+  for (const t of Object.values(tabs)) win.removeBrowserView(t.view);
+  // If another pair exists, activate the first one; otherwise show solo
+  const next = splitPairs[0];
+  if (next) {
+    next.paused = false;
+    _showPair(next, win);
+  } else {
+    notifyChrome('split-changed', null);
+    const at = tabs[activeTabId];
+    if (at) { win.addBrowserView(at.view); at.view.setBounds(tabBounds(win)); }
+  }
+  notifyTabsUpdated();
+}
+
+/** Exit split-view for the active tab's pair (backward compat). */
+function exitSplit(win = mainWin) {
+  exitSplitForTab(activeTabId, win);
+}
+
+/**
+ * Returns the id of an existing Admin Hub tab, or null if none is open.
+ */
+function _existingAdminHubId() {
+  return Object.values(tabs).find(t =>
+    !t.view.webContents.isDestroyed() &&
+    (t.view.webContents.getURL() || '').startsWith(GATEWAY_ORIGIN + '/ui/')
+  )?.id ?? null;
 }
 
 /**
@@ -340,22 +513,35 @@ function _isBlockedURL(urlStr) {
  * Create a new tab and attach it to the window.
  * Returns the tab id.
  */
-function createTab(url = NEW_TAB_URL, win = mainWin) {
+function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
+  // Si l'URL est un Admin Hub et qu'un tel onglet existe déjà, basculer dessus.
+  if (url.startsWith(GATEWAY_ORIGIN + '/ui/')) {
+    const existing = _existingAdminHubId();
+    if (existing !== null) { switchTab(existing, win); return existing; }
+  }
   const id   = nextTabId++;
   const view = new BrowserView({
     webPreferences: {
-      nodeIntegration:              false,
-      contextIsolation:             true,
-      sandbox:                      true,
-      webviewTag:                   false,
+      nodeIntegration:  false,
+      contextIsolation: true,    // isolate Electron globals from page world
+      sandbox:          true,    // full sandbox — no Node in page renderer
+      webviewTag:       false,
     },
   });
 
   // Do NOT addBrowserView here — switchTab will add it so we never get a
   // brief blank-view flash over the current tab while the new one loads.
   view.setAutoResize({ width: true, height: true });
+  // Force le bon UA sur chaque vue individuellement (le setUserAgent session-level
+  // ne se propage pas toujours aux BrowserViews créées après-coup).
+  view.webContents.setUserAgent(CHROME_UA);
   view.webContents.loadURL(url);
 
+  view.webContents.on('dom-ready', () => {
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.executeJavaScript(ANTIDETECT_JS).catch(() => {});
+    }
+  });
   // Forward page events to the chrome renderer
   view.webContents.on('page-title-updated', (_, title) => {
     notifyChrome('tab-title-updated', { id, title });
@@ -374,17 +560,55 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
   });
 
   view.webContents.on('did-navigate', (_, navUrl) => {
-    if (activeTabId === id) notifyChrome('url-changed', { id, url: navUrl });
+    if (activeTabId === id) {
+      notifyChrome('url-changed', { id, url: navUrl });
+      notifyChrome('nav-state', {
+        id,
+        canGoBack:    view.webContents.canGoBack(),
+        canGoForward: view.webContents.canGoForward(),
+      });
+    }
     // Record visit in history (skip internal gateway UI)
     if (!navUrl.startsWith(GATEWAY_ORIGIN)) {
       pushHistory(navUrl, view.webContents.getTitle());
     }
+    // Ré-injecter anti-détection après chaque navigation dure
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.executeJavaScript(ANTIDETECT_JS).catch(() => {});
+    }
   });
   view.webContents.on('did-navigate-in-page', (_, navUrl) => {
-    if (activeTabId === id) notifyChrome('url-changed', { id, url: navUrl });
+    if (activeTabId === id) {
+      notifyChrome('url-changed', { id, url: navUrl });
+      notifyChrome('nav-state', {
+        id,
+        canGoBack:    view.webContents.canGoBack(),
+        canGoForward: view.webContents.canGoForward(),
+      });
+    }
+    // Ré-injecter le script anti-détection : lors d'une navigation SPA
+    // (YouTube pushState entre vidéos), Electron re-injecte window.process
+    // dans le monde de la page. On le supprime à nouveau immédiatement.
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.executeJavaScript(ANTIDETECT_JS).catch(() => {});
+    }
   });
   view.webContents.on('page-favicon-updated', (_, favicons) => {
     notifyChrome('tab-favicon-updated', { id, favicon: favicons[0] || null });
+  });
+  view.webContents.on('audio-state-changed', ({ audible }) => {
+    notifyChrome('tab-muted', { id, muted: view.webContents.isAudioMuted(), audible });
+  });
+  // Capture a screenshot ~800ms after the page finishes loading,
+  // but only while this tab is the active (visible) one.
+  view.webContents.on('did-finish-load', () => {
+    if (activeTabId !== id) return;
+    setTimeout(() => {
+      if (activeTabId !== id || view.webContents.isDestroyed()) return;
+      view.webContents.capturePage().then(img => {
+        if (!img.isEmpty()) tabPreviews[id] = img.resize({ width: 280, height: 175 }).toDataURL();
+      }).catch(() => {});
+    }, 800);
   });
   // Right-click context menu on the page — adds Chrome-style Inspect option
   // (HTML menus beneath BrowserViews are inaccessible, so we must use native).
@@ -527,23 +751,69 @@ function createTab(url = NEW_TAB_URL, win = mainWin) {
  * Switch the visible tab.
  */
 function switchTab(id, win = mainWin) {
+  // Capture screenshot of the leaving tab so it can be shown on hover later.
+  // Freeze the ID in a local const — activeTabId changes before .then() fires.
+  if (activeTabId && activeTabId !== id && tabs[activeTabId]) {
+    const _captureId = activeTabId;
+    const _oldWc = tabs[_captureId].view.webContents;
+    if (!_oldWc.isDestroyed()) {
+      _oldWc.capturePage().then(img => {
+        tabPreviews[_captureId] = img.resize({ width: 280, height: 175 }).toDataURL();
+      }).catch(() => {});
+    }
+  }
   // Hide all views
   for (const t of Object.values(tabs)) {
     win.removeBrowserView(t.view);
   }
   const tab = tabs[id];
   if (!tab) return;
+
+  const pair       = getPairOf(id);
+  const activePair = getActivePair();
+
+  if (pair) {
+    if (pair.paused) {
+      // ─── Restore paused pair ───────────────────────────────────────────────
+      // If the right side was clicked, make it the active (left) side
+      if (id === pair.rightId) {
+        const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
+      }
+      _showPair(pair, win);
+    } else if (id === pair.rightId) {
+      // ─── Swap sides in the active pair ────────────────────────────────────
+      const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
+      activeTabId = pair.leftId;
+      const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+      if (lt && rt) {
+        win.addBrowserView(lt.view); win.addBrowserView(rt.view);
+        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
+      } else { exitSplitForTab(id, win); }
+    } else {
+      // ─── Clicked active left — refresh bounds ─────────────────────────────
+      const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+      if (lt && rt) {
+        win.addBrowserView(lt.view); win.addBrowserView(rt.view);
+        lt.view.setBounds(tabBounds(win)); rt.view.setBounds(splitRightBounds(win));
+      }
+    }
+    const wc2 = tabs[activeTabId]?.view.webContents;
+    if (wc2) {
+      notifyChrome('url-changed', { id: activeTabId, url: wc2.getURL() });
+      notifyChrome('nav-state', { id: activeTabId, canGoBack: wc2.canGoBack(), canGoForward: wc2.canGoForward() });
+    }
+    notifyTabsUpdated();
+    return;
+  }
+
+  // ─── Solo (unpaired) tab clicked ─────────────────────────────────────────
+  if (activePair) activePair.paused = true;   // pause any visible split pair
+  activeTabId = id;
   win.addBrowserView(tab.view);
   tab.view.setBounds(tabBounds(win));
-  activeTabId = id;
-
   const wc = tab.view.webContents;
   notifyChrome('url-changed', { id, url: wc.getURL() });
-  notifyChrome('nav-state', {
-    id,
-    canGoBack:    wc.canGoBack(),
-    canGoForward: wc.canGoForward(),
-  });
+  notifyChrome('nav-state', { id, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
   notifyTabsUpdated();
 
   // Push a fresh snapshot for the newly-active tab so "Page" context always
@@ -575,6 +845,15 @@ function switchTab(id, win = mainWin) {
 function closeTab(id, win = mainWin) {
   const tab = tabs[id];
   if (!tab) return;
+  // Admin Hub tabs are pinned — cannot be closed
+  const _tabUrl = tab.view.webContents.isDestroyed() ? '' : (tab.view.webContents.getURL() || '');
+  if (_tabUrl.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
+  // Remove pair if the closing tab was part of one
+  const closingPair = getPairOf(id);
+  if (closingPair) {
+    splitPairs = splitPairs.filter(p => p !== closingPair);
+    if (!getActivePair()) notifyChrome('split-changed', splitPairs.length > 0 ? {} : null);
+  }
   win.removeBrowserView(tab.view);
   tab.view.webContents.destroy();
   delete tabs[id];
@@ -586,8 +865,8 @@ function closeTab(id, win = mainWin) {
     return;
   }
   if (activeTabId === id) {
-    const remaining = Object.keys(tabs).map(Number).sort((a, b) => a - b);
-    switchTab(remaining[remaining.length - 1], win);
+    const remaining = tabOrder.filter(x => tabs[x]);
+    switchTab(remaining[remaining.length - 1] ?? remaining[0], win);
   } else {
     // Non-active tab closed — tab bar still needs to update
     notifyTabsUpdated();
@@ -628,7 +907,7 @@ function notifyTabsUpdated() {
 function registerIPC() {
   // New tab
   ipcMain.handle('new-tab', (_, url) => {
-    return createTab(url || NEW_TAB_URL);
+    return createTab(url || NEW_TAB_URL, mainWin, activeTabId);
   });
 
   // Close tab
@@ -644,28 +923,140 @@ function registerIPC() {
     return createTab(url);
   });
 
+  // Close split view (sent from the chrome renderer close-split button)
+  ipcMain.on('close-split', () => exitSplit());
+
+  // Swap left/right sides of a split pair (drag-to-swap from the tab bar pill)
+  ipcMain.handle('swap-split-sides', (_, tabId) => {
+    const pair = getPairOf(tabId);
+    if (!pair || pair.paused) return;
+    const tmp = pair.leftId; pair.leftId = pair.rightId; pair.rightId = tmp;
+    activeTabId = pair.leftId;
+    const lt = tabs[pair.leftId]; const rt = tabs[pair.rightId];
+    if (lt && rt) {
+      mainWin.removeBrowserView(lt.view); mainWin.removeBrowserView(rt.view);
+      mainWin.addBrowserView(lt.view);    mainWin.addBrowserView(rt.view);
+      lt.view.setBounds(tabBounds(mainWin));
+      rt.view.setBounds(splitRightBounds(mainWin));
+    }
+    notifyTabsUpdated();
+  });
+
+  // Reorder tabs by drag-and-drop
+  ipcMain.handle('reorder-tab', (_, dragId, targetId) => {
+    // Admin Hub is always pinned at position 0 — it cannot be moved
+    const adminId  = _existingAdminHubId();
+    if (dragId === adminId) return;
+
+    const from     = tabOrder.indexOf(dragId);
+    let   to       = tabOrder.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+
+    // Clamp: never allow a tab to be placed before the Admin Hub
+    const adminPos = adminId ? tabOrder.indexOf(adminId) : -1;
+    if (adminPos !== -1 && to <= adminPos) to = adminPos + 1;
+
+    if (from === to) return;
+    tabOrder.splice(from, 1);
+    tabOrder.splice(to, 0, dragId);
+    notifyTabsUpdated();
+  });
+
   // Right-click context menu on a tab — shown as a native OS menu so it
   // renders above all BrowserViews (HTML menus would be hidden under them).
-  ipcMain.handle('show-tab-ctx', (_, { tabId, tabUrl }) => {
-    const menu = Menu.buildFromTemplate([
-      {
-        label: 'New Tab',
-        click: () => createTab(),
-      },
-      {
-        label: 'Duplicate Tab',
-        click: () => {
-          const url = tabs[tabId]?.view.webContents.getURL() || tabUrl || NEW_TAB_URL;
-          createTab(url);
-        },
-      },
+  ipcMain.handle('show-tab-ctx', (_, { tabId, tabUrl, groups }) => {
+    const wc         = tabs[tabId]?.view.webContents;
+    const isMuted    = wc?.isAudioMuted() ?? false;
+    const isSplit    = getPairOf(tabId) !== null;
+    const isActive   = activeTabId === tabId;
+    const isAdminHub = (tabUrl || '').startsWith(GATEWAY_ORIGIN + '/ui/');
+    const items = [
+      { label: 'New Tab',       click: () => createTab() },
+      ...(!isAdminHub ? [{ label: 'Duplicate Tab', click: () => createTab(wc?.getURL() || tabUrl || NEW_TAB_URL) }] : []),
       { type: 'separator' },
-      {
-        label: 'Close Tab',
-        click: () => closeTab(tabId),
-      },
-    ]);
-    menu.popup({ window: mainWin });
+      ...(!isAdminHub ? [{
+        label: isMuted ? '🔊 Réactiver le son' : '🔇 Couper le son',
+        click: () => {
+          if (!wc) return;
+          wc.setAudioMuted(!isMuted);
+          notifyChrome('tab-muted', { id: tabId, muted: !isMuted });
+          notifyTabsUpdated();
+        },
+      }] : []),
+      // Split: close the pair this tab belongs to; show "fractionner" for any unpaired inactive tab
+      ...(getPairOf(tabId)
+        ? [{ label: '⊟ Fermer la vue fractionnée', click: () => exitSplitForTab(tabId) }]
+        : (!isActive
+            ? [{ label: '⊟ Vue fractionnée', click: () => enterSplit(tabId) }]
+            : [])),
+      { type: 'separator' },
+      ...(!isAdminHub ? [{
+        label: 'Mettre en onglet inactif',
+        click: () => {
+          const tab = tabs[tabId];
+          if (!tab) return;
+          const wc2 = tab.view.webContents;
+          wc2.capturePage().then(img => {
+            tabPreviews[tabId] = img.resize({ width: 320, height: 200 }).toDataURL();
+          }).catch(() => {});
+          notifyChrome('group-tab', {
+            id:      tabId,
+            url:     wc2.getURL()   || tabUrl || '',
+            title:   wc2.getTitle() || '',
+            favicon: null,
+          });
+        },
+      }] : []),
+      { type: 'separator' },
+      // ── Chrome-style tab groups ──────────────────────────────────────────
+      ...(!isAdminHub ? [{
+        label: '🏷 Ajouter à un groupe',
+        submenu: [
+          { label: '＋ Nouveau groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'new', tabId }) },
+          ...((groups && groups.length > 0) ? [{ type: 'separator' }] : []),
+          ...((groups || []).map(g => ({
+            label: `● ${g.name || '(sans nom)'}`,
+            click: () => mainWin.webContents.send('tab-group-action', { action: 'add', tabId, groupId: g.id }),
+          }))),
+        ],
+      }] : []),
+      ...((groups || []).some(g => g.tabIds && g.tabIds.includes(tabId))
+        ? [{ label: 'Retirer du groupe', click: () => mainWin.webContents.send('tab-group-action', { action: 'remove', tabId }) }]
+        : []),
+      { type: 'separator' },
+      ...(!isAdminHub ? [{ label: 'Close Tab', click: () => closeTab(tabId) }] : []),
+      // Close all tabs to the right of this one
+      ...(() => {
+        const idx = tabOrder.indexOf(tabId);
+        const toClose = idx >= 0
+          ? tabOrder.slice(idx + 1).filter(id => {
+              const u = tabs[id]?.view?.webContents?.getURL() || '';
+              return !u.startsWith(GATEWAY_ORIGIN + '/ui/');
+            })
+          : [];
+        return toClose.length > 0 ? [{
+          label: 'Fermer les onglets à droite',
+          click: () => toClose.forEach(id => closeTab(id)),
+        }] : [];
+      })(),
+    ];
+    Menu.buildFromTemplate(items).popup({ window: mainWin });
+  });
+
+  // Native context menu for tab group chips
+  ipcMain.handle('show-group-ctx', (_, { groupId }) => {
+    const send = (action) => mainWin?.webContents.send('group-ctx-action', { action, groupId });
+    const items = [
+      { label: 'Nouvel onglet dans le groupe', click: () => createTab() },
+      { type: 'separator' },
+      { label: '\u270F\uFE0F Renommer',            click: () => send('rename')       },
+      { label: '\u25CF Changer la couleur',         click: () => send('color')        },
+      { type: 'separator' },
+      { label: 'D\u00e9grouper',                     click: () => send('ungroup')      },
+      { label: '\uD83D\uDCC1 Fermer le groupe',      click: () => send('close-save-bm') },
+      { label: 'Fermer et supprimer',                click: () => send('close-group')   },
+    ];
+    Menu.buildFromTemplate(items).popup({ window: mainWin });
   });
 
   // Switch active tab
@@ -734,7 +1125,12 @@ function registerIPC() {
 
   // Navigate active tab to the Intelli admin hub
   ipcMain.handle('go-home', () => {
-    tabs[activeTabId]?.view.webContents.loadURL(HOME_URL);
+    const existing = _existingAdminHubId();
+    if (existing !== null) {
+      switchTab(existing);
+    } else {
+      tabs[activeTabId]?.view.webContents.loadURL(HOME_URL);
+    }
   });
 
   // Open external links in the system browser
@@ -851,6 +1247,14 @@ function registerIPC() {
     else wc.openDevTools();
   });
 
+  // ── Settings ─────────────────────────────────────────────────────────────
+  ipcMain.handle('get-settings', () => loadSettings());
+  ipcMain.handle('save-settings', (_, s) => {
+    saveSettingsData(s);
+    // Update NEW_TAB_URL live so next Ctrl+T uses the new value immediately
+    NEW_TAB_URL = _newtabToUrl(s);
+  });
+
   // ── Bookmarks ────────────────────────────────────────────────────────────
   ipcMain.handle('bookmarks-list',   () => loadBookmarks());
   ipcMain.handle('bookmarks-add',    (_, { url, title, favicon }) => {
@@ -858,15 +1262,25 @@ function registerIPC() {
     if (bm.find(b => b.url === url)) return bm;        // already saved
     bm.unshift({ id: Date.now(), url, title: title || url, favicon: favicon || null, addedAt: new Date().toISOString() });
     saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
     return bm;
   });
   ipcMain.handle('bookmarks-remove', (_, url) => {
     const bm = loadBookmarks().filter(b => b.url !== url);
     saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
     return bm;
   });
   ipcMain.handle('bookmarks-has', (_, url) => {
     return loadBookmarks().some(b => b.url === url);
+  });
+  ipcMain.handle('bookmarks-add-group', (_, { name, color, tabs }) => {
+    const bm = loadBookmarks();
+    const id = Date.now();
+    bm.unshift({ id, type: 'group', url: 'group:' + id, name: name || '', color: color || '#888', tabs: tabs || [], addedAt: new Date().toISOString() });
+    saveBookmarks(bm);
+    notifyChrome('bookmarks-changed', bm);
+    return bm;
   });
 
   // ── History ───────────────────────────────────────────────────────────────
@@ -901,6 +1315,130 @@ function registerIPC() {
     const tab = tabs[activeTabId];
     if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
   });
+
+  // ── Bookmarks bar visibility ──────────────────────────────────────────
+  ipcMain.handle('set-bookmarks-bar-visible', (_, v) => {
+    bookmarksBarVisible = !!v;
+    const s = loadSettings(); s.bookmarksBar = bookmarksBarVisible; saveSettingsData(s);
+    notifyChrome('bookmarks-bar-state', bookmarksBarVisible);
+    // Recalculate BrowserView bounds with new chrome height
+    const ap = getActivePair();
+    if (ap) {
+      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(tabBounds(mainWin));
+      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(mainWin));
+    } else {
+      const tab = tabs[activeTabId];
+      if (tab && mainWin) tab.view.setBounds(tabBounds(mainWin));
+    }
+  });
+
+  // ── Inactive-tabs popup (custom BrowserWindow — renders above BrowserViews) ───
+  let _tabsPopup = null;
+
+  function _closeTabsPopup() {
+    if (_tabsPopup && !_tabsPopup.isDestroyed()) { _tabsPopup.close(); }
+    _tabsPopup = null;
+  }
+
+  ipcMain.handle('show-inactive-tabs-popup', (_, { tabs, btnRect }) => {
+    _closeTabsPopup();
+    if (!tabs || tabs.length === 0) return;
+
+    // Attach stored screenshots
+    const tabsWithPreviews = tabs.map(g => ({
+      ...g,
+      preview: tabPreviews[Number(g.id)] || null,
+    }));
+
+    const popupW = 300;
+    const rowH   = 42;
+    const footerH = 34;
+    const popupH  = Math.min(tabs.length * rowH + footerH + 8, 490);
+
+    // Position below the button, clamp to screen
+    const display = screen.getDisplayNearestPoint({ x: btnRect.screenX, y: btnRect.screenY });
+    const { x: sx, y: sy, width: sw, height: sh } = display.bounds;
+    let px = Math.round(btnRect.screenX);
+    let py = Math.round(btnRect.screenY + btnRect.height);
+    if (px + popupW > sx + sw) px = sx + sw - popupW - 4;
+    if (py + popupH > sy + sh) py = Math.round(btnRect.screenY) - popupH;
+
+    _tabsPopup = new BrowserWindow({
+      x: px, y: py,
+      width: popupW, height: popupH,
+      frame: false, transparent: false,
+      skipTaskbar: true, alwaysOnTop: true,
+      resizable: false, movable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    _tabsPopup.loadFile(path.join(__dirname, 'src', 'inactive-tabs-popup.html'));
+    _tabsPopup.once('ready-to-show', () => {
+      if (!_tabsPopup || _tabsPopup.isDestroyed()) return;
+      _tabsPopup.show();
+      _tabsPopup.webContents.send('init-tabs', tabsWithPreviews);
+    });
+    _tabsPopup.on('blur', () => setTimeout(_closeTabsPopup, 150));
+  });
+
+  ipcMain.on('popup-restore', (_, id) => {
+    _closeTabsPopup();
+    mainWin.webContents.send('restore-inactive-tab', id);
+  });
+  ipcMain.on('popup-remove', (_, id) => {
+    mainWin.webContents.send('remove-inactive-tab', id);
+  });
+  ipcMain.on('popup-restore-all', () => {
+    _closeTabsPopup();
+    mainWin.webContents.send('restore-all-inactive-tabs');
+  });
+  ipcMain.on('popup-clear', () => {
+    _closeTabsPopup();
+    mainWin.webContents.send('clear-inactive-tabs');
+  });
+  ipcMain.on('popup-close', _closeTabsPopup);
+
+  // ── Tab hover preview ─────────────────────────────────────────────
+  // Returns the cached screenshot (data: URL) for a given tabId.
+  // Screenshots are captured on did-finish-load and on switchTab departure.
+  ipcMain.handle('get-tab-preview', (_, tabId) => tabPreviews[Number(tabId)] || null);
+
+  // ── Tab hover preview floating window ───────────────────────────
+  // (_hoverWin and _closeHoverWin are module-scope — see top of file)
+
+  ipcMain.handle('show-tab-preview', (_, { tabId, screenX, screenY, title, url, favicon }) => {
+    _closeHoverWin();
+    const preview = tabPreviews[Number(tabId)] || null;
+    const hasImg  = !!preview;
+    const W = 220;
+    const H = hasImg ? 192 : 126;
+
+    let domain = '';
+    try { domain = new URL(url || '').hostname.replace(/^www\./, ''); } catch {}
+
+    const disp = screen.getDisplayNearestPoint({ x: screenX, y: screenY });
+    const { x: sx, width: sw, height: sh, y: sy } = disp.bounds;
+    let px = Math.round(screenX);
+    let py = Math.round(screenY);
+    if (px + W > sx + sw) px = sx + sw - W - 4;
+    if (py + H > sy + sh) py = py - H - 4;
+
+    _hoverWin = new BrowserWindow({
+      x: px, y: py, width: W, height: H,
+      frame: false, transparent: true,
+      skipTaskbar: true, alwaysOnTop: true,
+      focusable: false, resizable: false, movable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    _hoverWin.setIgnoreMouseEvents(true);
+    _hoverWin.loadFile(path.join(__dirname, 'src', 'tab-preview-card.html'));
+    _hoverWin.once('ready-to-show', () => {
+      if (!_hoverWin || _hoverWin.isDestroyed()) return;
+      _hoverWin.showInactive();
+      _hoverWin.webContents.send('init-preview', { title, url, favicon, domain, preview });
+    });
+  });
+
+  ipcMain.on('hide-tab-preview', _closeHoverWin);
 
   // ── Downloads ─────────────────────────────────────────────────────────────
   ipcMain.handle('open-downloads-folder', () => {
@@ -1341,8 +1879,14 @@ function createMainWindow() {
 
   // Keep BrowserView bounds in sync when window is resized
   function syncBounds() {
-    const tab = tabs[activeTabId];
-    if (tab) tab.view.setBounds(tabBounds(mainWin));
+    const ap = getActivePair();
+    if (ap) {
+      if (tabs[ap.leftId])  tabs[ap.leftId].view.setBounds(tabBounds(mainWin));
+      if (tabs[ap.rightId]) tabs[ap.rightId].view.setBounds(splitRightBounds(mainWin));
+    } else {
+      const tab = tabs[activeTabId];
+      if (tab) tab.view.setBounds(tabBounds(mainWin));
+    }
     if (sidebarOpen && sidebarView) sidebarView.setBounds(sidebarBounds(mainWin));
   }
 
@@ -1353,7 +1897,8 @@ function createMainWindow() {
   // always fire in that case, so the BrowserView would keep its collapsed bounds.
   mainWin.on('restore',           syncBounds);
 
-  mainWin.on('closed', () => { mainWin = null; });
+  mainWin.on('closed',  () => { _closeHoverWin(); mainWin = null; });
+  mainWin.on('blur',    () => _closeHoverWin());
 
   // Forward maximize/unmaximize state to chrome renderer (updates button icon)
   // and re-sync bounds so the BrowserView fills the new window size.
@@ -1369,6 +1914,37 @@ function createMainWindow() {
 
 app.whenReady().then(async () => {
   installCSP();   // must be first — sets up webRequest before any window loads
+
+  // ── Override User-Agent on the default session ──────────────────────────
+  // Replaces "Electron/29.x.x" with a clean Chrome 122 UA so Google, Cloudflare
+  // and reCAPTCHA don't fingerprint us as automation.
+  session.defaultSession.setUserAgent(CHROME_UA);
+
+  // Grant media / DRM / notification permissions automatically so YouTube
+  // and other media sites never get silently blocked.
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+    // Deny only truly dangerous permissions; grant everything else
+    const denied = ['openExternal'];
+    callback(!denied.includes(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => {
+    const denied = ['openExternal'];
+    return !denied.includes(permission);
+  });
+
+  // Strip the Sec-CH-UA hint that also reveals Electron
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const h = details.requestHeaders;
+    h['User-Agent']          = CHROME_UA;
+    h['Sec-CH-UA']           = '"Not A(Brand";v="99", "Chromium";v="122", "Google Chrome";v="122"';
+    h['Sec-CH-UA-Mobile']    = '?0';
+    h['Sec-CH-UA-Platform']  = '"Windows"';
+    h['Accept-Language']     = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7';
+    delete h['X-Electron-Version'];
+    delete h['X-Electron-App-Version'];
+    callback({ cancel: false, requestHeaders: h });
+  });
+
   setupDownloads(session.defaultSession);
   registerIPC();
 
@@ -1479,8 +2055,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Shut down gateway before quitting
+// Shut down gateway before quitting; also destroy any floating preview window
 app.on('before-quit', () => {
+  _closeHoverWin();
   stopGateway();
 });
 

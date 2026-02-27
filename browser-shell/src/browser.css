@@ -10,10 +10,11 @@
   --danger:     #ff5f5f;
   --tab-h:      36px;
   --addr-h:     52px;
+  --bm-bar-h:   30px;
   --chrome-h:   88px;       /* tab-h + addr-h — must match main.js CHROME_HEIGHT */
   --radius:     6px;
-  --tab-min:    140px;
-  --tab-max:    220px;
+  --tab-min:    72px;
+  --tab-max:    240px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,8 +26,8 @@ html, body {
   color: var(--text);
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  /* allow the window to be dragged by clicking blank chrome areas */
-  -webkit-app-region: drag;
+  /* cursor explicit — pas de curseur 'grab' qui pourrait saigner dans les BrowserViews */
+  cursor: default;
   user-select: none;
 }
 
@@ -80,6 +81,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 0;
   min-width: var(--tab-min);
   max-width: var(--tab-max);
   height: 30px;
@@ -88,7 +90,6 @@ html, body {
   background: var(--surface2);
   color: var(--muted);
   cursor: pointer;
-  flex-shrink: 1;
   overflow: hidden;
   position: relative;
   transition: background 0.12s, color 0.12s;
@@ -134,21 +135,19 @@ html, body {
 .tab:hover .tab-close,
 .tab.active .tab-close { opacity: 0.7; }
 .tab-close:hover       { background: var(--danger); opacity: 1 !important; color: #fff; }
+.tab-close.hidden      { display: none !important; }
 
-#new-tab-btn {
+/* Speaker / mute icon — visible only when tab has audio or is muted */
+.tab-audio-icon {
   flex-shrink: 0;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  color: var(--muted);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  transition: background 0.12s, color 0.12s;
-  -webkit-app-region: no-drag;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.85;
+  pointer-events: none;
 }
-#new-tab-btn:hover { background: var(--surface2); color: var(--text); }
+.tab-audio-icon.hidden { display: none; }
+
+/* #new-tab-btn now uses .nav-btn class in the address bar */
 
 /* spacer hidden — #tabs takes flex:1 instead */
 .tab-bar-spacer { display: none; }
@@ -161,8 +160,9 @@ html, body {
   padding: 0 10px;
   gap: 6px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
+  border-bottom: 1px solid var(--border);  /* Allows dragging the window from the empty address-bar background
+     (interactive children override with no-drag) */
+  -webkit-app-region: drag;}
 
 .nav-btn {
   display: flex; align-items: center; justify-content: center;
@@ -489,6 +489,202 @@ button { cursor: pointer; }
   min-height: 18px;
 }
 
+/* ── Grouped-tabs tab-bar button ──────────────────────────────────────────────── */
+#btn-tab-groups {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px 0 9px;
+  margin-right: 2px;
+  border: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  -webkit-app-region: no-drag;
+}
+#btn-tab-groups:hover  { background: var(--surface); }
+#btn-tab-groups.active { background: var(--surface); box-shadow: inset 0 -2px 0 var(--accent); }
+#btn-tab-groups.hidden { display: none; }
+
+.tg-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Panel onglets inactifs — teinte gris pale distincte ─────────────────── */
+#panel-inactive-tabs {
+  background: #252836;
+}
+#panel-inactive-tabs .panel-header {
+  background: #2e3347;
+  border-bottom-color: #3a3f5c;
+}
+#panel-inactive-tabs .tg-list:empty::after {
+  content: 'Aucun onglet inactif';
+  display: block;
+  padding: 24px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── Toggle switch (tab groups) ─────────────────────────────── */
+.tg-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.tg-switch input { opacity: 0; width: 0; height: 0; }
+.tg-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.tg-slider::before {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  left: 2px; top: 2px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.2s, background 0.2s;
+}
+.tg-switch input:checked + .tg-slider { background: var(--accent-dim); border-color: var(--accent); }
+.tg-switch input:checked + .tg-slider::before { transform: translateX(16px); background: var(--accent); }
+
+/* ── Tab group list ─────────────────────────────────────────── */
+.tg-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.tg-list:empty::after {
+  content: 'Aucun onglet inactif pour l\'instant.';
+  display: block;
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.tg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+  border-radius: 4px;
+  margin: 1px 4px;
+}
+.tg-item:hover          { background: var(--surface2); }
+.tg-item.tg-selected    { background: var(--accent-dim); }
+
+/* Checkbox */
+.tg-item-check {
+  flex-shrink: 0;
+  width: 14px; height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+/* Favicon */
+.tg-item img {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 3px;
+}
+.tg-item-favicon-ph {
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+
+/* Info */
+.tg-item-info  { flex: 1; min-width: 0; }
+.tg-item-title {
+  font-size: 12px; color: var(--text); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tg-item-url {
+  font-size: 10px; color: var(--muted); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tg-item-time  {
+  font-size: 10px; color: var(--muted);
+  white-space: nowrap; flex-shrink: 0;
+}
+.tg-item-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  -webkit-app-region: no-drag;
+}
+.tg-item:hover .tg-item-close { opacity: 1; }
+.tg-item-close:hover { background: var(--danger, #e05); color: #fff; }
+
+/* Selection toolbar */
+.tg-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  gap: 8px;
+}
+.tg-selection-bar.hidden { display: none; }
+.tg-sel-label {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+}
+.tg-sel-open {
+  background: var(--accent); color: #fff; border: none;
+  border-radius: var(--radius); font-size: 11px; font-weight: 600;
+  padding: 4px 12px; cursor: pointer;
+}
+.tg-sel-open:hover { background: #574fd6; }
+.tg-sel-clear {
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 11px;
+  padding: 3px 8px; cursor: pointer;
+}
+.tg-sel-clear:hover { color: var(--danger); border-color: var(--danger); }
+
 /* Check rows (clear data panel) */
 .check-row {
   display: flex;
@@ -520,3 +716,280 @@ button { cursor: pointer; }
   cursor: pointer; flex-shrink: 0;
 }
 .btn-danger:hover { background: var(--danger); color: #fff; }
+
+/* ── Split-view tab indicator & close button ───────────────── */
+.tab.split { border-top: 2px solid var(--accent); }
+
+#btn-close-split {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 9px;
+  height: 24px;
+  background: rgba(108,99,255,0.18);
+  color: var(--accent);
+  border: 1px solid rgba(108,99,255,0.35);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+#btn-close-split:hover { background: rgba(108,99,255,0.32); }
+#btn-close-split.hidden { display: none; }
+
+/* ── Tab hover preview card (Chrome-style) ───────────────── */
+#tab-hover-card {
+  position: fixed;
+  z-index: 99999;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  width: 200px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  pointer-events: none;
+  animation: thc-in 0.12s ease;
+}
+@keyframes thc-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+#tab-hover-card.visible { display: flex; }
+.thc-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.thc-favicon {
+  width: 14px; height: 14px; flex-shrink: 0;
+}
+.thc-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thc-url {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thc-img {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--surface2);
+  display: block;
+}
+.thc-no-preview {
+  width: 100%;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+  background: var(--surface2);
+  border-radius: 4px;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Chrome-style tab groups
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Group chip in the tab bar ──────────────────────────────────── */
+.tab-group-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: #fff;
+  transition: filter 0.12s, transform 0.1s;
+  user-select: none;
+  align-self: center;
+  -webkit-app-region: no-drag;
+}
+.tab-group-chip:hover  { filter: brightness(1.18); }
+.tab-group-chip:active { transform: scale(0.96); }
+
+/* White dot — only visible when group is collapsed */
+.tab-group-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.80);
+  flex-shrink: 0;
+  display: none;
+}
+.tab-group-chip.collapsed .tab-group-chip-dot  { display: block; }
+.tab-group-chip.collapsed .tab-group-chip-label { display: none; }
+
+/* Tabs belonging to a group: colored top border */
+.tab.in-group {
+  border-top: 3px solid var(--tg-color, #888);
+  border-radius: 0 var(--radius) 0 0;
+}
+
+/* ── Tab group side panel ───────────────────────────────────────── */
+/* (uses existing .side-panel infrastructure)                        */
+.chg-colors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.chg-color-swatch {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.12s, transform 0.12s;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.chg-color-swatch:hover   { transform: scale(1.15); }
+.chg-color-swatch.selected {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+
+/* ── Group chip context-menu dropdown ──────────────────────────── */
+.chg-ctx {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 195px;
+  z-index: 9998;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+}
+.chg-ctx.hidden { display: none; }
+.chg-ctx-item {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chg-ctx-item:hover { background: var(--surface2); }
+.chg-ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.chg-ctx-danger { color: var(--danger); }
+
+/* transparent full-screen overlay — closes the chip ctx menu when clicking anywhere outside */
+.chg-ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;   /* behind chg-ctx (9998) but above everything else */
+  background: transparent;
+}
+.chg-ctx-overlay.hidden { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════
+   BOOKMARKS BAR
+   ═══════════════════════════════════════════════════════════════ */
+#bookmarks-bar {
+  display: flex;
+  align-items: center;
+  height: var(--bm-bar-h);
+  padding: 0 4px;
+  gap: 1px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+#bookmarks-bar.hidden { display: none; }
+
+.bm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  max-width: 160px;
+  padding: 0 7px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+  outline: none;
+}
+.bm-chip:hover { background: var(--surface2); }
+.bm-chip:focus-visible { outline: 1px solid var(--accent); }
+/* colored dot for group bookmarks in the bookmarks bar */
+.bm-chip-group-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 5px;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(0,0,0,.18);
+}
+
+.bm-chip-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.bm-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.bm-bar-hint {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* Bookmarks bar right-click context menu (reuses .chg-ctx styles, fine) */
+#bm-bar-ctx {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 195px;
+  z-index: 9998;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+}
+#bm-bar-ctx.hidden { display: none; }
+.bm-ctx-item {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bm-ctx-item:hover { background: var(--surface2); }
+.bm-ctx-item-danger { color: var(--danger); }

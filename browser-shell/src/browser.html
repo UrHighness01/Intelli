@@ -41,7 +41,6 @@
     </div>
     <div id="tabs"></div>
     <div class="tab-bar-spacer"></div>
-    <button id="new-tab-btn" title="New tab (Ctrl+T)">+</button>
     <!-- Custom window controls (titleBarStyle=hidden removes OS buttons) -->
     <div id="win-controls">
       <button class="wc-btn" id="btn-win-min"   title="Minimize">&#8211;</button>
@@ -56,6 +55,7 @@
     <button class="nav-btn" id="btn-forward" title="Forward (Alt+Right)">&#8594;</button>
     <button class="nav-btn" id="btn-reload"  title="Reload (Ctrl+R)">&#8635;</button>
     <button class="nav-btn" id="btn-home"    title="Home">&#8962;</button>
+    <button class="nav-btn" id="new-tab-btn" title="Nouvel onglet (Ctrl+T)">&#43;</button>
 
     <div id="url-wrap">
       <div id="gw-dot" class="loading" title="Gateway status"></div>
@@ -81,6 +81,9 @@
             title="Intelli menu">&#8942;</button>
   </div>
 
+  <!-- ── Bookmarks bar ─────────────────────────────────────────── -->
+  <div id="bookmarks-bar" class="hidden"></div>
+
   <!-- Update notification bar — hidden until an update is available -->
   <div id="update-bar" class="hidden">
     <span id="update-msg">Update available: <strong id="update-version"></strong></span>
@@ -97,7 +100,7 @@
        ══════════════════════════════════════════════════════════ -->
 
   <!-- Bookmark star tooltip / quick-add -->
-  <div id="panel-bookmark" class="side-panel hidden">
+  <div id="panel-bookmarks" class="side-panel hidden">
     <div class="panel-header">
       <span class="panel-title">Bookmarks</span>
       <button class="panel-close" id="bm-panel-close">&#10005;</button>
@@ -148,9 +151,16 @@
     <div class="settings-row">
       <span>New tab page</span>
       <select id="setting-newtab" class="panel-select">
-        <option value="home">Intelli Admin Hub</option>
-        <option value="blank">about:blank</option>
+        <option value="duckduckgo" selected>DuckDuckGo</option>
+        <option value="google">Google</option>
+        <option value="brave">Brave Search</option>
+        <option value="custom">URL personnalisée…</option>
       </select>
+    </div>
+    <div class="settings-row" id="setting-newtab-custom-row" style="display:none">
+      <input type="text" id="setting-newtab-custom-url" class="panel-input"
+             placeholder="https://…" style="flex:1;min-width:0" />
+      <button class="btn-primary" id="setting-newtab-save" style="flex-shrink:0">✓</button>
     </div>
     <div class="panel-section-label" style="margin-top:16px">Gateway</div>
     <div class="settings-row">
@@ -174,6 +184,41 @@
       <span>DevTools (chrome)</span>
       <button class="btn-primary" id="setting-devtools-chrome">Open</button>
     </div>
+
+    <!-- ── Barre de favoris ────────────────────────────────────── -->
+    <div class="panel-section-label" style="margin-top:16px">Barre de favoris</div>
+    <div class="settings-row">
+      <span>Afficher la barre de favoris</span>
+      <label class="tg-switch">
+        <input type="checkbox" id="setting-bookmarks-bar" />
+        <span class="tg-slider"></span>
+      </label>
+    </div>
+
+    <!-- ── Onglets groupés ──────────────────────────────────── -->
+    <div class="panel-section-label" style="margin-top:16px">Onglets groupés</div>
+    <div class="settings-row">
+      <span>Activer le regroupement</span>
+      <label class="tg-switch">
+        <input type="checkbox" id="setting-tab-group-enabled" />
+        <span class="tg-slider"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span>Regrouper après</span>
+      <select id="setting-tab-group-delay" class="panel-select">
+        <option value="1">1 minute</option>
+        <option value="5" selected>5 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 heure</option>
+        <option value="120">2 heures</option>
+        <option value="720">12 heures</option>
+        <option value="1440">24 heures</option>
+        <option value="2880">48 heures</option>
+      </select>
+    </div>
+
   </div>
 
   <!-- Clear browsing data panel -->
@@ -221,6 +266,47 @@
 
   <!-- panel backdrop (click to dismiss) -->
   <div id="panel-backdrop" class="hidden"></div>
+
+  <!-- ── Tab group: create / rename / recolor ─────────────────── -->
+  <div id="panel-tab-group" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title" id="chg-panel-title">Nouveau groupe</span>
+      <button class="panel-close" id="chg-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-section-label">Couleur</div>
+    <div class="chg-colors" id="chg-colors"></div>
+    <div class="panel-section-label" style="margin-top:12px">Nom du groupe</div>
+    <input id="chg-name-input" class="panel-input" type="text"
+           placeholder="(optionnel)" maxlength="32" />
+    <div class="panel-row" style="margin-top:14px">
+      <button id="chg-cancel-btn" class="btn-secondary">Annuler</button>
+      <button id="chg-save-btn"   class="btn-primary">Enregistrer</button>
+    </div>
+  </div>
+
+  <!-- transparent overlay — catches clicks outside the chip ctx menu -->
+  <div id="chg-ctx-overlay" class="chg-ctx-overlay hidden"></div>
+
+  <!-- ── Tab group chip context menu (HTML dropdown) ─────────── -->
+  <div id="chg-ctx" class="chg-ctx hidden">
+    <div class="chg-ctx-item" id="chgctx-newtab">Nouvel onglet dans le groupe</div>
+    <div class="chg-ctx-item" id="chgctx-rename">&#9998;&nbsp; Renommer</div>
+    <div class="chg-ctx-item" id="chgctx-color">&#9679;&nbsp; Changer la couleur</div>
+    <div class="chg-ctx-sep"></div>
+    <div class="chg-ctx-item" id="chgctx-ungroup">Dégrouper</div>
+    <div class="chg-ctx-item" id="chgctx-close-save-bm">&#128193;&nbsp; Fermer le groupe</div>
+    <div class="chg-ctx-item chg-ctx-danger" id="chgctx-close-group">Fermer et supprimer</div>
+  </div>
+
+  <!-- ── Bookmarks bar context menu ──────────────────────────────── -->
+  <div id="bm-bar-ctx-overlay" class="chg-ctx-overlay hidden"></div>
+  <div id="bm-bar-ctx" class="chg-ctx hidden">
+    <div class="bm-ctx-item" id="bmctx-open">Ouvrir</div>
+    <div class="bm-ctx-item" id="bmctx-open-tab">Ouvrir dans un nouvel onglet</div>
+    <div class="chg-ctx-sep"></div>
+    <div class="bm-ctx-item" id="bmctx-edit">&#9998;&nbsp; Renommer</div>
+    <div class="bm-ctx-item bm-ctx-item-danger" id="bmctx-delete">&#128465;&nbsp; Supprimer</div>
+  </div>
 
   <script src="browser.js"></script>
 </body>
