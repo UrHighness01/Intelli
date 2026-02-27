@@ -14,9 +14,11 @@ const {
   nativeTheme,
   nativeImage,
   screen,
+  webContents: electronWebContents,
 } = require('electron');
-const path  = require('path');
-const fs    = require('fs');
+const path   = require('path');
+const fs     = require('fs');
+const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const http  = require('http');
 const os    = require('os');
@@ -74,10 +76,10 @@ app.commandLine.appendSwitch('force-color-profile', 'srgb');
 // bot-detection systems (X.com, Google, Cloudflare) catch immediately.
 const _osPlatform = process.platform;
 const CHROME_UA = _osPlatform === 'darwin'
-  ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+  ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.6834.110 Safari/537.36'
   : _osPlatform === 'win32'
-    ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
-    : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+    ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.6834.110 Safari/537.36'
+    : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.6834.110 Safari/537.36';
 const SEC_CH_UA_PLATFORM = _osPlatform === 'darwin' ? '"macOS"' : _osPlatform === 'win32' ? '"Windows"' : '"Linux"';
 
 // ─── Anti-detect script injected into every page via executeJavaScript() ──────
@@ -91,6 +93,13 @@ const _webglRenderer = _osPlatform === 'darwin'
   : _osPlatform === 'win32'
     ? 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)'
     : 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)';
+// Path where we write the generated antidetect preload at startup.
+// Placed in the OS temp dir so it survives restarts but is writable.
+const _ANTIDETECT_PRELOAD_PATH = path.join(app.getPath('temp'), 'intelli-antidetect-preload.js');
+// Separate direct-execution preload for the Google auth popup (contextIsolation:false).
+// Runs ANTIDETECT_JS straight in the main world — no <script> element trick needed.
+const _POPUP_PRELOAD_PATH = path.join(app.getPath('temp'), 'intelli-popup-preload.js');
+
 const ANTIDETECT_JS = `(function(){
   // 1. navigator.webdriver
   try{Object.defineProperty(navigator,'webdriver',{get:()=>undefined,configurable:true});}catch(_){}
@@ -149,7 +158,217 @@ const ANTIDETECT_JS = `(function(){
   // 10. outerWidth / outerHeight
   try{Object.defineProperty(window,'outerWidth',{get:()=>window.innerWidth,configurable:true});}catch(_){}
   try{Object.defineProperty(window,'outerHeight',{get:()=>window.innerHeight+74,configurable:true});}catch(_){}
+  // 11. chrome.webstore — Google uses its presence to detect real Chrome
+  try{
+    if(window.chrome&&!window.chrome.webstore){
+      window.chrome.webstore={
+        onInstallStageChanged:{addListener:()=>{},removeListener:()=>{}},
+        onDownloadProgress:{addListener:()=>{},removeListener:()=>{}},
+        install:(u,ok,fail)=>{if(fail)fail('This feature requires the Chrome Web Store');}
+      };
+    }
+  }catch(_){}
+  // 12. navigator.userAgentData — exposes "Electron" brand if not overridden
+  try{
+    const _brands=[{brand:'Not A(Brand',version:'8'},{brand:'Chromium',version:'132'},{brand:'Google Chrome',version:'132'}];
+    const _fullBrands=[{brand:'Not A(Brand',version:'8.0.0.0'},{brand:'Chromium',version:'132.0.6834.110'},{brand:'Google Chrome',version:'132.0.6834.110'}];
+    const _platform='${_osPlatform === 'win32' ? 'Windows' : _osPlatform === 'darwin' ? 'macOS' : 'Linux'}';
+    const _uad={
+      brands:_brands,
+      mobile:false,
+      platform:_platform,
+      getHighEntropyValues(hints){
+        const r={brands:_brands,mobile:false,platform:_platform,architecture:'x86',bitness:'64',model:'',platformVersion:'6.1.0',fullVersionList:_fullBrands,uaFullVersion:'132.0.6834.110',wow64:false};
+        return Promise.resolve(Object.fromEntries(hints.map(h=>[h,r[h]])));
+      },
+      toJSON(){return{brands:_brands,mobile:false,platform:_platform};}
+    };
+    Object.defineProperty(navigator,'userAgentData',{get:()=>_uad,configurable:true});
+  }catch(_){}
 })();`;
+
+// ─── Google Sign-in popup ────────────────────────────────────────────────────────
+// Google detects Electron BrowserView as an "insecure embedded webview" and
+// blocks sign-in.  Opening a standalone BrowserWindow with the same session
+// makes it indistinguishable from a normal Chrome popup window.
+// Cookies are shared (same defaultSession) so auth persists to all tabs.
+
+let _googleAuthWin = null;
+
+const GOOGLE_AUTH_HOSTS = [
+  'accounts.google.com',
+  'accounts.youtube.com',
+];
+
+function _isGoogleAuthUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    // Any URL on accounts.google.com or accounts.youtube.com is a Google auth page
+    return GOOGLE_AUTH_HOSTS.includes(u.hostname);
+  } catch { return false; }
+}
+
+function openGoogleAuthPopup(url) {
+  if (_googleAuthWin && !_googleAuthWin.isDestroyed()) {
+    _googleAuthWin.loadURL(url);
+    _googleAuthWin.focus();
+    return;
+  }
+  _googleAuthWin = new BrowserWindow({
+    width:           520,
+    height:          680,
+    title:           'Sign in with Google',
+    autoHideMenuBar: true,
+    webPreferences: {
+      session:          session.defaultSession,   // shared cookies!
+      nodeIntegration:  false,
+      // contextIsolation:false — preload runs directly in the main world,
+      // so ANTIDETECT_JS patches navigator/window.chrome BEFORE any page
+      // inline script executes.  No <script> element trick, no CSP issue.
+      contextIsolation: false,
+      preload: _POPUP_PRELOAD_PATH,
+    },
+  });
+  _googleAuthWin.setMenuBarVisibility(false);
+  _googleAuthWin.webContents.setUserAgent(CHROME_UA);
+  // dom-ready injection kept as fallback in case preload file isn't ready
+  _googleAuthWin.webContents.on('dom-ready', () => {
+    if (!_googleAuthWin?.isDestroyed()) {
+      _googleAuthWin.webContents.executeJavaScript(ANTIDETECT_JS).catch(() => {});
+    }
+  });
+  // Close popup once Google redirects away from accounts (sign-in done)
+  // or if it navigates to a non-Google page (OAuth callback)
+  _googleAuthWin.webContents.on('will-navigate', (_, navUrl) => {
+    try {
+      const u = new URL(navUrl);
+      if (!u.hostname.endsWith('.google.com') && !u.hostname.endsWith('.youtube.com')) {
+        // OAuth callback going elsewhere — open in Intelli tab + close popup
+        setImmediate(() => createTab(navUrl));
+        _googleAuthWin?.close();
+      }
+    } catch (_) {}
+  });
+  _googleAuthWin.on('closed', () => { _googleAuthWin = null; });
+  _googleAuthWin.loadURL(url);
+  _googleAuthWin.show();
+}
+
+// ─── Extension context-menu bridge ──────────────────────────────────────────
+// Tracks background/popup webContents for loaded extensions so we can
+// read their chrome.contextMenus registrations and dispatch click events.
+
+/** extId → webContents (background page or popup page) */
+const _extBgPages = new Map();
+/** extId → [{id, title, contexts, enabled, parentId}] */
+const _extContextMenuCache = new Map();
+
+// Injected into every chrome-extension:// webContents after load.
+// Monkey-patches chrome.contextMenus.create/update/remove so registrations
+// are captured in window._intelliCtxItems (readable via executeJavaScript).
+const _EXT_CTX_BRIDGE = `(function(){
+  if(window.__intelliCtxBridge__)return;
+  window.__intelliCtxBridge__=true;
+  window._intelliCtxItems={};
+  function _hook(){
+    if(!window.chrome||!chrome.contextMenus)return;
+    if(chrome.contextMenus.__hooked__)return;
+    chrome.contextMenus.__hooked__=true;
+    var _c=chrome.contextMenus.create.bind(chrome.contextMenus);
+    chrome.contextMenus.create=function(p,cb){
+      var k=String(p.id||Object.keys(window._intelliCtxItems).length);
+      window._intelliCtxItems[k]=Object.assign({},p,{id:k});
+      return _c(p,cb);
+    };
+    var _u=chrome.contextMenus.update.bind(chrome.contextMenus);
+    chrome.contextMenus.update=function(id,changes,cb){
+      if(window._intelliCtxItems[id])Object.assign(window._intelliCtxItems[id],changes);
+      return _u(id,changes,cb);
+    };
+    var _r=chrome.contextMenus.remove.bind(chrome.contextMenus);
+    chrome.contextMenus.remove=function(id,cb){
+      delete window._intelliCtxItems[id];
+      return _r(id,cb);
+    };
+    chrome.contextMenus.removeAll=function(cb){
+      window._intelliCtxItems={};
+      return _r&&typeof _r==='function'?_r(cb):undefined;
+    };
+  }
+  // Try immediately and at staggered delays for lazy-init extensions
+  _hook();
+  setTimeout(_hook,500);
+  setTimeout(_hook,1500);
+})();`;
+
+async function _fetchExtContextMenuItems(extId, wc) {
+  if (!wc || wc.isDestroyed()) return;
+  try {
+    const raw = await wc.executeJavaScript('JSON.stringify(window._intelliCtxItems||{})');
+    const obj = JSON.parse(raw || '{}');
+    const items = Object.entries(obj).map(([id, p]) => ({
+      id:       String(p.id !== undefined ? p.id : id),
+      title:    String(p.title || id),
+      contexts: Array.isArray(p.contexts) ? p.contexts : ['all'],
+      enabled:  p.enabled !== false,
+      parentId: p.parentId != null ? String(p.parentId) : null,
+    }));
+    if (items.length) _extContextMenuCache.set(extId, items);
+  } catch (_) {}
+}
+
+async function _refreshExtContextMenus() {
+  // Also scan all live webContents for any extension pages not yet tracked
+  try {
+    const all = electronWebContents.getAllWebContents();
+    for (const wc of all) {
+      if (wc.isDestroyed()) continue;
+      const url = wc.getURL();
+      const m = url.match(/^chrome-extension:\/\/([a-z]{32})\//);
+      if (m && !_extBgPages.has(m[1])) {
+        _extBgPages.set(m[1], wc);
+        try { await wc.executeJavaScript(_EXT_CTX_BRIDGE); } catch (_) {}
+        setTimeout(() => _fetchExtContextMenuItems(m[1], wc), 800);
+      }
+    }
+  } catch (_) {}
+  for (const [extId, wc] of _extBgPages) {
+    if (wc.isDestroyed()) { _extBgPages.delete(extId); continue; }
+    await _fetchExtContextMenuItems(extId, wc);
+  }
+}
+
+let _ctxRefreshTimer = null;
+function _scheduleCtxMenuRefresh(delay = 2000) {
+  clearTimeout(_ctxRefreshTimer);
+  _ctxRefreshTimer = setTimeout(async function _tick() {
+    await _refreshExtContextMenus();
+    _ctxRefreshTimer = setTimeout(_tick, 8000);
+  }, delay);
+}
+
+function _dispatchExtCtxClick(extId, itemId, params) {
+  const wc = _extBgPages.get(extId);
+  if (!wc || wc.isDestroyed()) return;
+  const info = {
+    menuItemId:    itemId,
+    selectionText: params.selectionText || '',
+    linkUrl:       params.linkURL       || '',
+    srcUrl:        params.srcURL        || '',
+    pageUrl:       params.pageURL       || '',
+    frameUrl:      params.frameURL      || '',
+    editable:      params.isEditable    || false,
+  };
+  wc.executeJavaScript(`
+    (function(){
+      try{
+        if(chrome&&chrome.contextMenus&&chrome.contextMenus.onClicked){
+          chrome.contextMenus.onClicked.dispatch(${JSON.stringify(info)},{url:${JSON.stringify(params.pageURL||'')}});
+        }
+      }catch(e){}
+    })()
+  `).catch(()=>{});
+}
 
 // ─── Gateway process handle ───────────────────────────────────────────────────
 let gatewayProcess  = null;
@@ -191,6 +410,70 @@ function _closeHoverWin() {
 // ─── User-data paths ──────────────────────────────────────────────────────────
 function userDataFile(name) {
   return path.join(app.getPath('userData'), name);
+}
+
+// ─── Chrome Extension storage ─────────────────────────────────────────────────
+// Extensions are stored unpacked in <userData>/chrome-extensions/<uuid>/
+// The index file tracks metadata: [{id, name, version, path, enabled}]
+const CHROME_EXT_DIR  = () => path.join(app.getPath('userData'), 'chrome-extensions');
+const CHROME_EXT_FILE = () => userDataFile('chrome-extensions.json');
+
+function _readExtIndex() {
+  try { return JSON.parse(fs.readFileSync(CHROME_EXT_FILE(), 'utf8')); }
+  catch { return []; }
+}
+function _writeExtIndex(list) {
+  fs.writeFileSync(CHROME_EXT_FILE(), JSON.stringify(list, null, 2));
+}
+
+/** Extract a CRX3 file to a fresh subdirectory. Returns the extracted dir path. */
+async function _extractCrx(crxPath) {
+  const buf = fs.readFileSync(crxPath);
+  const magic = buf.toString('ascii', 0, 4);
+  if (magic !== 'Cr24') throw new Error('Not a valid CRX file (bad magic bytes)');
+  const version = buf.readUInt32LE(4);
+  if (version !== 3) throw new Error(`Unsupported CRX version ${version} (only CRX3 is supported)`);
+  const headerSize = buf.readUInt32LE(8);
+  const zipOffset  = 12 + headerSize;
+  const zipBuf     = buf.slice(zipOffset);
+
+  // Write the embedded ZIP to a temp file then extract it
+  const uuid    = crypto.randomUUID();
+  const tmpZip  = path.join(os.tmpdir(), `intelli-crx-${uuid}.zip`);
+  fs.writeFileSync(tmpZip, zipBuf);
+
+  const destDir = path.join(CHROME_EXT_DIR(), uuid);
+  fs.mkdirSync(destDir, { recursive: true });
+
+  await new Promise((resolve, reject) => {
+    // `unzip` is standard on Linux/macOS; use PowerShell on Windows
+    const cmd  = process.platform === 'win32' ? 'powershell' : 'unzip';
+    const args = process.platform === 'win32'
+      ? ['-NoProfile', '-Command', `Expand-Archive -Force -Path '${tmpZip}' -DestinationPath '${destDir}'`]
+      : ['-o', tmpZip, '-d', destDir];
+    execFile(cmd, args, (err) => {
+      try { fs.unlinkSync(tmpZip); } catch (_) {}
+      if (err) reject(new Error(`Failed to extract CRX: ${err.message}`));
+      else resolve();
+    });
+  });
+  return destDir;
+}
+
+/** Load all saved (enabled) extensions into the default session. */
+async function loadSavedExtensions() {
+  const list = _readExtIndex();
+  for (const ext of list) {
+    if (!ext.enabled) continue;
+    try {
+      await session.defaultSession.loadExtension(ext.path, { allowFileAccess: true });
+      console.log(`[ext] loaded "${ext.name}" (${ext.id})`);
+    } catch (e) {
+      console.warn(`[ext] failed to load "${ext.name}": ${e.message}`);
+    }
+  }
+  // Allow extension background pages to finish registering contextMenus items
+  if (list.some(e => e.enabled)) _scheduleCtxMenuRefresh(5000);
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -642,7 +925,14 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
   });
 
   // Navigation guard: block private IPs and dangerous schemes synchronously.
-  view.webContents.on('will-navigate', (event, navUrl) => {
+  // Both will-navigate (JS/link-initiated) AND will-redirect (HTTP 302s) are
+  // intercepted so Google sign-in is caught regardless of how the redirect arrives.
+  function _navGuard(event, navUrl) {
+    if (_isGoogleAuthUrl(navUrl)) {
+      event.preventDefault();
+      openGoogleAuthPopup(navUrl);
+      return;
+    }
     const reason = _isBlockedURL(navUrl);
     if (reason) {
       event.preventDefault();
@@ -651,7 +941,9 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
       notifyChrome('nav-blocked', { id, url: navUrl, reason });
       console.warn(`[NavGuard] Blocked navigation to ${navUrl}: ${reason}`);
     }
-  });
+  }
+  view.webContents.on('will-navigate', _navGuard);
+  view.webContents.on('will-redirect', _navGuard);
 
   view.webContents.on('did-navigate', (_, navUrl) => {
     if (activeTabId === id) {
@@ -738,6 +1030,79 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
       click: () => view.webContents.inspectElement(params.x, params.y),
     });
 
+    // ── Extension context menus ───────────────────────────────────────────
+    // Determine click context so we include only items that apply
+    const _clickCtx = params.selectionText
+      ? 'selection'
+      : params.linkURL
+        ? 'link'
+        : (params.mediaType && params.mediaType !== 'none')
+          ? params.mediaType  // 'image' | 'video' | 'audio'
+          : 'page';
+
+    const _enabledIds = new Set(_readExtIndex().filter(r => r.enabled).map(r => r.id));
+    let _extItemsAdded = false;
+
+    for (const [extId, extItems] of _extContextMenuCache) {
+      if (!_enabledIds.has(extId)) continue;
+      // Top-level items whose contexts match
+      const topItems = extItems.filter(item => {
+        if (!item.enabled || item.parentId) return false;
+        const ctx = item.contexts;
+        return ctx.includes('all') || ctx.includes(_clickCtx)
+          || (_clickCtx === 'selection' && ctx.includes('selection'))
+          || (_clickCtx === 'link'      && ctx.includes('link'))
+          || (ctx.includes('editable')  && params.isEditable)
+          || ctx.includes('page');
+      });
+      if (!topItems.length) continue;
+
+      if (!_extItemsAdded) {
+        items.push({ type: 'separator' });
+        _extItemsAdded = true;
+      }
+
+      const extRec   = _readExtIndex().find(r => r.id === extId);
+      const extLabel = extRec?.name || extId.slice(0, 10);
+
+      // Build a submenu per extension if there are multiple items,
+      // otherwise inline the single item directly
+      if (topItems.length === 1) {
+        const item  = topItems[0];
+        const label = item.title.replace(/%s/g, params.selectionText || '');
+        const children = extItems.filter(c => c.parentId === item.id && c.enabled);
+        if (children.length) {
+          items.push({
+            label,
+            submenu: children.map(c => ({
+              label: c.title.replace(/%s/g, params.selectionText || ''),
+              click: () => _dispatchExtCtxClick(extId, c.id, params),
+            })),
+          });
+        } else {
+          items.push({ label, click: () => _dispatchExtCtxClick(extId, item.id, params) });
+        }
+      } else {
+        items.push({
+          label: extLabel,
+          submenu: topItems.map(item => {
+            const label    = item.title.replace(/%s/g, params.selectionText || '');
+            const children = extItems.filter(c => c.parentId === item.id && c.enabled);
+            if (children.length) {
+              return {
+                label,
+                submenu: children.map(c => ({
+                  label: c.title.replace(/%s/g, params.selectionText || ''),
+                  click: () => _dispatchExtCtxClick(extId, c.id, params),
+                })),
+              };
+            }
+            return { label, click: () => _dispatchExtCtxClick(extId, item.id, params) };
+          }),
+        });
+      }
+    }
+
     Menu.buildFromTemplate(items).popup({ window: mainWin });
   });
   // Single combined did-finish-load handler — consolidates admin-token injection,
@@ -786,6 +1151,9 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
                     console.log(`[addon] skip "${addon.name}" — url_pattern "${addon.url_pattern}" not in ${currentUrl}`);
                     continue;
                   }
+                  // Never inject addons into the Google auth popup
+                  const _popWcId = _googleAuthWin && !_googleAuthWin.isDestroyed() ? _googleAuthWin.webContents.id : -1;
+                  if (view.webContents.id === _popWcId) continue;
                   try {
                     // Execute addon.code_js directly — avoids CodeQL js/improper-code-sanitization (CWE-116).
                     await view.webContents.executeJavaScript(addon.code_js);
@@ -1535,6 +1903,130 @@ function registerIPC() {
 
   ipcMain.on('hide-tab-preview', _closeHoverWin);
 
+  // ── Chrome Extensions ────────────────────────────────────────────────────
+
+  /** Return the current extension index merged with live session data. */
+  ipcMain.handle('ext-list', async () => {
+    const live = session.defaultSession.getAllExtensions();
+    const liveMap = Object.fromEntries(live.map(e => [e.id, e]));
+    const list = _readExtIndex();
+    return list.map(rec => {
+      // Read manifest to derive options / popup page URLs
+      let optionsUrl = null;
+      let popupUrl   = null;
+      try {
+        const mf = JSON.parse(fs.readFileSync(path.join(rec.path, 'manifest.json'), 'utf8'));
+        const optPage = mf.options_ui?.page || mf.options_page || null;
+        const popPage = mf.action?.default_popup || mf.browser_action?.default_popup || null;
+        if (optPage) optionsUrl = `chrome-extension://${rec.id}/${optPage.replace(/^\//, '')}`;
+        if (popPage) popupUrl   = `chrome-extension://${rec.id}/${popPage.replace(/^\//, '')}`;
+      } catch (_) {}
+      return {
+        ...rec,
+        liveLoaded: !!liveMap[rec.id],
+        optionsUrl,
+        popupUrl,
+      };
+    });
+  });
+
+  /** Pick an unpacked extension folder, load it, persist to index. */
+  ipcMain.handle('ext-load-unpacked', async () => {
+    const result = await dialog.showOpenDialog(mainWin, {
+      title: 'Select unpacked extension folder',
+      properties: ['openDirectory'],
+      buttonLabel: 'Load Extension',
+    });
+    if (result.canceled || !result.filePaths.length) return { ok: false, reason: 'cancelled' };
+    const extPath = result.filePaths[0];
+    const manifestPath = path.join(extPath, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return { ok: false, reason: 'No manifest.json found in selected folder' };
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
+    catch (e) { return { ok: false, reason: `Invalid manifest.json: ${e.message}` }; }
+    let loaded;
+    try { loaded = await session.defaultSession.loadExtension(extPath, { allowFileAccess: true }); }
+    catch (e) { return { ok: false, reason: e.message }; }
+    const list  = _readExtIndex();
+    const extId = loaded.id;
+    if (!list.find(r => r.id === extId)) {
+      list.push({ id: extId, name: manifest.name || 'Unknown', version: manifest.version || '', path: extPath, enabled: true });
+      _writeExtIndex(list);
+    }
+    return { ok: true, id: extId, name: manifest.name, version: manifest.version };
+  });
+
+  /** Pick a CRX file, extract it, load it, persist to index. */
+  ipcMain.handle('ext-load-crx', async () => {
+    const result = await dialog.showOpenDialog(mainWin, {
+      title: 'Select CRX extension file',
+      properties: ['openFile'],
+      filters: [{ name: 'Chrome Extension', extensions: ['crx'] }],
+      buttonLabel: 'Load CRX',
+    });
+    if (result.canceled || !result.filePaths.length) return { ok: false, reason: 'cancelled' };
+    const crxPath = result.filePaths[0];
+    let extPath;
+    try { extPath = await _extractCrx(crxPath); }
+    catch (e) { return { ok: false, reason: `CRX extraction failed: ${e.message}` }; }
+    const manifestPath = path.join(extPath, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return { ok: false, reason: 'Extracted CRX has no manifest.json' };
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
+    catch (e) { return { ok: false, reason: `Invalid manifest.json: ${e.message}` }; }
+    let loaded;
+    try { loaded = await session.defaultSession.loadExtension(extPath, { allowFileAccess: true }); }
+    catch (e) { return { ok: false, reason: e.message }; }
+    const extId = loaded.id;
+    const list  = _readExtIndex();
+    if (!list.find(r => r.id === extId)) {
+      list.push({ id: extId, name: manifest.name || 'Unknown', version: manifest.version || '', path: extPath, enabled: true });
+      _writeExtIndex(list);
+    }
+    return { ok: true, id: extId, name: manifest.name, version: manifest.version };
+  });
+
+  /** Remove a Chrome extension (unload from session + delete from index). */
+  ipcMain.handle('ext-remove', async (_, extId) => {
+    try { await session.defaultSession.removeExtension(extId); } catch (_) {}
+    let list = _readExtIndex();
+    const rec = list.find(r => r.id === extId);
+    list = list.filter(r => r.id !== extId);
+    _writeExtIndex(list);
+    // Clean up extracted dir if inside userData
+    if (rec && rec.path.startsWith(CHROME_EXT_DIR())) {
+      try { fs.rmSync(rec.path, { recursive: true, force: true }); } catch (_) {}
+    }
+    return { ok: true };
+  });
+
+  /** Enable or disable a Chrome extension (persists; re-loads session on enable). */
+  ipcMain.handle('ext-toggle', async (_, { extId, enabled }) => {
+    const list = _readExtIndex();
+    const rec  = list.find(r => r.id === extId);
+    if (!rec) return { ok: false, reason: 'Extension not found' };
+    rec.enabled = !!enabled;
+    _writeExtIndex(list);
+    if (!enabled) {
+      try { await session.defaultSession.removeExtension(extId); } catch (_) {}
+    } else {
+      try { await session.defaultSession.loadExtension(rec.path, { allowFileAccess: true }); } catch (e) {
+        return { ok: false, reason: e.message };
+      }
+    }
+    return { ok: true };
+  });
+
+  /** Rename (set custom display name for) a Chrome extension in the index. */
+  ipcMain.handle('ext-rename', (_, { extId, name }) => {
+    const list = _readExtIndex();
+    const rec  = list.find(r => r.id === extId);
+    if (!rec) return { ok: false, reason: 'Extension not found' };
+    rec.name = (name || '').trim() || rec.name;
+    _writeExtIndex(list);
+    return { ok: true, name: rec.name };
+  });
+
   // ── Downloads ─────────────────────────────────────────────────────────────
   ipcMain.handle('open-downloads-folder', () => {
     shell.openPath(app.getPath('downloads'));
@@ -1581,9 +2073,10 @@ function registerIPC() {
       { type: 'separator' },
       {
         label: 'Extensions / Addons', submenu: [
-          { label: 'Manage Intelli Addons', click: () => createTab(`${GATEWAY_ORIGIN}/ui/addons.html`) },
-          { label: 'Chrome Web Store',      click: () => createTab('https://chrome.google.com/webstore') },
-          { label: 'Developer Mode Addons', click: () => notifyChrome('open-panel', 'dev-addons') },
+          { label: 'Manage Intelli Addons',    click: () => createTab(`${GATEWAY_ORIGIN}/ui/addons.html`) },
+          { label: 'Manage Chrome Extensions', click: () => notifyChrome('open-panel', 'chrome-ext') },
+          { label: 'Chrome Web Store',         click: () => createTab('https://chrome.google.com/webstore') },
+          { label: 'Developer Mode Addons',    click: () => notifyChrome('open-panel', 'dev-addons') },
         ],
       },
       { type: 'separator' },
@@ -1937,12 +2430,35 @@ function installCSP() {
     "connect-src http://127.0.0.1:8080",
   ].join('; ');
 
-  // Narrow to the exact chrome renderer URL (browser.html) so we don't
-  // accidentally clobber other file:// pages (e.g. splash.html).
-  const filter = { urls: ['file://*browser.html*', 'file://*browser.html'] };
-  session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+  // Handle both the browser shell page's own CSP and Google auth page CSP
+  // in a single onHeadersReceived handler (Electron only supports 1 listener).
+  // For Google auth pages we STRIP their CSP entirely so the antidetect
+  // preload's <script> injection (which lacks a CSP nonce) is not blocked.
+  const _GOOGLE_AUTH_HOSTS_RE = /^accounts\.(google|youtube)\.com$/;
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
     const hdrs = { ...details.responseHeaders };
-    hdrs['Content-Security-Policy'] = [CHROME_CSP];
+    const url = details.url || '';
+
+    // --- browser.html: apply our strict own CSP ---
+    if (url.includes('browser.html')) {
+      hdrs['Content-Security-Policy'] = [CHROME_CSP];
+      return callback({ responseHeaders: hdrs });
+    }
+
+    // --- Google auth pages: remove CSP so preload injection works ---
+    try {
+      const _host = new URL(url).hostname;
+      if (_GOOGLE_AUTH_HOSTS_RE.test(_host)) {
+        // Delete CSP headers case-insensitively (Electron lowercases response headers)
+        for (const k of Object.keys(hdrs)) {
+          const kl = k.toLowerCase();
+          if (kl === 'content-security-policy' || kl === 'content-security-policy-report-only') {
+            delete hdrs[k];
+          }
+        }
+      }
+    } catch (_) {}
+
     callback({ responseHeaders: hdrs });
   });
 }
@@ -2018,10 +2534,83 @@ function createMainWindow() {
 app.whenReady().then(async () => {
   installCSP();   // must be first — sets up webRequest before any window loads
 
+  // ── Generate & register the antidetect preload script ───────────────────
+  // ANTIDETECT_JS patches navigator.userAgentData, window.chrome, etc.
+  // Injecting via executeJavaScript at dom-ready is TOO LATE — Google's
+  // bot-detection inline scripts run before DOMContentLoaded.
+  // Solution: write a preload script that injects into the MAIN world via a
+  // <script> element SYNCHRONOUSLY, before any page code runs, then register
+  // it on the session so it applies to every frame.
+  try {
+    const _preloadContent = [
+      "'use strict';",
+      "// Generated by Intelli – injects antidetect payload into the main world",
+      "// before any page script (including Google's bot-detection inline code).",
+      "try {",
+      "  const _s = document.createElement('script');",
+      `  _s.textContent = ${JSON.stringify(ANTIDETECT_JS)};`,
+      "  (document.documentElement || document.head || document.body).appendChild(_s);",
+      "  _s.remove();",
+      "} catch (_) {}",
+    ].join('\n');
+    fs.writeFileSync(_ANTIDETECT_PRELOAD_PATH, _preloadContent, 'utf8');
+
+    // Popup preload: direct IIFE — contextIsolation:false means this runs in the
+    // main world already, so no <script> injection needed.  Preloads bypass CSP.
+    // CRITICAL: also clean up Electron globals that contextIsolation:false leaks
+    // into the main world (window.process.versions.electron, window.Buffer, etc.).
+    // These must be removed AFTER the IIFE so they're available during patching.
+    const _popupPreloadContent = [
+      "'use strict';",
+      "// Generated by Intelli – runs ANTIDETECT_JS directly in the main world.",
+      // ANTIDETECT_JS already starts with (function(){ and ends with })(); — no extra wrapper needed.
+      ANTIDETECT_JS,
+      "// ── Remove Electron-specific globals (contextIsolation:false leaks these) ──",
+      "// Google's bot-detection checks window.process.versions.electron.",
+      "try { Object.defineProperty(window, 'process', { get: () => undefined, configurable: true, enumerable: false }); } catch (_) {}",
+      "try { Object.defineProperty(window, 'Buffer', { get: () => undefined, configurable: true, enumerable: false }); } catch (_) {}",
+      "// global is normally === window in browsers; Electron sets it to its own obj.",
+      "try { if (window.global !== window) Object.defineProperty(window, 'global', { get: () => window, configurable: true }); } catch (_) {}",
+    ].join('\n');
+    fs.writeFileSync(_POPUP_PRELOAD_PATH, _popupPreloadContent, 'utf8');
+
+    // Register on the session so it applies to every frame (BrowserViews + popups).
+    // setPreloads is the stable cross-version API; registerPreloadScript is newer.
+    // Try both so it works across Electron versions.
+    let _registered = false;
+    if (typeof session.defaultSession.registerPreloadScript === 'function') {
+      try {
+        session.defaultSession.registerPreloadScript({
+          id:     'intelli-antidetect',
+          type:   'frame',
+          script: _ANTIDETECT_PRELOAD_PATH,
+        });
+        _registered = true;
+      } catch (_) { /* try setPreloads fallback below */ }
+    }
+    if (!_registered && typeof session.defaultSession.setPreloads === 'function') {
+      session.defaultSession.setPreloads([_ANTIDETECT_PRELOAD_PATH]);
+      _registered = true;
+    }
+    if (!_registered) {
+      console.warn('[antidetect] no preload registration API available; relying on dom-ready injection only');
+    }
+    console.log('[antidetect] preload registered:', _ANTIDETECT_PRELOAD_PATH);
+  } catch (e) {
+    console.warn('[antidetect] failed to register preload:', e.message);
+  }
+
   // ── Override User-Agent on the default session ──────────────────────────
   // Replaces "Electron/29.x.x" with a clean Chrome 122 UA so Google, Cloudflare
   // and reCAPTCHA don't fingerprint us as automation.
   session.defaultSession.setUserAgent(CHROME_UA);
+
+  // Note: session.setUserAgentMetadata() does NOT exist in Electron 35.
+  // The Sec-CH-UA client-hint brands are patched via onBeforeSendHeaders below
+  // (sets Sec-CH-UA / Sec-CH-UA-Full-Version-List / Sec-CH-UA-Arch etc.), and
+  // the JS-level navigator.userAgentData is patched by ANTIDETECT_JS injected
+  // at dom-ready into every page.  Google's "not secure" check is server-side
+  // (header-based), so the header fixes plus X-Client-Data are sufficient.
 
   // Grant media / DRM / notification permissions automatically so YouTube
   // and other media sites never get silently blocked.
@@ -2035,23 +2624,95 @@ app.whenReady().then(async () => {
     return !denied.includes(permission);
   });
 
-  // Strip the Sec-CH-UA hint that also reveals Electron
+  // Strip any Electron-identifying headers and inject full Chrome header set.
+  // X-Client-Data is a Chrome field-trial protobuf header sent to all Google
+  // properties.  Its absence is Google's primary signal that the browser is NOT
+  // real Chrome — adding it (any plausible value) removes that signal.
+  const _SEC_CH_UA       = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"';
+  const _SEC_CH_UA_FULL  = '"Not A(Brand";v="8.0.0.0", "Chromium";v="132.0.6834.110", "Google Chrome";v="132.0.6834.110"';
+  // Real Chrome 132 field-trial header value (protobuf-encoded, base64)
+  const _X_CLIENT_DATA   = 'CJa2yQEIprbJAQipncoBCKijygEIkqHLAQiFoM0BCIWkzQEI3tXNAQ==';
+
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const h = details.requestHeaders;
-    h['User-Agent']          = CHROME_UA;
-    h['Sec-CH-UA']           = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"';
-    h['Sec-CH-UA-Mobile']    = '?0';
-    h['Sec-CH-UA-Platform']  = SEC_CH_UA_PLATFORM;
-    h['Accept-Language']     = _acceptLanguage;
+
+    // Core UA / client-hints spoofing
+    h['User-Agent']                  = CHROME_UA;
+    h['Sec-CH-UA']                   = _SEC_CH_UA;
+    h['Sec-CH-UA-Mobile']            = '?0';
+    h['Sec-CH-UA-Platform']          = SEC_CH_UA_PLATFORM;
+    h['Sec-CH-UA-Full-Version-List'] = _SEC_CH_UA_FULL;
+    h['Sec-CH-UA-Arch']              = '"x86"';
+    h['Sec-CH-UA-Bitness']           = '"64"';
+    h['Sec-CH-UA-Model']             = '""';
+    h['Accept-Language']             = _acceptLanguage;
+
+    // X-Client-Data: Chrome sends this to all Google domains; its absence is the
+    // #1 signal Google uses to detect non-Chrome browsers (including Electron).
+    try {
+      const _reqHost = new URL(details.url).hostname;
+      if (_reqHost.endsWith('.google.com') || _reqHost.endsWith('.googleapis.com') ||
+          _reqHost.endsWith('.youtube.com') || _reqHost.endsWith('.gstatic.com') ||
+          _reqHost.endsWith('.googlevideo.com')) {
+        h['X-Client-Data'] = _X_CLIENT_DATA;
+        // DEBUG: write headers to file so we can verify what's actually sent
+        if (_reqHost === 'accounts.google.com' && details.resourceType === 'mainFrame') {
+          const _dbgLine = JSON.stringify({
+            url: details.url.split('?')[0],
+            ua:  h['User-Agent'],
+            sch: h['Sec-CH-UA'],
+            xcd: h['X-Client-Data'],
+            keys: Object.keys(h),
+          }) + '\n';
+          fs.appendFileSync('/tmp/intelli-google-headers.txt', _dbgLine);
+        }
+      }
+    } catch (_) {}
+
+    // Remove any headers that could expose the Electron runtime
     delete h['X-Electron-Version'];
     delete h['X-Electron-App-Version'];
+
     callback({ cancel: false, requestHeaders: h });
   });
 
   setupDownloads(session.defaultSession);
   registerIPC();
+  await loadSavedExtensions();
 
-  // Show a loading window while the gateway boots
+  // ── Deep Google sign-in intercept via webRequest ────────────────────────────
+  // This catches the case where loadURL() is called directly (address bar) or
+  // an HTTP redirect arrives — neither of which fires will-navigate/will-redirect.
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['https://accounts.google.com/*', 'https://accounts.youtube.com/*'] },
+    (details, callback) => {
+      // Only intercept top-level navigations (not XHRs, images, etc from Google pages)
+      if (details.resourceType !== 'mainFrame') {
+        callback({ cancel: false });
+        return;
+      }
+      // Allow requests that come FROM the popup window itself (avoid infinite loop)
+      if (_googleAuthWin && !_googleAuthWin.isDestroyed() &&
+          details.webContentsId === _googleAuthWin.webContents.id) {
+        callback({ cancel: false });
+        return;
+      }
+      // Cancel the BrowserView navigation and open popup instead
+      callback({ cancel: true });
+      setImmediate(() => {
+        openGoogleAuthPopup(details.url);
+        // Navigate the source tab back so it doesn't show a broken-page error
+        try {
+          const srcWc = electronWebContents.fromId(details.webContentsId);
+          if (srcWc && !srcWc.isDestroyed()) {
+            if (srcWc.navigationHistory?.canGoBack()) srcWc.navigationHistory.goBack();
+            else srcWc.loadURL('about:blank');
+          }
+        } catch (_) {}
+      });
+    }
+  );
+
   const splash = new BrowserWindow({
     width: 400,
     height: 260,
@@ -2166,14 +2827,43 @@ app.on('before-quit', () => {
 
 // Security: restrict what new windows can be opened
 app.on('web-contents-created', (_, contents) => {
+  // Detect chrome-extension:// pages (background pages, popups, options pages)
+  // and inject the context-menu bridge so we can read registered items.
+  contents.on('did-finish-load', async () => {
+    const url = contents.getURL();
+    const m = url.match(/^chrome-extension:\/\/([a-z]{32})\//);
+    if (m) {
+      const extId = m[1];
+      try {
+        await contents.executeJavaScript(_EXT_CTX_BRIDGE);
+        _extBgPages.set(extId, contents);
+        // Allow background scripts to call contextMenus.create before we read
+        setTimeout(() => _fetchExtContextMenuItems(extId, contents), 1200);
+        setTimeout(() => _fetchExtContextMenuItems(extId, contents), 4000);
+        _scheduleCtxMenuRefresh(3000);
+      } catch (_) {}
+    }
+  });
+
   contents.setWindowOpenHandler(({ url }) => {
-    // Open external links in the system browser
-    if (!url.startsWith(GATEWAY_ORIGIN) && !url.startsWith('file://')) {
-      shell.openExternal(url);
+    // Google sign-in opened via window.open() — route to dedicated popup
+    if (_isGoogleAuthUrl(url)) {
+      setImmediate(() => openGoogleAuthPopup(url));
       return { action: 'deny' };
     }
-    // For gateway-origin links opened by the page, create a new tab instead
-    setImmediate(() => createTab(url));
+    // Always open gateway-origin links as a new Intelli tab
+    if (url.startsWith(GATEWAY_ORIGIN) || url.startsWith('file://')) {
+      setImmediate(() => createTab(url));
+      return { action: 'deny' };
+    }
+    // Open http/https links (including OAuth, external sites) as new Intelli tabs
+    // so auth flows and popups stay inside the browser.
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      setImmediate(() => createTab(url));
+      return { action: 'deny' };
+    }
+    // Non-web schemes (mailto:, tel:, magnet:, etc.) → system handler
+    shell.openExternal(url);
     return { action: 'deny' };
   });
 });

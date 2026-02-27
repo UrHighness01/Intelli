@@ -559,6 +559,7 @@ async function openPanel(name) {
   if (name === 'bookmarks')     loadBookmarksPanel();
   if (name === 'history')       loadHistoryPanel();
   if (name === 'settings')      { renderTabGroupList(); loadSettingsPanel(); }
+  if (name === 'chrome-ext')    loadChromeExtPanel();
 }
 
 function closeAllPanels() {
@@ -1274,11 +1275,12 @@ document.getElementById('setting-newtab-custom-url')?.addEventListener('keydown'
   if (e.key === 'Enter') _saveNewtabSetting();
 });
 
-document.getElementById('setting-open-hub')      ?.addEventListener('click', () => { window.electronAPI.goHome(); closeAllPanels(); });
-document.getElementById('setting-open-addons')   ?.addEventListener('click', () => { window.electronAPI.newTab('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
-document.getElementById('setting-open-downloads') ?.addEventListener('click', () => window.electronAPI.openDownloadsFolder());
-document.getElementById('setting-devtools-page')  ?.addEventListener('click', () => window.electronAPI.toggleDevTools());
-document.getElementById('setting-devtools-chrome')?.addEventListener('click', () => window.electronAPI.toggleChromeDevTools());
+document.getElementById('setting-open-hub')          ?.addEventListener('click', () => { window.electronAPI.goHome(); closeAllPanels(); });
+document.getElementById('setting-open-addons')       ?.addEventListener('click', () => { window.electronAPI.newTab('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
+document.getElementById('setting-open-chrome-ext')   ?.addEventListener('click', () => { closeAllPanels(); openPanel('chrome-ext'); });
+document.getElementById('setting-open-downloads')    ?.addEventListener('click', () => window.electronAPI.openDownloadsFolder());
+document.getElementById('setting-devtools-page')     ?.addEventListener('click', () => window.electronAPI.toggleDevTools());
+document.getElementById('setting-devtools-chrome')   ?.addEventListener('click', () => window.electronAPI.toggleChromeDevTools());
 
 /* ─── Clear data panel ──────────────────────────────────────────── */
 document.getElementById('clr-cancel-btn')?.addEventListener('click', closeAllPanels);
@@ -1308,6 +1310,188 @@ document.getElementById('devaddon-run-btn')?.addEventListener('click', async () 
 });
 document.getElementById('devaddon-store-btn')?.addEventListener('click', () => { window.electronAPI.newTab('https://chrome.google.com/webstore'); closeAllPanels(); });
 document.getElementById('devaddon-mgr-btn')  ?.addEventListener('click', () => { window.electronAPI.newTab('http://127.0.0.1:8080/ui/addons.html'); closeAllPanels(); });
+
+/* ─── Chrome Extensions panel ──────────────────────────────────── */
+const $chrextList   = document.getElementById('chrext-list');
+const $chrextStatus = document.getElementById('chrext-status');
+
+function _chrextMsg(msg, ok) {
+  if (!$chrextStatus) return;
+  $chrextStatus.textContent = (ok ? '✓ ' : '✗ ') + msg;
+  $chrextStatus.style.color = ok ? 'var(--accent)' : 'var(--danger)';
+  setTimeout(() => { $chrextStatus.textContent = ''; }, 4000);
+}
+
+async function loadChromeExtPanel() {
+  if (!$chrextList) return;
+  $chrextList.innerHTML = '<div class="panel-hint" style="padding:8px 0">Loading…</div>';
+  let list;
+  try { list = await window.electronAPI.extList(); }
+  catch (e) { $chrextList.innerHTML = `<div class="panel-hint" style="color:var(--danger)">✗ ${e.message}</div>`; return; }
+  if (!list.length) {
+    $chrextList.innerHTML = '<div class="panel-hint">No Chrome extensions installed yet.</div>';
+    return;
+  }
+  $chrextList.innerHTML = '';
+  for (const ext of list) {
+    const row = document.createElement('div');
+    row.className = 'chrext-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)';
+    // Icon placeholder
+    const icon = document.createElement('div');
+    icon.style.cssText = 'width:28px;height:28px;flex-shrink:0;border-radius:4px;background:var(--tab-bg);display:flex;align-items:center;justify-content:center;font-size:14px';
+    icon.textContent = '🧩';
+    // Info + inline rename
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+
+    // Name row: label + pencil btn
+    const nameRow = document.createElement('div');
+    nameRow.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0';
+    let currentName = ext.name;
+
+    const nameLabel = document.createElement('div');
+    nameLabel.style.cssText = 'font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0';
+    nameLabel.title = currentName;
+    nameLabel.textContent = currentName;
+
+    const editBtn = document.createElement('button');
+    editBtn.title = 'Rename';
+    editBtn.textContent = '✎';
+    editBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:12px;padding:0 2px;flex-shrink:0;line-height:1';
+    editBtn.addEventListener('mouseenter', () => editBtn.style.color = 'var(--accent)');
+    editBtn.addEventListener('mouseleave', () => editBtn.style.color = 'var(--text-dim)');
+
+    editBtn.addEventListener('click', () => {
+      // Switch to edit mode
+      nameRow.innerHTML = '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentName;
+      input.className = 'panel-input';
+      input.style.cssText = 'flex:1;min-width:0;font-size:12px;padding:2px 6px;height:24px';
+      const okBtn = document.createElement('button');
+      okBtn.textContent = '✓';
+      okBtn.className = 'btn-primary';
+      okBtn.style.cssText = 'padding:2px 7px;font-size:12px;flex-shrink:0';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '✕';
+      cancelBtn.className = 'btn-secondary';
+      cancelBtn.style.cssText = 'padding:2px 7px;font-size:12px;flex-shrink:0';
+
+      const restore = () => {
+        nameRow.innerHTML = '';
+        nameRow.append(nameLabel, editBtn);
+      };
+
+      const doRename = async () => {
+        const newName = input.value.trim();
+        if (!newName) { restore(); return; }
+        const res = await window.electronAPI.extRename(ext.id, newName);
+        if (res.ok) {
+          currentName = res.name;
+          nameLabel.textContent = currentName;
+          nameLabel.title = currentName;
+          _chrextMsg(`Renamed to "${currentName}"`, true);
+        } else {
+          _chrextMsg(res.reason || 'Rename failed', false);
+        }
+        restore();
+      };
+
+      okBtn.addEventListener('click', doRename);
+      cancelBtn.addEventListener('click', restore);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') doRename();
+        if (e.key === 'Escape') restore();
+      });
+
+      nameRow.append(input, okBtn, cancelBtn);
+      input.focus();
+      input.select();
+    });
+
+    nameRow.append(nameLabel, editBtn);
+
+    const subLabel = document.createElement('div');
+    subLabel.style.cssText = 'font-size:11px;color:var(--text-dim)';
+    subLabel.innerHTML = `${ext.version ? 'v' + ext.version : ''} &mdash; ${ext.id.slice(0, 12)}…`;
+
+    info.append(nameRow, subLabel);
+    // Toggle
+    const toggle = document.createElement('label');
+    toggle.className = 'tg-switch';
+    toggle.title = ext.enabled ? 'Disable' : 'Enable';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = !!ext.enabled;
+    chk.addEventListener('change', async () => {
+      const res = await window.electronAPI.extToggle(ext.id, chk.checked);
+      if (!res.ok) { chk.checked = !chk.checked; _chrextMsg(res.reason || 'Failed', false); }
+      else _chrextMsg(chk.checked ? `"${ext.name}" enabled` : `"${ext.name}" disabled`, true);
+    });
+    const slider = document.createElement('span');
+    slider.className = 'tg-slider';
+    toggle.appendChild(chk);
+    toggle.appendChild(slider);
+    // Remove
+    const rmBtn = document.createElement('button');
+    rmBtn.className = 'btn-danger';
+    rmBtn.title = 'Remove extension';
+    rmBtn.textContent = '🗑';
+    rmBtn.style.cssText = 'padding:4px 7px;font-size:12px;flex-shrink:0';
+    rmBtn.addEventListener('click', async () => {
+      row.style.opacity = '0.4';
+      const res = await window.electronAPI.extRemove(ext.id);
+      if (res.ok) { row.remove(); if (!$chrextList.children.length) $chrextList.innerHTML = '<div class="panel-hint">No Chrome extensions installed yet.</div>'; }
+      else { row.style.opacity = '1'; _chrextMsg(res.reason || 'Remove failed', false); }
+    });
+
+    // Action buttons row (Options / Open popup)
+    const actRow = document.createElement('div');
+    actRow.style.cssText = 'display:flex;gap:4px;margin-top:4px;flex-wrap:wrap';
+    if (ext.popupUrl) {
+      const popBtn = document.createElement('button');
+      popBtn.className = 'btn-primary';
+      popBtn.title = 'Open extension popup';
+      popBtn.textContent = '▶ Open';
+      popBtn.style.cssText = 'font-size:11px;padding:2px 8px;flex-shrink:0';
+      popBtn.addEventListener('click', () => { window.electronAPI.newTab(ext.popupUrl); closeAllPanels(); });
+      actRow.appendChild(popBtn);
+    }
+    if (ext.optionsUrl) {
+      const optBtn = document.createElement('button');
+      optBtn.className = 'btn-primary';
+      optBtn.title = 'Open extension options / settings';
+      optBtn.textContent = '⚙ Options';
+      optBtn.style.cssText = 'font-size:11px;padding:2px 8px;flex-shrink:0';
+      optBtn.addEventListener('click', () => { window.electronAPI.newTab(ext.optionsUrl); closeAllPanels(); });
+      actRow.appendChild(optBtn);
+    }
+    if (actRow.children.length) info.appendChild(actRow);
+
+    row.append(icon, info, toggle, rmBtn);
+    $chrextList.appendChild(row);
+  }
+}
+
+document.getElementById('chrext-crxextractor-link')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.electronAPI.newTab('https://www.crxextract.com/');
+  closeAllPanels();
+});
+
+document.getElementById('chrext-load-unpacked-btn')?.addEventListener('click', async () => {
+  const res = await window.electronAPI.extLoadUnpacked();
+  if (res.ok) { _chrextMsg(`"${res.name}" loaded!`, true); loadChromeExtPanel(); }
+  else if (res.reason !== 'cancelled') _chrextMsg(res.reason || 'Load failed', false);
+});
+
+document.getElementById('chrext-load-crx-btn')?.addEventListener('click', async () => {
+  const res = await window.electronAPI.extLoadCrx();
+  if (res.ok) { _chrextMsg(`"${res.name}" extracted and loaded!`, true); loadChromeExtPanel(); }
+  else if (res.reason !== 'cancelled') _chrextMsg(res.reason || 'Load failed', false);
+});
 
 /* ─── Zoom indicator ────────────────────────────────────────────── */
 const $zoomIndicator = document.getElementById('zoom-indicator');

@@ -85,6 +85,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Downloads ─────────────────────────────────────────────────────────────
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
 
+  // ── Chrome Extensions ─────────────────────────────────────────────────────
+  /** Returns [{id, name, version, path, enabled, liveLoaded}] */
+  extList:         ()              => ipcRenderer.invoke('ext-list'),
+  /** Opens folder picker, loads unpacked extension. Resolves {ok, id?, name?, reason?} */
+  extLoadUnpacked: ()              => ipcRenderer.invoke('ext-load-unpacked'),
+  /** Opens CRX file picker, extracts + loads. Resolves {ok, id?, name?, reason?} */
+  extLoadCrx:      ()              => ipcRenderer.invoke('ext-load-crx'),
+  /** Removes extension by id from session + index. */
+  extRemove:       (id)            => ipcRenderer.invoke('ext-remove', id),
+  /** Enable/disable extension. `enabled` is boolean. */
+  extToggle:       (id, enabled)   => ipcRenderer.invoke('ext-toggle', { extId: id, enabled }),
+  /** Rename the display name of an extension (persisted to index). */
+  extRename:       (id, name)      => ipcRenderer.invoke('ext-rename', { extId: id, name }),
+
   // ── App menu (three-dot popup) ────────────────────────────────────────────
   showAppMenu: () => ipcRenderer.invoke('show-app-menu'),
 

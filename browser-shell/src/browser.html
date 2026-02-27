@@ -188,8 +188,12 @@
       <button class="btn-primary" id="setting-open-hub">Open</button>
     </div>
     <div class="settings-row">
-      <span>Extensions</span>
+      <span>Intelli Addons</span>
       <button class="btn-primary" id="setting-open-addons">Manage Addons</button>
+    </div>
+    <div class="settings-row">
+      <span>Chrome Extensions</span>
+      <button class="btn-primary" id="setting-open-chrome-ext">Manage</button>
     </div>
     <div class="settings-row">
       <span>Downloads folder</span>
@@ -282,6 +286,23 @@
       <span>Intelli Addon Manager</span>
       <button id="devaddon-mgr-btn" class="btn-primary">Open</button>
     </div>
+  </div>
+
+  <!-- Chrome Extensions manager panel -->
+  <div id="panel-chrome-ext" class="side-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">Chrome Extensions</span>
+      <button class="panel-close" id="chrext-panel-close">&#10005;</button>
+    </div>
+    <div class="panel-section-label">Installed extensions</div>
+    <div id="chrext-list" class="panel-list"></div>
+    <div class="panel-section-label" style="margin-top:14px">Add extension</div>
+    <p class="panel-hint">Load an unpacked extension folder (developer mode) or a downloaded .crx file. Direct Chrome Web Store install is not supported in Intelli — use <a id="chrext-crxextractor-link" href="#" style="color:var(--accent);text-decoration:underline;cursor:pointer">crxextract.com</a> to download a .crx from the Store.</p>
+    <div class="panel-row" style="gap:8px;flex-wrap:wrap">
+      <button id="chrext-load-unpacked-btn" class="btn-primary" style="flex:1">&#128193; Load unpacked folder</button>
+      <button id="chrext-load-crx-btn"      class="btn-primary" style="flex:1">&#128230; Load .crx file</button>
+    </div>
+    <div id="chrext-status" class="panel-status" style="margin-top:8px"></div>
   </div>
 
   <!-- panel backdrop (click to dismiss) -->
