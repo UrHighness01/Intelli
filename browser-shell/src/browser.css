@@ -69,10 +69,13 @@ html, body {
   display: flex;
   flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   align-items: flex-end;
   gap: 2px;
+  scroll-behavior: smooth;
 }
+#tabs::-webkit-scrollbar { display: none; }
 
 /* Spacer no longer needed — #tabs carries flex:1 */
 .tab-bar-spacer { display: none; }
@@ -97,8 +100,38 @@ html, body {
 }
 .tab:hover         { background: var(--surface); color: var(--text); }
 .tab.active        { background: var(--surface); color: var(--text); }
-.tab.dragging      { opacity: 0.4; }
-.tab.drag-over     { box-shadow: -3px 0 0 0 var(--accent); }
+.tab.dragging      { opacity: 0.35; }
+/* ── Tab drag ghost (follows cursor) ── */
+.tab-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 30px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface);
+  color: var(--text);
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(0,0,0,.55);
+  transform: scale(1.05) translateY(-3px);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* ── Drop insertion line ── */
+.tab-drop-line {
+  position: fixed;
+  width: 3px;
+  height: 30px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 9998;
+  pointer-events: none;
+  transform: translateX(-1px);
+  box-shadow: 0 0 6px var(--accent);
+}
 .tab.active::after {
   content: '';
   position: absolute;
@@ -949,6 +982,8 @@ button { cursor: pointer; }
 .split-side:hover           { background: rgba(255,255,255,0.07); }
 .split-side.split-dragging  { opacity: 0.35; }
 .split-side.split-drop-over { background: var(--accent-dim); }
+.split-side.split-focused   { background: rgba(108,99,255,0.18); }
+.split-side.split-focused:hover { background: rgba(108,99,255,0.26); }
 
 .split-fav        { width: 13px; height: 13px; flex-shrink: 0; object-fit: contain; }
 .split-fav.hidden { display: none; }
@@ -1069,6 +1104,10 @@ button { cursor: pointer; }
 }
 .tab-group-chip:hover  { filter: brightness(1.18); }
 .tab-group-chip:active { transform: scale(0.96); }
+.tab-group-chip.chip-dragging  { opacity: 0.35; transform: scale(0.93); }
+.tab-group-chip.chip-drag-over { outline: 2px dashed rgba(255,255,255,.65); outline-offset: 2px; filter: brightness(1.3); }
+.tab.chip-drag-over-left  { box-shadow: -3px 0 0 0 var(--accent); }
+.tab.chip-drag-over-right { box-shadow:  3px 0 0 0 var(--accent); }
 
 /* White dot — only visible when group is collapsed */
 .tab-group-chip-dot {
@@ -1157,9 +1196,12 @@ button { cursor: pointer; }
   gap: 1px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   flex-shrink: 0;
+  scroll-behavior: smooth;
 }
+#bookmarks-bar::-webkit-scrollbar { display: none; }
 #bookmarks-bar.hidden { display: none; }
 
 .bm-chip {

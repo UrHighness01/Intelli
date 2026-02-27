@@ -447,9 +447,9 @@ function enterSplit(id, win = mainWin) {
   if (!tabs[id]) return;
   // Right-side tab must not already be in a pair
   if (getPairOf(id) !== null) return;
-  // Determine the left tab: prefer activeTabId if it's solo, else find a solo tab
+  // Determine the left tab: prefer activeTabId if it's solo and different from id
   let leftId = activeTabId;
-  if (!tabs[leftId] || getPairOf(leftId) !== null) {
+  if (!tabs[leftId] || getPairOf(leftId) !== null || leftId === id) {
     // Pick the most recently placed solo tab (last in tabOrder that is solo)
     const soloTab = tabOrder.slice().reverse().find(tid => tid !== id && getPairOf(tid) === null && tabs[tid]);
     if (!soloTab) return; // no solo tab available
@@ -737,7 +737,8 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
 
     function _reInjectAddons(delay) {
       setTimeout(() => {
-        // Guard: view may have navigated away during the delay
+        // Guard: view or its webContents may have been destroyed during the delay
+        if (!view || !view.webContents || view.webContents.isDestroyed()) return;
         const currentUrl = view.webContents.getURL();
         if (currentUrl !== _addonUrl) return;
         http.get(`${GATEWAY_ORIGIN}/tab/active-addons`, res => {
@@ -1001,6 +1002,19 @@ function registerIPC() {
     return createTab(url);
   });
 
+  // Enter split view with two explicit tab IDs (used when restoring a group from bookmarks)
+  ipcMain.handle('enter-split-pair', (_, { leftId, rightId }) => {
+    if (!tabs[leftId] || !tabs[rightId]) return;
+    if (getPairOf(leftId) !== null || getPairOf(rightId) !== null) return;
+    const ap = getActivePair();
+    if (ap) ap.paused = true;
+    activeTabId = leftId;
+    const pair = { leftId, rightId, paused: false, ratio: 0.5, focusedId: leftId };
+    splitPairs.push(pair);
+    _showPair(pair, mainWin);
+    notifyTabsUpdated();
+  });
+
   // Close split view (sent from the chrome renderer close-split button)
   ipcMain.on('close-split', () => exitSplit());
 
@@ -1035,6 +1049,24 @@ function registerIPC() {
 
   // Reorder tabs by drag-and-drop.
   // Zone rule: admin hub tabs stay left of regular tabs and vice-versa.
+  ipcMain.handle('reorder-group', (_, dragTabIds, targetFirstTabId) => {
+    const toInsert = dragTabIds.filter(id => tabOrder.includes(id));
+    if (!toInsert.length) return;
+    tabOrder = tabOrder.filter(id => !toInsert.includes(id));
+    if (targetFirstTabId === -1) {
+      // Append at end
+      tabOrder = [...tabOrder, ...toInsert];
+    } else {
+      const toPos = tabOrder.indexOf(targetFirstTabId);
+      if (toPos === -1) {
+        tabOrder = [...tabOrder, ...toInsert]; // unknown id → append at end
+      } else {
+        tabOrder.splice(toPos, 0, ...toInsert);
+      }
+    }
+    notifyTabsUpdated();
+  });
+
   ipcMain.handle('reorder-tab', (_, dragId, targetId) => {
     const from = tabOrder.indexOf(dragId);
     const to   = tabOrder.indexOf(targetId);
@@ -1132,6 +1164,21 @@ function registerIPC() {
   });
 
   // Native context menu for tab group chips
+  // ── Bookmarks-bar native context menu ─────────────────────────────────────
+  ipcMain.handle('show-bm-ctx', (_, bm) => {
+    const send = (action) => mainWin?.webContents.send('bm-ctx-action', { action, bm });
+    const isGroup = bm.type === 'group';
+    const items = [
+      { label: 'Ouvrir',                              click: () => send('open')     },
+      ...(!isGroup ? [{ label: 'Ouvrir dans un nouvel onglet', click: () => send('open-tab') }] : []),
+      { type: 'separator' },
+      { label: '\u270F\uFE0F Renommer',               click: () => send('edit')     },
+      { type: 'separator' },
+      { label: '\uD83D\uDDD1\uFE0F Supprimer',         click: () => send('delete')   },
+    ];
+    Menu.buildFromTemplate(items).popup({ window: mainWin });
+  });
+
   ipcMain.handle('show-group-ctx', (_, { groupId }) => {
     const send = (action) => mainWin?.webContents.send('group-ctx-action', { action, groupId });
     const items = [

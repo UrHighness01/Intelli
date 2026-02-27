@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchTab:     (id)   => ipcRenderer.invoke('switch-tab', id),
   getTabs:       ()     => ipcRenderer.invoke('get-tabs'),
   reorderTab:    (dragId, targetId) => ipcRenderer.invoke('reorder-tab', dragId, targetId),
+  reorderGroup:  (dragTabIds, targetFirstTabId) => ipcRenderer.invoke('reorder-group', dragTabIds, targetFirstTabId),
   duplicateTab:  (id)            => ipcRenderer.invoke('duplicate-tab', id),
   /** Swap left/right sides of the active split pair (drag-to-swap in tab bar). */
   swapSplitSides: (tabId) => ipcRenderer.invoke('swap-split-sides', tabId),
@@ -142,6 +143,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNavState:          (cb) => ipcRenderer.on('nav-state',           (_, d) => cb(d)),
   /** Called whenever tabs are created, closed, or switched. cb receives the full tab array. */
   onTabsUpdated:       (cb) => ipcRenderer.on('tabs-updated',        (_, tabs) => cb(tabs)),
+  /** Enter split-view mode with two specific tab IDs (used when restoring a group from bookmarks). */
+  enterSplitPair:      (leftId, rightId) => ipcRenderer.invoke('enter-split-pair', { leftId, rightId }),
   /** Close the split-view mode. */
   closeSplit:          ()   => ipcRenderer.send('close-split'),
   /** Called when split mode changes. cb receives { splitTabId } or null. */
@@ -156,6 +159,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateDownloaded:  (cb) => ipcRenderer.on('update-downloaded', ()        => cb()),
   /** Quit and install the downloaded update immediately. */
   installUpdate:       ()   => ipcRenderer.invoke('install-update'),
+
+  // ── Bookmarks bar native context-menu ──────────────────────────────────────
+  /** Ask main to show a native OS context-menu for a bookmark/group chip.
+   *  main will send back a 'bm-ctx-action' event with { action, bm }. */
+  showBmCtx:     (bm) => ipcRenderer.invoke('show-bm-ctx', bm),
+  /** Called when the user picks an item from the native bm-bar context menu. */
+  onBmCtxAction: (cb) => ipcRenderer.on('bm-ctx-action', (_, data) => cb(data)),
 
   // Remove all listeners for a channel (cleanup)
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

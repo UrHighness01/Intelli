@@ -5,7 +5,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self';
                  script-src  'self';
-                 style-src   'self';
+                 style-src   'self' 'unsafe-inline';
                  img-src     'self' data: https: http://127.0.0.1:8080;
                  connect-src http://127.0.0.1:8080;" />
   <title>Intelli</title>
@@ -300,7 +300,7 @@
       <span class="panel-title" id="chg-panel-title">Nouveau groupe</span>
       <button class="panel-close" id="chg-panel-close">&#10005;</button>
     </div>
-    <div class="panel-section-label">Couleur</div>
+    <div class="panel-section-label" id="chg-color-label">Couleur</div>
     <div class="chg-colors" id="chg-colors"></div>
     <div class="panel-section-label" style="margin-top:12px">Nom du groupe</div>
     <input id="chg-name-input" class="panel-input" type="text"
