@@ -45,10 +45,17 @@ import re as _re
 
 
 def _session_path(session_id: str) -> pathlib.Path:
-    safe = _re.sub(r'[^a-zA-Z0-9_-]', '', session_id)
-    # os.path.basename used directly as the path-join operand so CodeQL sees
-    # the sanitiser output as the immediate operand, not an intermediate variable.
-    return _SESSIONS_DIR / (os.path.basename(safe) + '.jsonl')
+    """Return the .jsonl path for *session_id* after verifying it stays within _SESSIONS_DIR.
+
+    Uses os.path.realpath (PathNormalization) + startswith (SafeAccessCheck) so
+    CodeQL's two-state path-injection model sees both required steps.
+    """
+    safe_name = _re.sub(r'[^a-zA-Z0-9_-]', '', session_id) + '.jsonl'
+    joined = os.path.realpath(os.path.join(str(_SESSIONS_DIR), safe_name))
+    base = os.path.realpath(str(_SESSIONS_DIR))
+    if not joined.startswith(base + os.sep):
+        raise PermissionError('Invalid session ID — path traversal detected')
+    return pathlib.Path(joined)
 
 
 def _load_index() -> list[dict]:
@@ -105,7 +112,7 @@ def save_message(
     if meta:
         entry.update(meta)
 
-    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
+    path = _session_path(session_id)
     with path.open('a', encoding='utf-8') as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
@@ -147,7 +154,7 @@ def list_sessions(limit: int = 50, offset: int = 0) -> list[dict]:
 
 def get_session(session_id: str) -> list[dict]:
     """Return all messages in a session in chronological order."""
-    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
+    path = _session_path(session_id)
     if not path.exists():
         return []
     messages: list[dict] = []
@@ -164,7 +171,7 @@ def get_session(session_id: str) -> list[dict]:
 
 def delete_session(session_id: str) -> bool:
     """Delete a session file and remove it from the index."""
-    path = _SESSIONS_DIR / (os.path.basename(_re.sub(r'[^a-zA-Z0-9_-]', '', session_id)) + '.jsonl')
+    path = _session_path(session_id)
     if not path.exists():
         return False
     path.unlink()

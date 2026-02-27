@@ -94,21 +94,32 @@ def list_personas() -> list[dict]:
 
 
 def _safe_slug(slug: str) -> Optional[str]:
-    """Sanitize *slug* for use as a filesystem component.
-
-    Applies the slug regex then ``os.path.basename()`` (CodeQL-recognised taint
-    sanitiser) to strip any directory separators.  Returns None for empty result.
-    """
-    sanitized = _slug(slug)                     # strips to a-z0-9_-
-    sanitized = os.path.basename(sanitized)     # taint barrier
+    """Kept for import compatibility; use _persona_dir for path operations."""
+    sanitized = _slug(slug)
     return sanitized if sanitized else None
+
+
+def _persona_dir(slug: str) -> pathlib.Path:
+    """Return _PERSONAS_DIR/<slug> after verifying it stays within _PERSONAS_DIR.
+
+    Applies _slug() to normalize, then uses os.path.realpath (PathNormalization)
+    and startswith (SafeAccessCheck) — the two steps CodeQL requires to clear the
+    py/path-injection two-state taint model.
+    """
+    _PERSONAS_DIR.mkdir(parents=True, exist_ok=True)
+    safe = _slug(slug)
+    joined = os.path.realpath(os.path.join(str(_PERSONAS_DIR), safe))
+    base = os.path.realpath(str(_PERSONAS_DIR))
+    if not joined.startswith(base + os.sep):
+        raise PermissionError(f'Persona slug {slug!r} escapes personas directory')
+    return pathlib.Path(joined)
 
 
 def get_persona(slug: str) -> Optional[dict]:
     """Return a persona by slug, or None if not found."""
     if slug in ('', 'intelli'):
         return _DEFAULT_PERSONA
-    return _load_dir(_PERSONAS_DIR / os.path.basename(_slug(slug)))
+    return _load_dir(_persona_dir(slug))
 
 
 def create_persona(
@@ -120,7 +131,7 @@ def create_persona(
 ) -> dict:
     """Create a new persona and persist it to disk. Returns the full persona dict."""
     slug = _slug(name)
-    d = _PERSONAS_DIR / os.path.basename(slug)
+    d = _persona_dir(slug)
     d.mkdir(parents=True, exist_ok=True)
     cfg: dict = {
         'name':       name,
@@ -138,7 +149,7 @@ def update_persona(slug: str, **kwargs) -> Optional[dict]:
     """Update fields of an existing persona. Pass soul= to update SOUL.md."""
     if slug in ('', 'intelli'):
         return None  # built-in is immutable
-    d = _PERSONAS_DIR / os.path.basename(_slug(slug))
+    d = _persona_dir(slug)
     cfg_path = d / 'config.json'
     if not cfg_path.exists():
         return None
@@ -156,7 +167,7 @@ def delete_persona(slug: str) -> bool:
     """Delete a persona. Cannot delete the built-in 'intelli' persona."""
     if slug in ('', 'intelli'):
         return False
-    d = _PERSONAS_DIR / os.path.basename(_slug(slug))
+    d = _persona_dir(slug)
     if not d.exists():
         return False
     shutil.rmtree(d)

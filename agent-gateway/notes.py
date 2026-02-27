@@ -172,9 +172,14 @@ def get_note_file(date_str: str = '') -> str:
         date.fromisoformat(date_str)
     except (ValueError, TypeError):
         return 'Invalid date format — expected YYYY-MM-DD.'
-    # os.path.basename used directly as the path-join operand (no intermediate
-    # variable) so CodeQL sees the sanitiser output as the join operand.
-    fp = _dir() / (os.path.basename(date_str) + '.md')
+    # Use os.path.realpath (CodeQL PathNormalization) + startswith (CodeQL
+    # SafeAccessCheck) to create a taint barrier for py/path-injection.
+    notes_base = _dir()
+    base = os.path.realpath(str(notes_base))
+    joined = os.path.realpath(os.path.join(str(notes_base), date_str + '.md'))
+    if not joined.startswith(base + os.sep):
+        return 'Invalid date string.'
+    fp = Path(joined)
     if not fp.exists():
-        return 'No notes file for ' + os.path.basename(date_str) + '.'
+        return 'No notes file for ' + date_str + '.'
     return fp.read_text(encoding='utf-8', errors='replace')

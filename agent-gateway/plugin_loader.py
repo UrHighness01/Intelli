@@ -115,11 +115,15 @@ def _save_state(state: Dict[str, Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 def _read_manifest(plugin_dir: Path) -> Optional[Dict[str, Any]]:
-    # Re-anchor to PLUGINS_DIR using only the final directory component so that
-    # any taint carried by plugin_dir is discarded.  os.path.basename() is a
-    # CodeQL-recognised sanitiser that removes directory separators.
+    # Re-anchor to PLUGINS_DIR using the final path component.  Apply
+    # os.path.realpath (PathNormalization) + startswith (SafeAccessCheck) to
+    # create a CodeQL taint barrier for py/path-injection.
     clean_name = os.path.basename(str(plugin_dir))
-    mf = PLUGINS_DIR / clean_name / _MANIFEST
+    base = os.path.realpath(str(PLUGINS_DIR))
+    joined = os.path.realpath(os.path.join(str(PLUGINS_DIR), clean_name))
+    if not joined.startswith(base + os.sep):
+        return None
+    mf = Path(joined) / _MANIFEST
     if not mf.exists():
         return None
     try:
@@ -150,6 +154,26 @@ def _safe_plugin_slug(slug: str) -> str:
     except ValueError:
         raise ValueError(f'Plugin slug {slug!r} escapes plugins directory')
     return clean
+
+
+def _plugin_dir(slug: str) -> Path:
+    """Return the realpath-resolved, containment-checked path for *slug* inside PLUGINS_DIR.
+
+    Uses ``os.path.realpath`` (CodeQL ``PathNormalization``) followed by
+    ``str.startswith`` (CodeQL ``SafeAccessCheck``) to create a taint barrier
+    that satisfies the ``py/path-injection`` query.
+
+    Raises :exc:`ValueError` for syntactically invalid slugs, or
+    :exc:`PermissionError` if the resolved path would escape PLUGINS_DIR.
+    """
+    clean = slug.strip().lower()
+    if not _PLUGIN_SLUG_RE.match(clean):
+        raise ValueError(f'Invalid plugin slug: {slug!r}')
+    base = os.path.realpath(str(PLUGINS_DIR))
+    joined = os.path.realpath(os.path.join(str(PLUGINS_DIR), clean))
+    if not joined.startswith(base + os.sep):
+        raise PermissionError(f'Plugin slug {slug!r} escapes plugins directory')
+    return Path(joined)
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +388,7 @@ def install(source: str) -> Dict[str, Any]:
 
 def uninstall(slug: str) -> bool:
     """Remove a plugin completely.  Returns True if it existed."""
-    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
-        raise ValueError(f'Invalid plugin slug: {slug!r}')
-    dest = PLUGINS_DIR / os.path.basename(slug.strip().lower())
+    dest = _plugin_dir(slug)  # validates slug and applies realpath+startswith barrier
     if not dest.exists():
         return False
     with _lock:
@@ -374,24 +396,23 @@ def uninstall(slug: str) -> bool:
         _registry_snapshot.pop(slug, None)
     shutil.rmtree(dest)
     state = _load_state()
-    state.pop(slug, None)
+    state.pop(slug.strip().lower(), None)
     _save_state(state)
     return True
 
 
 def enable(slug: str) -> bool:
     """Enable a plugin and register its tools.  Returns True on success."""
-    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
-        raise ValueError(f'Invalid plugin slug: {slug!r}')
-    dest = PLUGINS_DIR / os.path.basename(slug.strip().lower())
+    dest = _plugin_dir(slug)  # validates slug and applies realpath+startswith barrier
     manifest = _read_manifest(dest)
     if manifest is None:
         return False
+    clean = slug.strip().lower()
     with _lock:
-        names = _register_tools(slug, manifest, dest)
-        _registry_snapshot[slug] = names
+        names = _register_tools(clean, manifest, dest)
+        _registry_snapshot[clean] = names
     state = _load_state()
-    state.setdefault(slug, {})['enabled'] = True
+    state.setdefault(clean, {})['enabled'] = True
     _save_state(state)
     return True
 
@@ -414,14 +435,14 @@ def disable(slug: str) -> bool:
 
 def reload_plugin(slug: str) -> Dict[str, Any]:
     """Disable then re-enable a plugin (picks up code changes)."""
-    if not _PLUGIN_SLUG_RE.match(slug.strip().lower()):
+    clean = slug.strip().lower()
+    if not _PLUGIN_SLUG_RE.match(clean):
         raise ValueError(f'Invalid plugin slug: {slug!r}')
-    slug = slug.strip().lower()
-    disable(slug)
-    if not enable(slug):
-        raise FileNotFoundError(f'Plugin "{slug}" not found in {PLUGINS_DIR}')
-    manifest = _read_manifest(PLUGINS_DIR / os.path.basename(slug)) or {}
-    return {**manifest, 'slug': slug, 'tools_registered': _registry_snapshot.get(slug, [])}
+    disable(clean)
+    if not enable(clean):
+        raise FileNotFoundError(f'Plugin "{clean}" not found in {PLUGINS_DIR}')
+    manifest = _read_manifest(_plugin_dir(clean)) or {}
+    return {**manifest, 'slug': clean, 'tools_registered': _registry_snapshot.get(clean, [])}
 
 
 # ---------------------------------------------------------------------------

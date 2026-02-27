@@ -285,42 +285,31 @@ Example:
 def _safe_path(rel: str) -> Path:
     """Resolve *rel* inside the workspace root, raising ValueError if it escapes.
 
-    Each path component is passed through ``os.path.basename()`` — a CodeQL-recognised
-    taint sanitiser — which strips any directory separator character, preventing
-    traversal across the workspace boundary.
+    Uses os.path.realpath (PathNormalization) then startswith (SafeAccessCheck)
+    so CodeQL's two-state path-injection tracker sees both required steps.
     """
     root = _ensure_root()
-    try:
-        parts = Path(rel).parts
-    except Exception:
-        raise ValueError(f'Invalid path: {rel!r}')
-    sanitized: list[str] = []
-    for part in parts:
-        clean = os.path.basename(part)          # taint barrier
-        if not clean or clean in ('.', '..'):
-            raise ValueError(f'Path {rel!r} contains invalid component {part!r}')
-        sanitized.append(clean)
-    if not sanitized:
-        raise ValueError(f'Empty path: {rel!r}')
-    return root.joinpath(*sanitized)
+    joined = os.path.realpath(os.path.join(str(root), rel))
+    base = os.path.realpath(str(root))
+    if not joined.startswith(base + os.sep):
+        raise ValueError(f'Path {rel!r} escapes workspace root')
+    return Path(joined)
 
 
 def _safe_skill_dir(slug: str) -> Path:
-    """Validate *slug* and return the skill directory path.
+    """Return the skill directory path after verifying it stays within workspace/skills/.
 
-    Raises ValueError if the slug is syntactically invalid.
-    Uses ``os.path.basename()`` at the join site as a CodeQL-recognised sanitiser.
+    Uses os.path.realpath (PathNormalization) then startswith (SafeAccessCheck)
+    so CodeQL's two-state path-injection tracker sees both required steps.
     """
     if not _SLUG_RE.match(slug):
         raise ValueError(f'Invalid skill slug {slug!r} — use lowercase letters, digits, _ or -')
     root = _ensure_root()
-    clean = os.path.basename(slug)              # taint barrier
-    if not clean:
-        raise ValueError(f'Invalid skill slug {slug!r}')
-    return root / 'skills' / clean
-
-
-# ---------------------------------------------------------------------------
+    skills_root = os.path.realpath(str(root / 'skills'))
+    joined = os.path.realpath(os.path.join(skills_root, slug))
+    if not joined.startswith(skills_root + os.sep):
+        raise ValueError(f'Skill slug {slug!r} escapes skills directory')
+    return Path(joined)
 # File CRUD
 # ---------------------------------------------------------------------------
 
@@ -421,10 +410,8 @@ def list_skills() -> list[dict]:
 
 def create_skill(slug: str, name: str, description: str, content: str) -> dict:
     """Create a new skill directory with a SKILL.md."""
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f'Invalid skill slug {slug!r} — use lowercase letters, digits, _ or -')
-    root = _ensure_root()
-    skill_dir = root / 'skills' / os.path.basename(slug)
+    root = _ensure_root()  # called first so skills/ exists before _safe_skill_dir
+    skill_dir = _safe_skill_dir(slug)
     if skill_dir.exists():
         raise ValueError(f"Skill '{slug}' already exists")
     skill_dir.mkdir(parents=True)
@@ -441,10 +428,8 @@ def create_skill(slug: str, name: str, description: str, content: str) -> dict:
 
 def delete_skill(slug: str) -> None:
     """Remove a skill directory entirely."""
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f'Invalid skill slug {slug!r}')
-    root = _ensure_root()
-    skill_dir = root / 'skills' / os.path.basename(slug)
+    root = _ensure_root()  # noqa: F841 — ensures workspace exists before guard
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     import shutil
@@ -453,10 +438,8 @@ def delete_skill(slug: str) -> None:
 
 def get_skill(slug: str) -> dict:
     """Return metadata + full SKILL.md content for a single skill."""
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f'Invalid skill slug {slug!r}')
     root = _ensure_root()
-    skill_dir = root / 'skills' / os.path.basename(slug)
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     skill_md = skill_dir / 'SKILL.md'
@@ -476,10 +459,8 @@ def get_skill(slug: str) -> dict:
 
 def update_skill(slug: str, content: str) -> dict:
     """Overwrite the SKILL.md of an existing skill."""
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f'Invalid skill slug {slug!r}')
     root = _ensure_root()
-    skill_dir = root / 'skills' / os.path.basename(slug)
+    skill_dir = _safe_skill_dir(slug)
     if not skill_dir.exists():
         raise FileNotFoundError(f"Skill '{slug}' not found")
     skill_md = skill_dir / 'SKILL.md'

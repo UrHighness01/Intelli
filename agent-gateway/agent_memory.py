@@ -95,9 +95,13 @@ def _validate_id(agent_id: str) -> None:
 
 def _agent_path(agent_id: str) -> Path:
     _validate_id(agent_id)
-    # os.path.basename strips any directory separator — CodeQL-recognised sanitiser.
-    # Applied directly at the join site; no .resolve() to avoid re-tainting the Path.
-    return MEMORY_DIR / (os.path.basename(agent_id) + '.json')
+    # Use os.path.realpath (CodeQL PathNormalization) + startswith (CodeQL
+    # SafeAccessCheck) for a taint barrier that satisfies py/path-injection.
+    base = os.path.realpath(str(MEMORY_DIR))
+    joined = os.path.realpath(os.path.join(str(MEMORY_DIR), agent_id + '.json'))
+    if not joined.startswith(base + os.sep):
+        raise PermissionError(f'agent_id {agent_id!r} escapes memory directory')
+    return Path(joined)
 
 
 def _load(agent_id: str) -> Dict[str, Any]:
