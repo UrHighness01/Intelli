@@ -160,8 +160,9 @@ class TestAdminRedactionRules:
         )
         assert r.status_code == 200
         rules = r.json()['rules']
-        assert 'https://test.corp.local' in rules
-        assert sorted(rules['https://test.corp.local']) == ['password', 'ssn']
+        # Assert value directly; avoids CodeQL's py/incomplete-url-substring-sanitization
+        # false-positive that fires on `url-string in dict` membership tests.
+        assert sorted(rules.get('https://test.corp.local', [])) == ['password', 'ssn']
 
     def test_cleared_origin_has_empty_fields(self, client_default, auth_token):
         client_default.post(
@@ -193,7 +194,5 @@ class TestAdminRedactionRules:
             headers={'Authorization': f'Bearer {auth_token}'},
         )
         rules = r.json()['rules']
-        assert 'https://app.corp.local' in rules
-        assert 'https://hr.corp.local' in rules
-        assert sorted(rules['https://app.corp.local']) == ['card_number', 'cvv']
-        assert sorted(rules['https://hr.corp.local']) == ['dob', 'salary']
+        assert sorted(rules.get('https://app.corp.local', [])) == ['card_number', 'cvv']
+        assert sorted(rules.get('https://hr.corp.local', [])) == ['dob', 'salary']

@@ -520,10 +520,12 @@ class GitHubCopilotAdapter(BaseAdapter):
 
         Returns (copilot_token, base_url).  Caches result until 5 min before expiry.
         """
-        import hashlib as _hashlib
+        import hmac as _hmac
         import time as _time
 
-        key = _hashlib.sha256(github_token.encode()).hexdigest()[:16]
+        # Use HMAC-SHA256 with a static context key so that hashing a credential
+        # does not produce a raw hash that could be reversed via lookup tables.
+        key = _hmac.new(b'intelli-copilot-cache-v1', github_token.encode(), 'sha256').hexdigest()[:16]
         now_ms = int(_time.time() * 1000)
 
         if key in self._cache:

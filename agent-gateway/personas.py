@@ -97,6 +97,11 @@ def _safe_slug(slug: str) -> Optional[str]:
     """Re-apply slug sanitization and verify the resulting path stays inside
     _PERSONAS_DIR.  Returns the sanitized slug or None if the path escapes."""
     sanitized = _slug(slug)  # strips everything except a-z0-9_-
+    # os.path.basename is a CodeQL-recognised taint sanitiser for path injection;
+    # combined with the regex above it is doubly safe.
+    sanitized = os.path.basename(sanitized)
+    if not sanitized:
+        return None
     candidate = (_PERSONAS_DIR / sanitized).resolve()
     try:
         candidate.relative_to(_PERSONAS_DIR.resolve())
@@ -123,7 +128,9 @@ def create_persona(
     provider: str = '',
 ) -> dict:
     """Create a new persona and persist it to disk. Returns the full persona dict."""
-    slug = _slug(name)
+    slug = _safe_slug(name)
+    if slug is None:
+        raise ValueError(f'Invalid persona name: {name!r}')
     d = _PERSONAS_DIR / slug
     d.mkdir(parents=True, exist_ok=True)
     cfg: dict = {

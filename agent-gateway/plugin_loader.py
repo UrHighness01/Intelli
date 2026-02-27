@@ -115,8 +115,13 @@ def _save_state(state: Dict[str, Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 def _read_manifest(plugin_dir: Path) -> Optional[Dict[str, Any]]:
-    mf = plugin_dir / _MANIFEST
+    mf = (plugin_dir / _MANIFEST).resolve()
     if not mf.exists():
+        return None
+    # Verify manifest did not escape plugin_dir via symlink or traversal.
+    try:
+        mf.relative_to(plugin_dir.resolve())
+    except ValueError:
         return None
     try:
         return json.loads(mf.read_text(encoding='utf-8'))
@@ -313,7 +318,7 @@ def install(source: str) -> Dict[str, Any]:
             manifest = _read_manifest(src)
             if manifest is None:
                 raise ValueError(f'No {_MANIFEST} found in {src}')
-            slug = _slug(manifest)
+            slug = _safe_plugin_slug(_slug(manifest))
             dest = PLUGINS_DIR / slug
             if dest.exists():
                 shutil.rmtree(dest)
@@ -330,7 +335,7 @@ def install(source: str) -> Dict[str, Any]:
                 manifest = _read_manifest(root)
                 if manifest is None:
                     raise ValueError(f'Invalid {_MANIFEST} in archive')
-                slug = _slug(manifest)
+                slug = _safe_plugin_slug(_slug(manifest))
                 dest = PLUGINS_DIR / slug
                 if dest.exists():
                     shutil.rmtree(dest)

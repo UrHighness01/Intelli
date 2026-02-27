@@ -168,7 +168,15 @@ def get_note_file(date_str: str = '') -> str:
     """
     if not date_str:
         date_str = date.today().isoformat()
-    fp = _dir() / f'{date_str}.md'
+    # Validate date_str is a well-formed ISO date (YYYY-MM-DD) before using it
+    # in a path expression — rejects any traversal attempts.
+    try:
+        date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        return f'Invalid date format: {date_str!r} — expected YYYY-MM-DD.'
+    # os.path.basename is a CodeQL-recognised taint sanitiser.
+    safe_date = os.path.basename(date_str)
+    fp = _dir() / f'{safe_date}.md'
     if not fp.exists():
-        return f'No notes file for {date_str}.'
+        return f'No notes file for {safe_date}.'
     return fp.read_text(encoding='utf-8', errors='replace')
