@@ -93,11 +93,26 @@ def list_personas() -> list[dict]:
     return out
 
 
+def _safe_slug(slug: str) -> Optional[str]:
+    """Re-apply slug sanitization and verify the resulting path stays inside
+    _PERSONAS_DIR.  Returns the sanitized slug or None if the path escapes."""
+    sanitized = _slug(slug)  # strips everything except a-z0-9_-
+    candidate = (_PERSONAS_DIR / sanitized).resolve()
+    try:
+        candidate.relative_to(_PERSONAS_DIR.resolve())
+    except ValueError:
+        return None
+    return sanitized
+
+
 def get_persona(slug: str) -> Optional[dict]:
     """Return a persona by slug, or None if not found."""
     if slug in ('', 'intelli'):
         return _DEFAULT_PERSONA
-    return _load_dir(_PERSONAS_DIR / slug)
+    safe = _safe_slug(slug)
+    if safe is None:
+        return None
+    return _load_dir(_PERSONAS_DIR / safe)
 
 
 def create_persona(
@@ -127,7 +142,10 @@ def update_persona(slug: str, **kwargs) -> Optional[dict]:
     """Update fields of an existing persona. Pass soul= to update SOUL.md."""
     if slug in ('', 'intelli'):
         return None  # built-in is immutable
-    d = _PERSONAS_DIR / slug
+    safe = _safe_slug(slug)
+    if safe is None:
+        return None
+    d = _PERSONAS_DIR / safe
     cfg_path = d / 'config.json'
     if not cfg_path.exists():
         return None
@@ -145,7 +163,10 @@ def delete_persona(slug: str) -> bool:
     """Delete a persona. Cannot delete the built-in 'intelli' persona."""
     if slug in ('', 'intelli'):
         return False
-    d = _PERSONAS_DIR / slug
+    safe = _safe_slug(slug)
+    if safe is None:
+        return False
+    d = _PERSONAS_DIR / safe
     if not d.exists():
         return False
     shutil.rmtree(d)

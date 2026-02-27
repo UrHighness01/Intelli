@@ -80,6 +80,19 @@ def pdf_read(
             source = url
         else:
             fp = pathlib.Path(path).expanduser().resolve()
+            # ── Path-injection guard ─────────────────────────────────────
+            # Only allow reading PDFs from within the user's home directory.
+            # This prevents traversal attacks like path="/etc/passwd" or
+            # path="~/../../etc/shadow".
+            _safe_root = pathlib.Path.home().resolve()
+            try:
+                fp.relative_to(_safe_root)
+            except ValueError:
+                return (
+                    '[ERROR] Access denied: PDF path must be inside your home '
+                    f'directory ({_safe_root}). Absolute paths outside home are '
+                    'not allowed.'
+                )
             if not fp.exists():
                 return f'[ERROR] File not found: {path}'
             if fp.suffix.lower() not in ('.pdf',):
