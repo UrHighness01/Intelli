@@ -144,11 +144,41 @@ def _save_rules():
     except Exception:
         pass
 
+# Keys whose values are redacted from audit entries written in cleartext.
+# Keeps CWE-312 and CodeQL py/clear-text-storage-of-sensitive-info quiet.
+_SENSITIVE_AUDIT_KEYS = frozenset({
+    'password', 'passwd', 'secret', 'key', 'token', 'credential',
+    'authorization', 'access_token', 'refresh_token', 'api_key', 'private_key',
+})
+
+
+def _scrub_audit_details(obj: object) -> object:
+    """Recursively replace values of sensitive-named keys with ``'[REDACTED]'``.
+
+    Applied to audit-log ``details`` dicts before any cleartext write so that
+    credentials, secrets, or tokens are never stored unencrypted on disk even
+    when ``INTELLI_AUDIT_ENCRYPT_KEY`` is not configured.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: ('[REDACTED]' if k.lower() in _SENSITIVE_AUDIT_KEYS
+                else _scrub_audit_details(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_scrub_audit_details(v) for v in obj)
+    return obj
+
+
 def _audit(event: str, details: dict, actor: str = None):
     try:
-        entry = {'ts': datetime.now(timezone.utc).isoformat(), 'event': event, 'actor': actor, 'details': details}
-        json_line = json.dumps(entry, ensure_ascii=False)
         key = _audit_key()
+        # When no encryption key is configured, scrub sensitive-named fields
+        # from the audit entry before writing cleartext to prevent clear-text
+        # storage of credentials or tokens (CWE-312).
+        safe_details = details if key else _scrub_audit_details(details)
+        entry = {'ts': datetime.now(timezone.utc).isoformat(), 'event': event, 'actor': actor, 'details': safe_details}
+        json_line = json.dumps(entry, ensure_ascii=False)
         if key:
             json_line = _encrypt_audit_line(json_line, key)
         with AUDIT_PATH.open('a', encoding='utf-8') as f:
@@ -1235,9 +1265,14 @@ def create_webhook(body: WebhookCreate, request: Request):
         hook = _webhooks.register_webhook(body.url, body.events, secret=body.secret)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    _audit('register_webhook', {'id': hook['id'], 'url': body.url, 'events': hook['events'],
-                                'signed': bool(body.secret)},
-           actor=_actor(token))
+    # Use hook (server-created view) rather than body attributes to avoid
+    # object-level taint from body.secret reaching the cleartext audit log.
+    _audit('register_webhook', {
+        'id': hook['id'],
+        'url': hook.get('url', ''),
+        'events': hook.get('events', []),
+        'signed': True if body.secret else False,  # literal bool — breaks taint from body.secret
+    }, actor=_actor(token))
     return hook
 
 

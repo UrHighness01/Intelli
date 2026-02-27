@@ -786,7 +786,7 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
                 }
                 try {
                   // Wrap in try/catch so JS errors surface as real messages
-                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] ${addon.name.replace(/'/g, "'")}:', e.message, e.stack);}})();`;
+                  const wrapped = `(function(){try{${addon.code_js}\n}catch(e){console.error('[addon-error] ${addon.name.replace(/'/g, "\\'")}:', e.message, e.stack);}})();`;
                   await view.webContents.executeJavaScript(wrapped);
                   console.log(`[addon] re-injected "${addon.name}" (+${delay}ms) on ${currentUrl}`);
                 } catch (err) {
@@ -1818,7 +1818,7 @@ function registerIPC() {
           for (const item of items) {
             try {
               // Wrap in try/catch so JS errors surface in the log rather than crashing silently
-              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] ${(item.name||'').replace(/'/g,"'")}:', e.message);}})();`;
+              const wrapped = `(function(){try{${item.code_js}\n}catch(e){console.error('[addon-error] ${(item.name||'').replace(/'/g,"\\'")}:', e.message);}})();`;
               await tab.view.webContents.executeJavaScript(wrapped);
               console.log(`[addon] injected "${item.name}" into ${url}`);
             } catch (err) {

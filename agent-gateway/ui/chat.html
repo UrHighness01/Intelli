@@ -1032,7 +1032,13 @@
     }
 
     function _hoEsc(s) {
-      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      // Escape all characters that can break out of HTML attributes or text nodes.
+      // &  →  &amp;  (must be first)
+      // <  →  &lt;   (tag injection)
+      // >  →  &gt;
+      // "  →  &quot; (breaks out of double-quoted attributes like data-id="…")
+      // '  →  &#39;  (breaks out of single-quoted attributes)
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     async function openHistoryOverlay() {

@@ -375,7 +375,9 @@ def _parse_skill_frontmatter(text: str) -> dict:
             in_fm = not in_fm
             continue
         if in_fm or not in_fm:
-            m = re.match(r'^(\w[\w\s]*):\s*(.+)$', line)
+            # Use [^\r\n]+ instead of (.+)$ to avoid polynomial backtracking
+            # on uncontrolled input (CodeQL py/polynomial-redos).
+            m = re.match(r'^(\w[\w ]{0,80}):\s*([^\r\n]{1,500})', line)
             if m:
                 meta[m.group(1).strip().lower()] = m.group(2).strip()
             elif in_fm and stripped:
