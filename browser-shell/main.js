@@ -851,6 +851,7 @@ function _isBlockedURL(urlStr) {
       const [, a, b] = ipv4.map(Number);
       if (a === 127) {
         if (String(u.port) === String(GATEWAY_PORT)) return null; // gateway
+        if (String(u.port) === '18789') return null; // OpenClaw dashboard
         return `Loopback IP blocked: ${h}`;
       }
       if (a === 10)                              return `Private IP (10.x) blocked`;
@@ -2800,6 +2801,19 @@ function createMainWindow() {
 // ─────────────────────────────────────────────────────────────────────────────
 // App lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Allow self-signed certificate on local trusted services
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  try {
+    const u = new URL(url);
+    if (u.hostname === '127.0.0.1' && u.port === '18789') {
+      event.preventDefault();
+      callback(true); // trust cert
+      return;
+    }
+  } catch {}
+  callback(false); // reject everything else
+});
 
 app.whenReady().then(async () => {
   installCSP();   // must be first — sets up webRequest before any window loads
