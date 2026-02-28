@@ -2395,11 +2395,13 @@ class AddonCreate(BaseModel):
     name:        str
     description: str = ''
     code_js:     str
+    url_pattern: str = ''
 
 
 class AddonUpdate(BaseModel):
     description: str | None = None
     code_js:     str | None = None
+    url_pattern: str | None = None
 
 
 @app.get('/admin/addons')
@@ -2419,7 +2421,8 @@ def addons_create(body: AddonCreate, request: Request):
     """
     _require_admin_token(request)
     try:
-        addon = _addons.create_addon(body.name, body.description, body.code_js)
+        addon = _addons.create_addon(body.name, body.description, body.code_js,
+                                     url_pattern=body.url_pattern)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return addon
@@ -2440,7 +2443,8 @@ def addons_update(name: str, body: AddonUpdate, request: Request):
     """Update an addon's description and/or code.  Admin auth required."""
     _require_admin_token(request)
     try:
-        addon = _addons.update_addon(name, body.description, body.code_js)
+        addon = _addons.update_addon(name, body.description, body.code_js,
+                                     url_pattern=body.url_pattern)
     except KeyError:
         raise HTTPException(status_code=404, detail='addon not found')
     return addon

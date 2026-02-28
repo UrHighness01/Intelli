@@ -900,9 +900,9 @@ function createTab(url = NEW_TAB_URL, win = mainWin, fromTabId = null) {
       contextIsolation: true,   // MUST be true — keeps Node globals out of page world
       sandbox:          true,   // full sandbox — no Node in page renderer
       webviewTag:       false,
-      // No preload: with contextIsolation:true a preload runs in an isolated
-      // context and cannot override page-visible navigator.* properties.
-      // All anti-detect overrides run via executeJavaScript() (main world) below.
+      // Tab preload: exposes window.electronAPI.addonFetch so injected addon
+      // scripts can reach localhost (e.g. Ollama) bypassing page CSP.
+      preload:          path.join(__dirname, 'tab-preload.js'),
     },
   });
 
@@ -1678,6 +1678,33 @@ function registerIPC() {
     });
   });
 
+  // ── Addon network bridge — makes HTTP/HTTPS requests from main process ─────
+  // This bypasses page CSP entirely since the call happens in Node, not the
+  // renderer. Used by injected addon scripts to reach localhost:11434 (Ollama)
+  // even on sites with strict connect-src policies (e.g. x.com).
+  ipcMain.handle('addon-fetch', async (_, url, options = {}) => {
+    const { method = 'GET', headers = {}, body } = options;
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const transport = parsedUrl.protocol === 'https:' ? require('https') : http;
+      const reqOpts = {
+        hostname: parsedUrl.hostname,
+        port:     parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path:     parsedUrl.pathname + parsedUrl.search,
+        method,
+        headers,
+      };
+      const req = transport.request(reqOpts, res => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: data }));
+      });
+      req.on('error', err => reject(err.message));
+      if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+      req.end();
+    });
+  });
+
   // ── Script injection — run JS in the active tab (used by addon system) ───
   ipcMain.handle('inject-script', async (_, code) => {
     const tab = tabs[activeTabId];
@@ -2311,6 +2338,10 @@ function registerIPC() {
           if (!url || url === 'about:blank' || url.startsWith(GATEWAY_ORIGIN + '/ui/')) return;
 
           for (const item of items) {
+            if (item.url_pattern && !url.includes(item.url_pattern)) {
+              console.log(`[addon] skip "${item.name}" — url_pattern "${item.url_pattern}" not in ${url}`);
+              continue;
+            }
             try {
               // Execute item.code_js directly without embedding it in a template
               // literal — avoids CodeQL js/improper-code-sanitization (CWE-116).
@@ -2445,6 +2476,8 @@ function installCSP() {
   // For Google auth pages we STRIP their CSP entirely so the antidetect
   // preload's <script> injection (which lacks a CSP nonce) is not blocked.
   const _GOOGLE_AUTH_HOSTS_RE = /^accounts\.(google|youtube)\.com$/;
+  // Strip CSP from any site where we inject addons so fetch() to localhost works
+  const _STRIP_CSP_HOSTS_RE   = /^(x\.com|twitter\.com|www\.linkedin\.com)$/;
   session.defaultSession.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
     const hdrs = { ...details.responseHeaders };
     const url = details.url || '';
@@ -2455,11 +2488,10 @@ function installCSP() {
       return callback({ responseHeaders: hdrs });
     }
 
-    // --- Google auth pages: remove CSP so preload injection works ---
+    // --- Google auth pages + addon-target sites: remove CSP ---
     try {
       const _host = new URL(url).hostname;
-      if (_GOOGLE_AUTH_HOSTS_RE.test(_host)) {
-        // Delete CSP headers case-insensitively (Electron lowercases response headers)
+      if (_GOOGLE_AUTH_HOSTS_RE.test(_host) || _STRIP_CSP_HOSTS_RE.test(_host)) {
         for (const k of Object.keys(hdrs)) {
           const kl = k.toLowerCase();
           if (kl === 'content-security-policy' || kl === 'content-security-policy-report-only') {

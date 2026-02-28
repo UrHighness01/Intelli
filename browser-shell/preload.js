@@ -171,6 +171,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Remove all listeners for a channel (cleanup)
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
 
+  // ── Addon network bridge — makes fetch calls from the main process to bypass
+  //    page CSP restrictions (e.g. localhost Ollama from x.com context)
+  addonFetch: (url, options) => ipcRenderer.invoke('addon-fetch', url, options),
+
   // ── Extension API Audit ────────────────────────────────────────────────
   extApiAuditGet:   ()   => ipcRenderer.invoke('get-ext-api-audit'),
   extApiAuditClear: ()   => ipcRenderer.invoke('clear-ext-api-audit'),
