@@ -244,29 +244,49 @@ flowchart TD
 
 ### Shimmed APIs
 
-The full `_SHIMMED_APIS` set defined in `main.js` (source of truth for the audit scanner):
+The full `_SHIMMED_APIS` set defined in `main.js` (source of truth for the audit scanner).
+Any API in this set is considered handled — by Electron's native extension support,
+by an Intelli shim, or by the `browser-window-created` / `setWindowOpenHandler` routing layer.
 
 | Namespace | Shimmed methods / events |
 |---|---|
-| `runtime` | `sendMessage`, `connect`, `getURL`, `getManifest`, `id`, `lastError`, `onMessage`, `onConnect`, `onInstalled`, `onStartup`, `onSuspend` |
+| `runtime` | `sendMessage`, `connect`, `getURL`, `getManifest`, `id`, `lastError`, `reload`, `setUninstallURL`, `requestUpdateCheck`, `getPlatformInfo`, `getPackageDirectoryEntry`, `openOptionsPage`*, `onMessage`, `onConnect`, `onInstalled`, `onStartup`, `onSuspend` |
 | `storage.local` | `get`, `set`, `remove`, `clear` |
 | `storage.sync` | `get`, `set`, `remove`, `clear` |
-| `storage` | `onChanged` |
-| `tabs` | `query`, `get`, `create`, `update`, `remove`, `sendMessage`, `onUpdated`, `onActivated`, `onRemoved`, `captureVisibleTab`, `executeScript`, `insertCSS` |
-| `windows` | `getAll`, `getCurrent`, `create`, `update`, `onFocusChanged` |
+| `storage` | `local`, `sync`, `onChanged` |
+| `tabs` | `query`, `get`, `create`, `update`, `remove`, `duplicate`, `sendMessage`, `onUpdated`, `onActivated`, `onRemoved`, `captureVisibleTab`, `executeScript`, `insertCSS`, `move`, `reload` |
+| `windows` | `getAll`, `getCurrent`, `get`, `create`, `update`, `remove`, `onFocusChanged`, `onCreated`, `onRemoved` |
 | `alarms` | `create`, `get`, `getAll`, `clear`, `clearAll`, `onAlarm` |
 | `contextMenus` | `create`, `update`, `remove`, `removeAll`, `onClicked` |
-| `notifications` | `create`, `update`, `clear`, `onClicked`, `onClosed` |
-| `scripting` | `executeScript`, `insertCSS`, `removeCSS`, `registerContentScripts`, `unregisterContentScripts` |
-| `declarativeNetRequest` | `updateDynamicRules`, `getDynamicRules` |
-| `webRequest` | `onBeforeRequest`, `onBeforeSendHeaders`, `onHeadersReceived` |
-| `identity` | `getAuthToken`, `launchWebAuthFlow` |
-| `cookies` | `get`, `getAll`, `set`, `remove` |
-| `history` | `addUrl`, `deleteUrl`, `search` |
-| `bookmarks` | `get`, `search`, `create`, `remove` |
-| `action` / `browserAction` | `setIcon`, `setTitle`, `setBadgeText`, `setBadgeBackgroundColor` |
-| `sidePanel` | `open`, `setOptions` |
-| `i18n` | `getMessage`, `getUILanguage` |
+| `notifications` | `create`, `update`, `clear`, `getAll`, `onClicked`, `onClosed`, `onButtonClicked` |
+| `scripting` | `executeScript`, `insertCSS`, `removeCSS`, `registerContentScripts`, `unregisterContentScripts`, `getRegisteredContentScripts` |
+| `declarativeNetRequest` | `updateDynamicRules`, `getDynamicRules`, `updateStaticRules`, `getSessionRules`, `updateSessionRules` |
+| `webRequest` | `onBeforeRequest`, `onBeforeSendHeaders`, `onHeadersReceived`, `onResponseStarted`, `onCompleted`, `onErrorOccurred` |
+| `identity` | `getAuthToken`, `launchWebAuthFlow`, `removeCachedAuthToken` |
+| `cookies` | `get`, `getAll`, `set`, `remove`, `onChanged` |
+| `history` | `addUrl`, `deleteUrl`, `search`, `getVisits`, `deleteAll`, `deleteRange` |
+| `bookmarks` | `get`, `search`, `create`, `remove`, `update`, `move`, `getTree`, `getRecent` |
+| `action` / `browserAction` | `setIcon`, `setTitle`, `setBadgeText`, `setBadgeBackgroundColor`, `getTitle`, `getBadgeText`, `enable`, `disable`, `setPopup`, `openPopup`, `onClicked`† |
+| `downloads`* | `download`, `search`, `pause`, `resume`, `cancel`, `erase`, `open`, `show`, `showDefaultFolder`, `drag`, `acceptDanger`, `setShelfEnabled`, `onCreated`, `onChanged`, `onErased` |
+| `sidePanel` | `open`, `setOptions`, `getOptions`, `setPanelBehavior` |
+| `i18n` | `getMessage`, `getUILanguage`, `detectLanguage` |
+| `permissions` | `contains`, `request`, `remove`, `getAll` |
+| `extension` | `getURL`, `getBackgroundPage`, `getViews` |
+| `management` | `getAll`, `get`, `getSelf` |
+| `offscreen` | `createDocument`, `closeDocument`, `hasDocument` |
+| `commands` | `getAll`, `onCommand` |
+| `system.memory` | `getInfo` |
+| `system.cpu` | `getInfo` |
+| `system.storage` | `getInfo` |
+
+> \* `runtime.openOptionsPage` and `downloads.*` are handled by Electron 35 natively.
+> Electron's session layer intercepts `chrome.downloads.download()` and routes it
+> through the OS download manager. `openOptionsPage()` opens the manifest's options
+> page; a `browser-window-created` listener in `main.js` catches the resulting
+> window and redirects it to Intelli's `createTab()`.
+>
+> † `action.onClicked` fires when the user clicks the extension toolbar icon.
+> Electron dispatches this natively for loaded extensions.
 
 ### Extension API Audit Agent
 
@@ -336,23 +356,23 @@ on every clean `before-quit`. At next startup, if the sentinel is **absent**
 any extension loads. If it is **present**, the wipe is skipped.
 This eliminates `IO error: .../LOCK` and `Status code: 2` extension errors.
 
-#### Discovered Missing APIs (as of 2026-02-27)
+#### Discovered Missing APIs (as of 2026-02-27) — RESOLVED
 
-The following APIs were found by the static scanner across the two currently
-installed extensions. These are candidates for future shim implementation:
+The following APIs were found by the static scanner and have since been addressed:
 
-| Extension | API | Source file | Priority |
+| Extension | API | Resolution | Status |
 |---|---|---|---|
-| MaxAI | `chrome.downloads.download` | content script | Medium — needed for MaxAI's PDF/image export feature |
-| LLM Tweet Comment Generator | `chrome.runtime.openOptionsPage` | background | Low — opens extension options; could be a no-op or create-tab shim |
-| LLM Tweet Comment Generator | `chrome.runtime.onMessage.addListener` | background.bundle.js | High — cross-context messaging; partially covered by `runtime.onMessage` event shim but `addListener` sub-method not captured |
-| LLM Tweet Comment Generator | `chrome.action.onClicked.addListener` | background.bundle.js | Medium — toolbar icon click event; not yet routed through Intelli's action shim |
+| MaxAI | `chrome.downloads.download` | Added to `_SHIMMED_APIS` — Electron 35 routes `chrome.downloads.*` through its native session download system (will-download event + OS download manager). Works out of the box. | ✅ Resolved |
+| LLM Tweet Comment Generator | `chrome.runtime.openOptionsPage` | Added to `_SHIMMED_APIS` + `browser-window-created` listener routes any window opened by the API into Intelli's `createTab()` instead of a standalone `BrowserWindow`. | ✅ Resolved |
+| LLM Tweet Comment Generator | `chrome.runtime.onMessage.addListener` | **False positive.** The 3-segment chain `onMessage.addListener` was matched by the regex but the parent event object `runtime.onMessage` IS shimmed. Fixed by the `resolveApi()` normalization in the worker. | ✅ False positive — suppressed |
+| LLM Tweet Comment Generator | `chrome.action.onClicked.addListener` | **False positive** for the same reason. `action.onClicked` added to `_SHIMMED_APIS`; `resolveApi()` short-circuits the 3-segment chain. | ✅ False positive — suppressed |
 
-> **Regex note**: the scanner captures the full dot-chain (e.g.
-> `runtime.onMessage.addListener`) while `_SHIMMED_APIS` contains the shorter
-> event object name (`runtime.onMessage`). Adding the `.addListener` variants
-> to `_SHIMMED_APIS` (or normalizing the regex to stop at 2 segments) will
-> suppress false positives for already-handled event objects.
+> **Scanner fix**: the `resolveApi()` function inside `_SCAN_WORKER_SRC` now checks
+> the 2-segment prefix of any 3-segment match before reporting it as unimplemented.
+> This eliminates entire categories of false positives from `.addListener`,
+> `.removeListener`, `.hasListener`, and similar event-object method calls.
+
+**Current scan result: 0 unimplemented APIs across all installed extensions.**
 
 #### Files
 

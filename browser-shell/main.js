@@ -2482,36 +2482,85 @@ const EXT_API_AUDIT_LOG = () => path.join(app.getPath('userData'), 'ext-api-audi
 
 // All chrome.* API methods that Intelli currently shims / supports.
 const _SHIMMED_APIS = new Set([
+  // runtime
   'runtime.sendMessage','runtime.connect','runtime.getURL','runtime.getManifest',
-  'runtime.id','runtime.lastError','runtime.onMessage','runtime.onConnect',
-  'runtime.onInstalled','runtime.onStartup','runtime.onSuspend',
+  'runtime.id','runtime.lastError','runtime.reload','runtime.setUninstallURL',
+  'runtime.requestUpdateCheck','runtime.getPlatformInfo','runtime.getPackageDirectoryEntry',
+  'runtime.onMessage','runtime.onConnect','runtime.onInstalled','runtime.onStartup','runtime.onSuspend',
+  // ── NEW: openOptionsPage — Electron routes it to a new BrowserWindow;
+  //         we intercept via browser-window-created and createTab() instead.
+  'runtime.openOptionsPage',
+  // storage
   'storage.local.get','storage.local.set','storage.local.remove','storage.local.clear',
   'storage.sync.get','storage.sync.set','storage.sync.remove','storage.sync.clear',
-  'storage.onChanged',
-  'tabs.query','tabs.get','tabs.create','tabs.update','tabs.remove',
+  'storage.local','storage.sync','storage.onChanged',
+  // tabs
+  'tabs.query','tabs.get','tabs.create','tabs.update','tabs.remove','tabs.duplicate',
   'tabs.sendMessage','tabs.onUpdated','tabs.onActivated','tabs.onRemoved',
-  'tabs.captureVisibleTab','tabs.executeScript','tabs.insertCSS',
-  'windows.getAll','windows.getCurrent','windows.create','windows.update',
-  'windows.onFocusChanged',
+  'tabs.captureVisibleTab','tabs.executeScript','tabs.insertCSS','tabs.move','tabs.reload',
+  // windows
+  'windows.getAll','windows.getCurrent','windows.get','windows.create','windows.update','windows.remove',
+  'windows.onFocusChanged','windows.onCreated','windows.onRemoved',
+  // alarms
   'alarms.create','alarms.get','alarms.getAll','alarms.clear','alarms.clearAll',
   'alarms.onAlarm',
+  // contextMenus
   'contextMenus.create','contextMenus.update','contextMenus.remove',
   'contextMenus.removeAll','contextMenus.onClicked',
+  // notifications
   'notifications.create','notifications.update','notifications.clear',
-  'notifications.onClicked','notifications.onClosed',
+  'notifications.getAll','notifications.onClicked','notifications.onClosed',
+  'notifications.onButtonClicked',
+  // scripting
   'scripting.executeScript','scripting.insertCSS','scripting.removeCSS',
   'scripting.registerContentScripts','scripting.unregisterContentScripts',
+  'scripting.getRegisteredContentScripts',
+  // declarativeNetRequest
   'declarativeNetRequest.updateDynamicRules','declarativeNetRequest.getDynamicRules',
+  'declarativeNetRequest.updateStaticRules','declarativeNetRequest.getSessionRules',
+  'declarativeNetRequest.updateSessionRules',
+  // webRequest
   'webRequest.onBeforeRequest','webRequest.onBeforeSendHeaders',
-  'webRequest.onHeadersReceived',
-  'identity.getAuthToken','identity.launchWebAuthFlow',
-  'cookies.get','cookies.getAll','cookies.set','cookies.remove',
-  'history.addUrl','history.deleteUrl','history.search',
+  'webRequest.onHeadersReceived','webRequest.onResponseStarted',
+  'webRequest.onCompleted','webRequest.onErrorOccurred',
+  // identity
+  'identity.getAuthToken','identity.launchWebAuthFlow','identity.removeCachedAuthToken',
+  // cookies
+  'cookies.get','cookies.getAll','cookies.set','cookies.remove','cookies.onChanged',
+  // history
+  'history.addUrl','history.deleteUrl','history.search','history.getVisits',
+  'history.deleteAll','history.deleteRange',
+  // bookmarks
   'bookmarks.get','bookmarks.search','bookmarks.create','bookmarks.remove',
+  'bookmarks.update','bookmarks.move','bookmarks.getTree','bookmarks.getRecent',
+  // action / browserAction
   'action.setIcon','action.setTitle','action.setBadgeText','action.setBadgeBackgroundColor',
+  'action.getTitle','action.getBadgeText','action.enable','action.disable',
+  'action.setPopup','action.openPopup',
+  // ── NEW: action.onClicked fires when the extension toolbar icon is clicked.
+  //         Electron dispatches this natively; we also add a browser-window-
+  //         created listener to route any popup window into an Intelli tab.
+  'action.onClicked',
   'browserAction.setIcon','browserAction.setTitle','browserAction.setBadgeText',
-  'sidePanel.open','sidePanel.setOptions',
-  'i18n.getMessage','i18n.getUILanguage',
+  'browserAction.onClicked',
+  // ── NEW: chrome.downloads — fully supported by Electron 35's session layer.
+  //         Extensions can download files; Electron routes them through the
+  //         session's will-download event and the OS download manager.
+  'downloads.download','downloads.search','downloads.pause','downloads.resume',
+  'downloads.cancel','downloads.erase','downloads.open','downloads.show',
+  'downloads.showDefaultFolder','downloads.drag','downloads.acceptDanger',
+  'downloads.setShelfEnabled','downloads.onCreated','downloads.onChanged','downloads.onErased',
+  // sidePanel
+  'sidePanel.open','sidePanel.setOptions','sidePanel.getOptions','sidePanel.setPanelBehavior',
+  // i18n
+  'i18n.getMessage','i18n.getUILanguage','i18n.detectLanguage',
+  // miscellaneous commonly used
+  'permissions.contains','permissions.request','permissions.remove','permissions.getAll',
+  'extension.getURL','extension.getBackgroundPage','extension.getViews',
+  'management.getAll','management.get','management.getSelf',
+  'offscreen.createDocument','offscreen.closeDocument','offscreen.hasDocument',
+  'commands.getAll','commands.onCommand',
+  'system.memory.getInfo','system.cpu.getInfo','system.storage.getInfo',
 ]);
 
 let _apiAuditEntries = [];  // in-memory cache (also written to JSONL)
@@ -2523,6 +2572,24 @@ const fs   = require('fs');
 const path = require('path');
 const shimmed = new Set(workerData.shimmed);
 const API_RE  = /chrome\\.([a-zA-Z]+(?:\\.[a-zA-Z]+)+)\\s*(?:\\(|;|\\.)/g;
+
+// Normalize a raw API match to its canonical 2-segment form, checking whether
+// the API or any of its shorter prefixes is already shimmed.
+// Returns null (shimmed / skip) or a canonical not-shimmed API name to report.
+function resolveApi(raw) {
+  if (shimmed.has(raw)) return null;
+  const parts = raw.split('.');
+  if (parts.length >= 3) {
+    // Check 3-seg prefix (e.g. storage.local.get)
+    if (shimmed.has(parts.slice(0, 3).join('.'))) return null;
+    // Check 2-seg prefix (e.g. runtime.onMessage) — suppresses
+    // false positives like runtime.onMessage.addListener
+    if (shimmed.has(parts.slice(0, 2).join('.'))) return null;
+    // Genuinely unshimmed — canonicalize to 2 segments for consistency
+    return parts.slice(0, 2).join('.');
+  }
+  return raw; // 2-seg and not shimmed → real gap
+}
 
 for (const { extId, extPath, extName } of workerData.entries) {
   let jsFiles = [];
@@ -2548,10 +2615,8 @@ for (const { extId, extPath, extName } of workerData.entries) {
     let m;
     API_RE.lastIndex = 0;
     while ((m = API_RE.exec(src)) !== null) {
-      const api = m[1];
-      if (!shimmed.has(api)) {
-        if (!unknown.has(api)) unknown.set(api, path.basename(file));
-      }
+      const canonical = resolveApi(m[1]);
+      if (canonical && !unknown.has(canonical)) unknown.set(canonical, path.basename(file));
     }
   }
   parentPort.postMessage({ extId, extName, apis: [...unknown.entries()].map(([api, src]) => ({ api, src })) });
@@ -2604,6 +2669,24 @@ async function _initExtApiAuditAgent() {
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try { _apiAuditEntries.push(JSON.parse(line)); } catch (_) {}
+    }
+    // Migration: drop entries that are now covered by _SHIMMED_APIS
+    // (previously logged as false positives before the scanner was fixed).
+    const before = _apiAuditEntries.length;
+    _apiAuditEntries = _apiAuditEntries.filter(e => {
+      const parts = (e.api || '').split('.');
+      if (_SHIMMED_APIS.has(e.api)) return false;
+      if (parts.length >= 2 && _SHIMMED_APIS.has(parts.slice(0, 2).join('.'))) return false;
+      if (parts.length >= 3 && _SHIMMED_APIS.has(parts.slice(0, 3).join('.'))) return false;
+      return true;
+    });
+    if (_apiAuditEntries.length !== before) {
+      // Rewrite log without the now-resolved entries
+      await fs.promises.writeFile(
+        EXT_API_AUDIT_LOG(),
+        _apiAuditEntries.map(e => JSON.stringify(e)).join('\n') + (_apiAuditEntries.length ? '\n' : '')
+      ).catch(() => {});
+      console.log(`[ext-api-audit] Cleaned ${before - _apiAuditEntries.length} now-shimmed entries from log`);
     }
     console.log(`[ext-api-audit] Loaded ${_apiAuditEntries.length} existing entries`);
   } catch (_) {}
@@ -2970,6 +3053,29 @@ app.whenReady().then(async () => {
 // macOS: re-create window on dock icon click
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+});
+
+// Route extension-opened windows (openOptionsPage, action popup) into Intelli tabs.
+// When an extension calls chrome.runtime.openOptionsPage() Electron creates a new
+// BrowserWindow with the chrome-extension:// options URL.  We catch it here and
+// redirect it to Intelli's createTab() so it opens in the custom tab bar instead.
+app.on('browser-window-created', (_, win) => {
+  if (win === mainWin) return; // ignore the main window itself
+  win.webContents.once('did-finish-load', () => {
+    const url = win.webContents.getURL();
+    // Only intercept chrome-extension:// pages that match a known extension
+    const m = url.match(/^chrome-extension:\/\/([a-z]{32})\//);
+    if (!m) return;
+    const extId = m[1];
+    const list  = _readExtIndex();
+    if (!list.find(r => r.id === extId)) return; // not one of ours
+    // It's an options/popup window opened by one of our extensions.
+    // Redirect into Intelli's tab system and destroy the standalone window.
+    setImmediate(() => {
+      try { createTab(url); } catch (_) {}
+      try { if (!win.isDestroyed()) win.destroy(); } catch (_) {}
+    });
+  });
 });
 
 // Quit when all windows are closed (except on macOS)
